@@ -1,0 +1,491 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+
+:root {
+    /* Typography - Material 3 Expressive */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "Inter", "Noto Sans JP", sans-serif;
+    font-feature-settings: "palt";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* Material 3 Color Tokens - Light Theme */
+    --m3-primary: #6750A4;
+    --m3-on-primary: #FFFFFF;
+    --m3-primary-container: #EADDFF;
+    --m3-on-primary-container: #21005D;
+
+    --m3-secondary: #625B71;
+    --m3-on-secondary: #FFFFFF;
+    --m3-secondary-container: #E8DEF8;
+    --m3-on-secondary-container: #1D192B;
+
+    --m3-tertiary: #7D5260;
+    --m3-on-tertiary: #FFFFFF;
+    --m3-tertiary-container: #FFD8E4;
+    --m3-on-tertiary-container: #31111D;
+
+    --m3-error: #B3261E;
+    --m3-on-error: #FFFFFF;
+    --m3-error-container: #F9DEDC;
+    --m3-on-error-container: #410E0B;
+
+    --m3-surface: #FEF7FF;
+    --m3-on-surface: #1D1B20;
+    --m3-surface-variant: #E7E0EC;
+    --m3-on-surface-variant: #49454F;
+
+    --m3-surface-container-lowest: #FFFFFF;
+    --m3-surface-container-low: #F7F2FA;
+    --m3-surface-container: #F3EDF7;
+    --m3-surface-container-high: #ECE6F0;
+    --m3-surface-container-highest: #E6E0E9;
+
+    --m3-outline: #79747E;
+    --m3-outline-variant: #CAC4D0;
+
+    /* Elevation shadows */
+    --m3-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.30);
+    --m3-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.30);
+    --m3-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.15), 0px 1px 3px 0px rgba(0, 0, 0, 0.30);
+    --m3-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.15), 0px 2px 3px 0px rgba(0, 0, 0, 0.30);
+    --m3-elevation-5: 0px 8px 12px 6px rgba(0, 0, 0, 0.15), 0px 4px 4px 0px rgba(0, 0, 0, 0.30);
+
+    /* Shape - M3 Expressive uses larger radii */
+    --m3-shape-corner-xs: 4px;
+    --m3-shape-corner-sm: 8px;
+    --m3-shape-corner-md: 12px;
+    --m3-shape-corner-lg: 16px;
+    --m3-shape-corner-xl: 28px;
+    --m3-shape-corner-full: 9999px;
+}
+
+/* Dark theme variables for sales mode */
+.dark-theme {
+    --m3-primary: #D0BCFF;
+    --m3-on-primary: #381E72;
+    --m3-primary-container: #4F378B;
+    --m3-on-primary-container: #EADDFF;
+
+    --m3-secondary: #CCC2DC;
+    --m3-on-secondary: #332D41;
+    --m3-secondary-container: #4A4458;
+    --m3-on-secondary-container: #E8DEF8;
+
+    --m3-tertiary: #EFB8C8;
+    --m3-on-tertiary: #492532;
+    --m3-tertiary-container: #633B48;
+    --m3-on-tertiary-container: #FFD8E4;
+
+    --m3-error: #F2B8B5;
+    --m3-on-error: #601410;
+    --m3-error-container: #8C1D18;
+    --m3-on-error-container: #F9DEDC;
+
+    --m3-surface: #141218;
+    --m3-on-surface: #E6E0E9;
+    --m3-surface-variant: #49454F;
+    --m3-on-surface-variant: #CAC4D0;
+
+    --m3-surface-container-lowest: #0F0D13;
+    --m3-surface-container-low: #1D1B20;
+    --m3-surface-container: #211F26;
+    --m3-surface-container-high: #2B2930;
+    --m3-surface-container-highest: #36343B;
+
+    --m3-outline: #938F99;
+    --m3-outline-variant: #49454F;
+}
+
+/* User Custom Dummy Colors (Pastel) */
+:root {
+    --dummy-purple: #D0A3FF;
+    --dummy-pink: #F2C4E8;
+    --dummy-orange: #FFDDB5;
+    --dummy-yellow: #FFF8C9;
+    --dummy-volt: #DFF590;
+
+    /* New Dummy Colors */
+    --dummy-gray: #E2E8F0;
+    --dummy-red: #FECACA;
+    --dummy-green: #BBF7D0;
+
+    /* Volt/Lime Green */
+    --dummy-text-color: #5D5D5D;
+    /* Darker text for contrast on pastel backgrounds */
+}
+
+body {
+    @apply antialiased;
+    background: var(--m3-surface);
+    color: var(--m3-on-surface);
+    min-height: 100vh;
+}
+
+/* Custom Scrollbar - M3 style */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--m3-outline-variant);
+    border-radius: var(--m3-shape-corner-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--m3-outline);
+}
+
+/* M3 Surface with tonal elevation */
+.m3-surface {
+    background: var(--m3-surface);
+    color: var(--m3-on-surface);
+}
+
+.m3-surface-container {
+    background: var(--m3-surface-container);
+    color: var(--m3-on-surface);
+}
+
+.m3-surface-container-high {
+    background: var(--m3-surface-container-high);
+    color: var(--m3-on-surface);
+}
+
+/* M3 Card styles */
+.m3-card-elevated {
+    background: var(--m3-surface-container-low);
+    border-radius: var(--m3-shape-corner-lg);
+    box-shadow: var(--m3-elevation-1);
+}
+
+.m3-card-filled {
+    background: var(--m3-surface-container-highest);
+    border-radius: var(--m3-shape-corner-lg);
+}
+
+.m3-card-outlined {
+    background: var(--m3-surface);
+    border: 1px solid var(--m3-outline-variant);
+    border-radius: var(--m3-shape-corner-lg);
+}
+
+/* M3 Button styles */
+.m3-btn-filled {
+    background: var(--m3-primary);
+    color: var(--m3-on-primary);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 10px 24px;
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    box-shadow: none;
+}
+
+.m3-btn-filled:hover {
+    box-shadow: var(--m3-elevation-1);
+    filter: brightness(1.08);
+}
+
+.m3-btn-filled:active {
+    transform: scale(0.98);
+}
+
+.m3-btn-tonal {
+    background: var(--m3-secondary-container);
+    color: var(--m3-on-secondary-container);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 10px 24px;
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-btn-tonal:hover {
+    box-shadow: var(--m3-elevation-1);
+    filter: brightness(0.96);
+}
+
+.m3-btn-outlined {
+    background: transparent;
+    color: var(--m3-primary);
+    border: 1px solid var(--m3-outline);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 10px 24px;
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-btn-outlined:hover {
+    background: var(--m3-primary);
+    background: rgba(103, 80, 164, 0.08);
+}
+
+.m3-btn-text {
+    background: transparent;
+    color: var(--m3-primary);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 10px 12px;
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-btn-text:hover {
+    background: rgba(103, 80, 164, 0.08);
+}
+
+/* M3 FAB */
+.m3-fab {
+    background: var(--m3-primary-container);
+    color: var(--m3-on-primary-container);
+    border-radius: var(--m3-shape-corner-lg);
+    padding: 16px;
+    box-shadow: var(--m3-elevation-3);
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-fab:hover {
+    box-shadow: var(--m3-elevation-4);
+}
+
+.m3-fab-extended {
+    background: var(--m3-primary-container);
+    color: var(--m3-on-primary-container);
+    border-radius: var(--m3-shape-corner-lg);
+    padding: 16px 20px;
+    box-shadow: var(--m3-elevation-3);
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 500;
+}
+
+.m3-fab-extended:hover {
+    box-shadow: var(--m3-elevation-4);
+}
+
+/* M3 Icon Button */
+.m3-icon-btn {
+    background: transparent;
+    color: var(--m3-on-surface-variant);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 8px;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-icon-btn:hover {
+    background: var(--m3-surface-container-highest);
+}
+
+.m3-icon-btn-filled {
+    background: var(--m3-primary);
+    color: var(--m3-on-primary);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 8px;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-icon-btn-tonal {
+    background: var(--m3-secondary-container);
+    color: var(--m3-on-secondary-container);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 8px;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* M3 Input field */
+.m3-input {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--m3-on-surface-variant);
+    padding: 16px 16px 8px 16px;
+    color: var(--m3-on-surface);
+    font-size: 16px;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-input:focus {
+    outline: none;
+    border-bottom: 2px solid var(--m3-primary);
+}
+
+.m3-input-outlined {
+    background: transparent;
+    border: 1px solid var(--m3-outline);
+    border-radius: var(--m3-shape-corner-xs);
+    padding: 16px;
+    color: var(--m3-on-surface);
+    font-size: 16px;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-input-outlined:focus {
+    outline: none;
+    border: 2px solid var(--m3-primary);
+}
+
+/* M3 Chip */
+.m3-chip {
+    background: var(--m3-surface-container-low);
+    color: var(--m3-on-surface-variant);
+    border: 1px solid var(--m3-outline);
+    border-radius: var(--m3-shape-corner-sm);
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.m3-chip-selected {
+    background: var(--m3-secondary-container);
+    color: var(--m3-on-secondary-container);
+    border: none;
+}
+
+/* M3 Dialog */
+.m3-dialog {
+    background: var(--m3-surface-container-high);
+    border-radius: var(--m3-shape-corner-xl);
+    box-shadow: var(--m3-elevation-3);
+    padding: 24px;
+    min-width: 280px;
+    max-width: 560px;
+}
+
+/* M3 Navigation Drawer */
+.m3-nav-drawer {
+    background: var(--m3-surface-container-low);
+    border-radius: 0 var(--m3-shape-corner-lg) var(--m3-shape-corner-lg) 0;
+}
+
+.m3-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 24px 16px 16px;
+    border-radius: var(--m3-shape-corner-full);
+    color: var(--m3-on-surface-variant);
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    margin: 0 12px;
+}
+
+.m3-nav-item:hover {
+    background: var(--m3-surface-container);
+}
+
+.m3-nav-item-active {
+    background: var(--m3-secondary-container);
+    color: var(--m3-on-secondary-container);
+}
+
+/* M3 Top App Bar */
+.m3-top-app-bar {
+    background: var(--m3-surface);
+    color: var(--m3-on-surface);
+    padding: 0 16px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* M3 Segmented Button */
+.m3-segmented {
+    display: flex;
+    border: 1px solid var(--m3-outline);
+    border-radius: var(--m3-shape-corner-full);
+    overflow: hidden;
+}
+
+.m3-segmented-item {
+    padding: 10px 20px;
+    font-weight: 500;
+    color: var(--m3-on-surface);
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    border-right: 1px solid var(--m3-outline);
+}
+
+.m3-segmented-item:last-child {
+    border-right: none;
+}
+
+.m3-segmented-item:hover {
+    background: var(--m3-surface-container);
+}
+
+.m3-segmented-item-active {
+    background: var(--m3-secondary-container);
+    color: var(--m3-on-secondary-container);
+}
+
+/* M3 Badge */
+.m3-badge {
+    background: var(--m3-error);
+    color: var(--m3-on-error);
+    border-radius: var(--m3-shape-corner-full);
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 500;
+    min-width: 16px;
+    text-align: center;
+}
+
+/* Micro-animations */
+@keyframes m3-ripple {
+    0% {
+        transform: scale(0);
+        opacity: 0.5;
+    }
+
+    100% {
+        transform: scale(4);
+        opacity: 0;
+    }
+}
+
+@keyframes m3-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes m3-scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.m3-animate-fade-in {
+    animation: m3-fade-in 0.3s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+.m3-animate-scale-in {
+    animation: m3-scale-in 0.2s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+/* Legacy support - ios-glass mapped to M3 */
+.ios-glass {
+    @apply backdrop-blur-xl;
+    background: var(--m3-surface-container);
+}
+
+.dark-ios-glass {
+    @apply backdrop-blur-xl;
+    background: var(--m3-surface-container);
+}
