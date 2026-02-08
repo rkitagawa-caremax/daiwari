@@ -88,9 +88,29 @@ try {
   activeConfig = firebaseConfig;
 }
 
-// 初期状態。初期化失敗時に true に倒すことで機能を維持する
-// ローカルモードを強制的に有効にする（Firebaseパーミッションエラー回避のため）
-let USE_LOCAL_STORAGE = true;
+const resolveStorageMode = () => {
+  if (typeof window === 'undefined') return 'cloud';
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const modeParam = (params.get('mode') || '').toLowerCase();
+    if (modeParam === 'local' || modeParam === 'cloud') {
+      localStorage.setItem('daiwari_storage_mode', modeParam);
+      return modeParam;
+    }
+
+    const savedMode = (localStorage.getItem('daiwari_storage_mode') || '').toLowerCase();
+    if (savedMode === 'local' || savedMode === 'cloud') {
+      return savedMode;
+    }
+  } catch (e) {
+    console.warn('Failed to resolve storage mode, defaulting to cloud.', e);
+  }
+
+  return 'cloud';
+};
+
+let USE_LOCAL_STORAGE = resolveStorageMode() === 'local';
 
 let app, auth, db;
 const DEFAULT_APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default-workspace';
