@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -156,6 +156,25 @@ const normalizeCode = (str) => {
     .toUpperCase(); // 大文字統一
 };
 
+// UTF-8 BOM があれば UTF-8、なければ Shift-JIS として自動デコード
+const readFileAutoEncoding = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const buf = e.target.result;
+    const bytes = new Uint8Array(buf);
+    const encoding = (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
+      ? 'UTF-8' : 'Shift_JIS';
+    try {
+      const text = new TextDecoder(encoding).decode(buf).replace(/^\uFEFF/, '');
+      resolve(text);
+    } catch (err) {
+      reject(err);
+    }
+  };
+  reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
+  reader.readAsArrayBuffer(file);
+});
+
 // --- Size Definition Helper ---
 const getSizeType = (rowSpan, colSpan) => {
   if (rowSpan === 1 && colSpan === 1) return '1/16（1コマ）';
@@ -207,6 +226,46 @@ const getSpansFromSizeType = (sizeStr) => {
   return { r: 1, c: 1 };
 };
 
+// CSV表記ゆれ耐性版（NFKC正規化 + 縦横判定 + コマ数フォールバック）
+const getSpansFromSizeTypeRobust = (sizeStr) => {
+  if (!sizeStr) return { r: 1, c: 1 };
+
+  const normalized = String(sizeStr).normalize('NFKC').toLowerCase();
+  const s = normalized.replace(/\s+/g, '');
+  const hasVertical = /[\u7e26]|vertical/.test(s); // 縦
+  const hasHorizontal = /[\u6a2a]|horizontal/.test(s); // 横
+
+  if (s.includes('1/16')) return { r: 1, c: 1 };
+  if (s.includes('1/8')) return hasVertical ? { r: 2, c: 1 } : { r: 1, c: 2 };
+  if (s.includes('3/16')) return hasVertical ? { r: 3, c: 1 } : { r: 1, c: 3 };
+  if (s.includes('1/4')) {
+    if (hasVertical) return { r: 4, c: 1 };
+    if (hasHorizontal) return { r: 1, c: 4 };
+    return { r: 2, c: 2 };
+  }
+  if (s.includes('6/16')) return hasVertical ? { r: 3, c: 2 } : { r: 2, c: 3 };
+  if (s.includes('1/2')) return hasVertical ? { r: 4, c: 2 } : { r: 2, c: 4 };
+  if (s.includes('12/16')) return hasVertical ? { r: 4, c: 3 } : { r: 3, c: 4 };
+  if (s.includes('1p')) return { r: 4, c: 4 };
+
+  const countMatch = s.match(/(\d+)\s*コマ/);
+  const count = countMatch ? parseInt(countMatch[1], 10) : NaN;
+  if (count === 1) return { r: 1, c: 1 };
+  if (count === 2) return hasVertical ? { r: 2, c: 1 } : { r: 1, c: 2 };
+  if (count === 3) return hasVertical ? { r: 3, c: 1 } : { r: 1, c: 3 };
+  if (count === 4) {
+    if (hasVertical) return { r: 4, c: 1 };
+    if (hasHorizontal) return { r: 1, c: 4 };
+    return { r: 2, c: 2 };
+  }
+  if (count === 6) return hasVertical ? { r: 3, c: 2 } : { r: 2, c: 3 };
+  if (count === 8) return hasVertical ? { r: 4, c: 2 } : { r: 2, c: 4 };
+  if (count === 12) return hasVertical ? { r: 4, c: 3 } : { r: 3, c: 4 };
+  if (count === 16) return { r: 4, c: 4 };
+
+  return { r: 1, c: 1 };
+};
+
 // --- Utility: Compress Image ---
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
@@ -246,10 +305,17 @@ const compressImage = (file) => {
 // --- Components ---
 
 // メッセージ用モーダル (Alertの代わり) - Material 3 Style
-const AlertModal = React.memo(({ isOpen, message, onClose, title = "通知" }) => {
+const AlertModal = React.memo(({ isOpen, message, onClose, title = "通知", closeOnBackdrop = false }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm m3-animate-fade-in">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm m3-animate-fade-in"
+      onClick={(e) => {
+        if (closeOnBackdrop && e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className="m3-dialog m3-animate-scale-in" style={{ background: 'var(--m3-surface-container-high)' }}>
         <div className="flex items-center gap-4 mb-6">
           <div className="p-3 rounded-full" style={{ background: 'var(--m3-primary-container)' }}>
@@ -581,7 +647,7 @@ const ConfirmModal = React.memo(({ isOpen, message, onConfirm, onCancel }) => {
 });
 
 // Panel Component
-const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isSelected, onSelect, highlightEmpty, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales }) => {
+const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isSelected, onSelect, highlightEmpty, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById }) => {
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
@@ -638,6 +704,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
     // Normal Drop
     const type = e.dataTransfer.getData("type");
     const src = e.dataTransfer.getData("src");
+    const droppedImageId = e.dataTransfer.getData("imageId");
     let label = e.dataTransfer.getData("label");
     if (label === "null") label = null;
 
@@ -664,6 +731,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       onUpdate({
         ...data,
         image: src,
+        imageId: droppedImageId || null,
         label: label || null,
         code: code,
         isText: isText === "true",
@@ -676,7 +744,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
   };
 
   const handleDragStart = (e) => {
-    if (!data.image && !data.label && !data.isText && !data.code) {
+    if (!resolvedImage && !data.label && !data.isText && !data.code) {
       e.preventDefault();
       return;
     }
@@ -694,7 +762,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
     e.dataTransfer.dropEffect = "move";
   };
 
-  const isEmpty = !data.image && !data.label && !data.code && !data.isText;
+  const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
+  const isEmpty = !resolvedImage && !data.label && !data.code && !data.isText;
 
   const handleFocusTextarea = () => {
     if (textareaRef.current) {
@@ -734,7 +803,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       ref={panelRef}
       id={`panel-${sheetId}-${index}`}
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
-        ${(highlightEmpty && (!data.image && (isEmpty || !!data.code))) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
+        ${(highlightEmpty && (!resolvedImage && (isEmpty || !!data.code))) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
         ${!isEmpty && !isOverview ? 'cursor-grab active:cursor-grabbing' : ''}
         ${isSalesMode ? 'hover:ring-4 hover:z-40' : ''}
@@ -743,14 +812,14 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
         gridColumn: `span ${data.colSpan || 1}`,
         gridRow: `span ${data.rowSpan || 1}`,
         borderColor: 'var(--m3-outline-variant)',
-        backgroundColor: (highlightEmpty && (!data.image && (isEmpty || !!data.code)))
+        backgroundColor: (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
           ? 'var(--m3-error-container)'
           : isSalesMode && matchedSales
             ? 'var(--m3-secondary-container)'
             : 'var(--m3-surface)',
         '--tw-ring-color': isSelected
           ? 'var(--m3-primary)'
-          : (highlightEmpty && (!data.image && (isEmpty || !!data.code)))
+          : (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
             ? 'var(--m3-error)'
             : isSalesMode
               ? 'var(--m3-tertiary)'
@@ -765,8 +834,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       onClick={!isOverview ? onSelect : undefined}
     >
       {/* Image Layer */}
-      {data.image && (
-        <img src={data.image} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" />
+      {resolvedImage && (
+        <img src={resolvedImage} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" />
       )}
 
       {/* Sales Overlay Mode */}
@@ -798,8 +867,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       )}
 
       {/* Drop Placeholder */}
-      {!data.image && (!data.code || (highlightEmpty && (!data.image && (isEmpty || !!data.code)))) && !data.label && !isOverview && (
-        <div className={`flex flex-col items-center justify-center transition-opacity duration-300 ${(highlightEmpty && (!data.image && (isEmpty || !!data.code))) ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
+      {!resolvedImage && (!data.code || (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))) && !data.label && !isOverview && (
+        <div className={`flex flex-col items-center justify-center transition-opacity duration-300 ${(highlightEmpty && (!resolvedImage && (isEmpty || !!data.code))) ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
           <span className={`text-[10px] select-none font-bold`} style={{ color: (highlightEmpty && isEmpty) ? 'var(--m3-on-error-container)' : 'var(--m3-outline)' }}>
             {highlightEmpty && isEmpty ? '空き' : 'Drop Here'}
           </span>
@@ -866,11 +935,11 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       {/* Controls (Only in List Mode) */}
       {!isOverview && (
         <>
-          {(data.image || data.label || data.isText || data.code) && isHovered && !isSalesMode && (
+          {(resolvedImage || data.label || data.isText || data.code) && isHovered && !isSalesMode && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onUpdate({ ...data, image: null, label: null, code: null, isText: false, text: '' });
+                onUpdate({ ...data, image: null, imageId: null, label: null, code: null, isText: false, text: '' });
               }}
               className="absolute top-1.5 right-1.5 rounded-full p-1.5 shadow-lg border z-30 transition-all duration-300 transform hover:scale-110 active:scale-90"
               style={{ background: 'var(--m3-surface)', color: 'var(--m3-error)', borderColor: 'var(--m3-error)' }}
@@ -884,7 +953,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
   );
 });
 
-const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales }) => {
+const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById }) => {
   const genre = GENRES.find(g => g.id === sheet.genre) || GENRES[0];
 
   let visibleCounter = 0;
@@ -951,6 +1020,7 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
               salesData={salesData}
               onHoverSales={onHoverSales}
               onLeaveSales={onLeaveSales}
+              imageDataById={imageDataById}
             />
           );
         })}
@@ -1057,10 +1127,11 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     sheets.forEach(sheet => {
       sheet.panels.forEach(p => {
         if (p.image) usedImageSet.add(p.image);
+        if (p.imageId) usedImageSet.add(p.imageId);
       });
     });
 
-    let result = images.filter(img => !usedImageSet.has(img.data));
+    let result = images.filter(img => !usedImageSet.has(img.data) && !usedImageSet.has(img.id));
 
     if (!searchQuery) return result;
     const lowerQuery = searchQuery.toLowerCase();
@@ -1223,6 +1294,7 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                       return;
                     }
                     e.dataTransfer.setData("src", img.data);
+                    e.dataTransfer.setData("imageId", img.id);
                     e.dataTransfer.setData("type", "image");
                     e.dataTransfer.setData("name", img.name);
                   }}
@@ -1322,7 +1394,7 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                 .map((sheet, originalIndex) => ({ sheet, originalIndex }))
                 .filter(({ sheet }) => statusGenreFilter === 'all' || sheet.genre === statusGenreFilter)
                 .map(({ sheet, originalIndex }) => {
-                  const pureEmptyCount = sheet.panels.filter(p => !p.hidden && !p.image && !p.label).length;
+                  const pureEmptyCount = sheet.panels.filter(p => !p.hidden && !p.image && !p.imageId && !p.label).length;
                   const dummyCount = sheet.panels.filter(p => !p.hidden && p.label && p.label !== 'タイトル' && p.label !== '埋草' && p.label !== 'テキスト').length;
                   const totalEmpty = pureEmptyCount + dummyCount;
 
@@ -1586,7 +1658,7 @@ export default function App() {
   const [isMergeMode, setIsMergeMode] = useState(false);
   const [highlightEmpty, setHighlightEmpty] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
-  const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知' });
+  const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知', closeOnBackdrop: false });
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
@@ -1826,8 +1898,8 @@ export default function App() {
     });
   };
 
-  const showAlert = (message, title = "通知") => {
-    setAlertDialog({ isOpen: true, message, title });
+  const showAlert = (message, title = "通知", closeOnBackdrop = false) => {
+    setAlertDialog({ isOpen: true, message, title, closeOnBackdrop });
   };
 
   // --- Common CSV Parser ---
@@ -1855,15 +1927,49 @@ export default function App() {
     return result;
   };
 
+  const canPlacePanelAt = (startIdx, rowSpan, colSpan, occupied) => {
+    const startRow = Math.floor(startIdx / 4);
+    const startCol = startIdx % 4;
+    if (startRow + rowSpan > 4 || startCol + colSpan > 4) return false;
+
+    for (let r = 0; r < rowSpan; r++) {
+      for (let c = 0; c < colSpan; c++) {
+        const idx = (startRow + r) * 4 + (startCol + c);
+        if (occupied.has(idx)) return false;
+      }
+    }
+    return true;
+  };
+
+  const findFirstPlaceableIndex = (rowSpan, colSpan, occupied) => {
+    for (let startIdx = 0; startIdx < 16; startIdx++) {
+      if (occupied.has(startIdx)) continue;
+      if (canPlacePanelAt(startIdx, rowSpan, colSpan, occupied)) return startIdx;
+    }
+    return -1;
+  };
+
+  const fillPanelArea = (panels, startIdx, rowSpan, colSpan, occupied) => {
+    const startRow = Math.floor(startIdx / 4);
+    const startCol = startIdx % 4;
+
+    for (let r = 0; r < rowSpan; r++) {
+      for (let c = 0; c < colSpan; c++) {
+        const idx = (startRow + r) * 4 + (startCol + c);
+        occupied.add(idx);
+        if (idx !== startIdx) {
+          panels[idx] = { ...panels[idx], hidden: true };
+        }
+      }
+    }
+  };
+
   // --- Sales CSV Import Logic ---
-  const handleImportSalesCSV = (file) => {
+  const handleImportSalesCSV = async (file) => {
     setIsProcessing(true);
     setProgressMessage("売上データを解析中...");
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
+    try {
+        const text = await readFileAutoEncoding(file);
         const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         const rows = normalizedText.split('\n');
 
@@ -1964,14 +2070,12 @@ export default function App() {
         showAlert("売上データを取り込みました！");
         setIsSettingsOpen(false);
 
-      } catch (err) {
-        console.error(err);
-        showAlert("取り込みに失敗しました: " + err.message);
-      } finally {
-        setIsProcessing(false);
-      }
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      console.error(err);
+      showAlert("取り込みに失敗しました: " + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // --- Sales Hover Handler (Improved) ---
@@ -2182,6 +2286,7 @@ export default function App() {
     // Fix: Create independent objects for each panel to prevent reference sharing
     const defaultPanels = Array(16).fill(null).map(() => ({
       image: null,
+      imageId: null,
       text: '',
       label: null,
       code: null,
@@ -2243,12 +2348,13 @@ export default function App() {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.label && !panel.isText && !panel.code) return;
+    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
 
     if (USE_LOCAL_STORAGE) {
       const newTempItem = {
         id: idbHelper.generateId(),
         image: panel.image || null,
+        imageId: panel.imageId || null,
         label: panel.label || null,
         code: panel.code || null,
         text: panel.text || '',
@@ -2262,7 +2368,7 @@ export default function App() {
       // localStorageHelper.setItem('tempItems', newTempItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2274,6 +2380,7 @@ export default function App() {
     const tempRef = doc(tempShelfCollection);
     batch.set(tempRef, {
       image: panel.image || null,
+      imageId: panel.imageId || null,
       label: panel.label || null,
       code: panel.code || null,
       text: panel.text || '',
@@ -2286,6 +2393,7 @@ export default function App() {
     updatedPanels[panelIndex] = {
       ...updatedPanels[panelIndex],
       image: null,
+      imageId: null,
       label: null,
       code: null,
       text: '',
@@ -2311,12 +2419,13 @@ export default function App() {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.label && !panel.isText && !panel.code) return;
+    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
 
     if (USE_LOCAL_STORAGE) {
       const newExcludedItem = {
         id: idbHelper.generateId(),
         image: panel.image || null,
+        imageId: panel.imageId || null,
         label: panel.label || null,
         code: panel.code || null,
         text: panel.text || '',
@@ -2330,7 +2439,7 @@ export default function App() {
       // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2342,6 +2451,7 @@ export default function App() {
     const excludedRef = doc(excludedItemsCollection);
     batch.set(excludedRef, {
       image: panel.image || null,
+      imageId: panel.imageId || null,
       label: panel.label || null,
       code: panel.code || null,
       text: panel.text || '',
@@ -2354,6 +2464,7 @@ export default function App() {
     updatedPanels[panelIndex] = {
       ...updatedPanels[panelIndex],
       image: null,
+      imageId: null,
       label: null,
       code: null,
       text: '',
@@ -2487,7 +2598,7 @@ export default function App() {
 
         newPanels[fromIndex] = {
           ...newPanels[fromIndex],
-          image: null, label: null, code: null, text: '', isText: false
+          image: null, imageId: null, label: null, code: null, text: '', isText: false
         };
 
         newPanels[toIndex] = {
@@ -2508,7 +2619,7 @@ export default function App() {
 
         newFromPanels[fromIndex] = {
           ...newFromPanels[fromIndex],
-          image: null, label: null, code: null, text: '', isText: false
+          image: null, imageId: null, label: null, code: null, text: '', isText: false
         };
 
         const newToPanels = [...toSheet.panels];
@@ -2540,7 +2651,7 @@ export default function App() {
 
       newPanels[fromIndex] = {
         ...newPanels[fromIndex],
-        image: null, label: null, code: null, text: '', isText: false
+        image: null, imageId: null, label: null, code: null, text: '', isText: false
       };
 
       newPanels[toIndex] = {
@@ -2560,7 +2671,7 @@ export default function App() {
 
       newFromPanels[fromIndex] = {
         ...newFromPanels[fromIndex],
-        image: null, label: null, code: null, text: '', isText: false
+        image: null, imageId: null, label: null, code: null, text: '', isText: false
       };
       batch.update(doc(sheetsCollection, fromSheetId), { panels: newFromPanels });
 
@@ -2837,6 +2948,7 @@ export default function App() {
                 panels: s.panels.map(p => ({
                   ...p,
                   image: null,
+                  imageId: null,
                   label: null,
                   code: null,
                   text: '',
@@ -2870,6 +2982,7 @@ export default function App() {
           const newPanels = sheet.panels.map(p => ({
             ...p,
             image: null,
+            imageId: null,
             label: null,
             code: null,
             text: '',
@@ -2977,7 +3090,7 @@ export default function App() {
   };
 
   // --- CSV Import Logic (for Pages) ---
-  const handleImportCSV = (e) => {
+  const handleImportCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -2986,17 +3099,16 @@ export default function App() {
     setProgressMax(100);
     setProgressMessage("ファイルを読み込んでいます...");
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
-        const rows = text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
+    try {
+        const text = await readFileAutoEncoding(file);
+        const rows = text.split(/\r\n|\n|\r/);
         const headers = parseCSVLine(rows[0]);
         if (headers.length < 6) throw new Error('CSVの形式が正しくありません。カラム数が足りません。');
 
         setProgressMessage("データを解析中...");
 
         const searchableImages = images.map(img => ({
+          id: img.id,
           name: img.name || '',
           lowerName: (img.name || '').toLowerCase(),
           data: img.data
@@ -3021,8 +3133,14 @@ export default function App() {
           // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 7:テキスト情報
           const genreLabel = cols[0];
           const pageNum = parseInt(cols[1], 10);
-          const panelNum = parseInt(cols[2], 10);
-          let frameNum = parseInt(cols[3], 10);
+          const panelNumRaw = parseInt(cols[2], 10);
+          const frameNumRaw = parseInt(cols[3], 10);
+          const frameNum = (!isNaN(frameNumRaw) && frameNumRaw > 0)
+            ? frameNumRaw
+            : ((!isNaN(panelNumRaw) && panelNumRaw > 0) ? panelNumRaw : NaN);
+          const panelNum = (!isNaN(panelNumRaw) && panelNumRaw > 0)
+            ? panelNumRaw
+            : ((!isNaN(frameNumRaw) && frameNumRaw > 0) ? frameNumRaw : NaN);
           const codeVal = cols[4] === 'ダミーコマ' ? '' : (cols[4] || '').trim();
           const isDummyMarker = cols[4] === 'ダミーコマ';
           const sizeVal = cols[5] || '1/16（1コマ）';
@@ -3044,7 +3162,7 @@ export default function App() {
           const genreObj = GENRES.find(g => g.label === genreLabel);
           if (genreObj) sheetUpdates[pageIndex].genre = genreObj.id;
 
-          let targetImage = null;
+          let targetImageId = null;
           let targetCode = null;
           let targetLabel = null;
           let isText = false;
@@ -3058,14 +3176,20 @@ export default function App() {
             if (sizeVal.includes('タイトル')) targetLabel = 'タイトル';
             else if (sizeVal.includes('埋草')) targetLabel = '埋草';
           } else if (codeVal) {
-            targetCode = codeVal;
+            const normalizedToken = codeVal.normalize('NFKC').replace(/[-\s]/g, '').toUpperCase();
+            const isLikelyProductCode = /^[A-Z]{1,2}\d{3,5}$/.test(normalizedToken);
+
+            if (!isLikelyProductCode) {
+              targetLabel = codeVal;
+            } else {
+              targetCode = normalizedToken;
 
             // Helper: 全角英数字を半角に変換＆小文字化
             const normalizeStr = (s) => {
               return s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).toLowerCase();
             };
 
-            const searchCode = normalizeStr(codeVal);
+            const searchCode = normalizeStr(targetCode);
             const isNumericSearch = /^\d+$/.test(searchCode);
             const searchNum = isNumericSearch ? parseInt(searchCode, 10) : null;
 
@@ -3120,34 +3244,36 @@ export default function App() {
             // スコア90以上のマッチングのみを有効とする
             const MATCH_THRESHOLD = 90;
             if (bestMatchImg && bestScore >= MATCH_THRESHOLD) {
-              targetImage = bestMatchImg.data;
+              targetImageId = bestMatchImg.id || null;
               // マッチング詳細を記録
               sheetUpdates[pageIndex].matchDetails = sheetUpdates[pageIndex].matchDetails || [];
               sheetUpdates[pageIndex].matchDetails.push({
-                code: codeVal,
+                code: targetCode,
                 imageName: bestMatchImg.name,
                 score: bestScore,
                 csvRow: i + 1
               });
-            } else if (codeVal) {
+            } else if (targetCode) {
               // マッチしなかったコードを記録
               sheetUpdates[pageIndex].unmatchedCodes = sheetUpdates[pageIndex].unmatchedCodes || [];
               sheetUpdates[pageIndex].unmatchedCodes.push({
-                code: codeVal,
+                code: targetCode,
                 csvRow: i + 1,
                 bestScore: bestScore,
                 bestMatch: bestMatchImg ? bestMatchImg.name : 'なし'
               });
             }
+            }
           }
 
           sheetUpdates[pageIndex].contentItems.push({
             isFixed: isFixed,
-            frameIndex: isFixed ? frameNum - 1 : -1,
+            frameNo: isFixed ? frameNum : -1,
             order: isNaN(panelNum) ? 9999 : panelNum,
             data: {
               code: targetCode,
-              image: targetImage,
+              image: null,
+              imageId: targetImageId,
               label: targetLabel,
               sizeType: sizeVal,
               text: textVal,
@@ -3167,7 +3293,7 @@ export default function App() {
             createdAt: { seconds: Date.now() / 1000 },
             genre: 'none',
             panels: Array(16).fill(null).map(() => ({
-              image: null, text: '', label: null, code: null,
+              image: null, imageId: null, text: '', label: null, code: null,
               rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
             }))
           });
@@ -3198,7 +3324,7 @@ export default function App() {
           if (update.genre) currentSheet.genre = update.genre;
 
           const newPanels = Array(16).fill(null).map(() => ({
-            image: null, text: '', label: null, code: null,
+            image: null, imageId: null, text: '', label: null, code: null,
             rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
           }));
 
@@ -3206,13 +3332,45 @@ export default function App() {
 
           // === コマ番号順流し込み配置 ===
           // 全アイテムをコマ番号（追番order）順にソート
-          const allItems = [...update.contentItems].sort((a, b) => a.order - b.order);
+          const allItems = [...update.contentItems].sort((a, b) => {
+            const aKey = a.frameNo > 0 ? a.frameNo : Number.MAX_SAFE_INTEGER;
+            const bKey = b.frameNo > 0 ? b.frameNo : Number.MAX_SAFE_INTEGER;
+            if (aKey !== bKey) return aKey - bKey;
+            return a.order - b.order;
+          });
 
           // アイテムを順番に、次の空き位置に配置
           for (const item of allItems) {
             importSummary.total++;
             const { data } = item;
-            const { r: rowSpan, c: colSpan } = getSpansFromSizeType(data.sizeType);
+            const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
+            const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+
+            if (resolvedStartIdx === -1) {
+              if (item.isFixed) {
+                importSummary.fixedFailed++;
+              } else {
+                importSummary.autoFailed++;
+              }
+              importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
+              continue;
+            }
+
+            newPanels[resolvedStartIdx] = {
+              ...newPanels[resolvedStartIdx],
+              ...data,
+              rowSpan,
+              colSpan,
+              hidden: false
+            };
+            fillPanelArea(newPanels, resolvedStartIdx, rowSpan, colSpan, occupied);
+
+            if (item.isFixed) {
+              importSummary.fixedSuccess++;
+            } else {
+              importSummary.autoSuccess++;
+            }
+            continue;
 
             let placed = false;
 
@@ -3306,6 +3464,24 @@ export default function App() {
           }
         }
 
+        let saveFailed = false;
+        let saveErrorMessage = '';
+
+        if (!USE_LOCAL_STORAGE) {
+          for (let i = 0; i < localSheets.length; i++) {
+            const sheet = localSheets[i];
+            if (!sheet?.id || !String(sheet.id).startsWith('local_')) continue;
+
+            const newRef = await addDoc(sheetsCollection, {
+              genre: sheet.genre || 'none',
+              order: sheet.order ?? i,
+              panels: sheet.panels || [],
+              createdAt: serverTimestamp()
+            });
+            localSheets[i] = { ...sheet, id: newRef.id };
+          }
+        }
+
         if (USE_LOCAL_STORAGE) {
           setSheets(localSheets);
           try {
@@ -3314,6 +3490,39 @@ export default function App() {
           } catch (err) {
             console.error("IDB save failed:", err);
             showAlert("自動保存に失敗しました。");
+            saveFailed = true;
+            saveErrorMessage = err.message;
+          }
+        } else {
+          setSheets(localSheets);
+          try {
+            let batch = writeBatch(db);
+            let opCount = 0;
+            for (let i = 0; i < finalPageCount; i++) {
+              if (!sheetUpdates[i]) continue;
+              const targetSheet = localSheets[i];
+              if (!targetSheet?.id) continue;
+
+              if (opCount >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                opCount = 0;
+              }
+
+              batch.update(doc(sheetsCollection, targetSheet.id), {
+                genre: targetSheet.genre || 'none',
+                order: targetSheet.order ?? i,
+                panels: targetSheet.panels
+              });
+              opCount++;
+            }
+            if (opCount > 0) {
+              await batch.commit();
+            }
+          } catch (err) {
+            console.error("Cloud save failed:", err);
+            saveFailed = true;
+            saveErrorMessage = err.message;
           }
         }
 
@@ -3345,18 +3554,19 @@ export default function App() {
           importSummary.details.length > 0 ? "\n【未配置の項目】\n" + importSummary.details.slice(0, 10).join('\n') + (importSummary.details.length > 10 ? '\n...他' : '') : ''
         ].filter(Boolean).join('\n');
 
-        showAlert(report, "インポート完了報告");
+        if (saveFailed) {
+          showAlert("保存に失敗したため、取り込み内容は反映されていません。\n" + saveErrorMessage);
+        } else {
+          showAlert(report, "インポート完了報告", true);
+        }
 
       } catch (err) {
         console.error(err);
         showAlert('エラーが発生しました: ' + err.message);
-      } finally {
-        setIsProcessing(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
-    };
-    reader.onerror = () => { showAlert("ファイルの読み込みに失敗しました"); setIsProcessing(false); };
-    reader.readAsText(file);
+    } finally {
+      setIsProcessing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const displaySheets = useMemo(() => {
@@ -3364,6 +3574,16 @@ export default function App() {
     if (viewMode === 'single' && activeSheetId) result = result.filter(s => s.id === activeSheetId);
     return result;
   }, [sheets, genreFilter, viewMode, activeSheetId]);
+
+  const imageDataById = useMemo(() => {
+    const map = {};
+    images.forEach((img) => {
+      if (img?.id && img?.data) {
+        map[img.id] = img.data;
+      }
+    });
+    return map;
+  }, [images]);
 
   const currentList = useMemo(() => {
     return genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
@@ -3694,7 +3914,7 @@ export default function App() {
             </div>
 
             <div className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}>
-              {displaySheets.map((sheet, idx) => {
+              {displaySheets.map((sheet) => {
                 const isPageSelected = selectedSheetIds.has(sheet.id);
                 return (
                   <div
@@ -3753,6 +3973,7 @@ export default function App() {
                           salesData={salesData}
                           onHoverSales={handleHoverSales}
                           onLeaveSales={handleLeaveSales}
+                          imageDataById={imageDataById}
                         />
                       </div>
                     </div>
@@ -3791,6 +4012,7 @@ export default function App() {
         isOpen={alertDialog.isOpen}
         message={alertDialog.message}
         title={alertDialog.title}
+        closeOnBackdrop={alertDialog.closeOnBackdrop}
         onClose={() => setAlertDialog({ ...alertDialog, isOpen: false })}
       />
 
