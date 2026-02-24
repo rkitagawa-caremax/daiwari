@@ -1969,106 +1969,106 @@ export default function App() {
     setIsProcessing(true);
     setProgressMessage("売上データを解析中...");
     try {
-        const text = await readFileAutoEncoding(file);
-        const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        const rows = normalizedText.split('\n');
+      const text = await readFileAutoEncoding(file);
+      const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const rows = normalizedText.split('\n');
 
-        const salesMap = {};
-        const startIndex = 2; // ヘッダー2行スキップ
+      const salesMap = {};
+      const startIndex = 2; // ヘッダー2行スキップ
 
-        rows.slice(startIndex).forEach((row) => {
-          if (!row.trim()) return;
-          const cols = parseCSVLine(row);
+      rows.slice(startIndex).forEach((row) => {
+        if (!row.trim()) return;
+        const cols = parseCSVLine(row);
 
-          if (cols.length <= 17) return;
+        if (cols.length <= 17) return;
 
-          const rawCode = cols[3];
-          if (!rawCode) return;
-          const code = normalizeCode(rawCode);
+        const rawCode = cols[3];
+        if (!rawCode) return;
+        const code = normalizeCode(rawCode);
 
-          const name = cols[1] || '';
-          const spec = cols[2] || '';
-          const countStr = cols[17].replace(/,/g, '');
-          const count = parseInt(countStr) || 0;
+        const name = cols[1] || '';
+        const spec = cols[2] || '';
+        const countStr = cols[17].replace(/,/g, '');
+        const count = parseInt(countStr) || 0;
 
-          if (!salesMap[code]) {
-            salesMap[code] = [];
-          }
-          salesMap[code].push({ name, spec, count });
-        });
+        if (!salesMap[code]) {
+          salesMap[code] = [];
+        }
+        salesMap[code].push({ name, spec, count });
+      });
 
-        if (USE_LOCAL_STORAGE) {
-          try {
-            await idbHelper.setItem('salesData', salesMap);
-            setSalesData(salesMap);
-            setProgressMessage("完了しました");
-            setTimeout(() => {
-              setIsProcessing(false);
-              showAlert("売上データを取り込みました");
-              setIsSettingsOpen(false);
-            }, 500);
-          } catch (e) {
-            console.error("Failed to save sales data to IDB:", e);
-            showAlert("売上データの保存に失敗しました。");
+      if (USE_LOCAL_STORAGE) {
+        try {
+          await idbHelper.setItem('salesData', salesMap);
+          setSalesData(salesMap);
+          setProgressMessage("完了しました");
+          setTimeout(() => {
             setIsProcessing(false);
-          }
-          return;
+            showAlert("売上データを取り込みました");
+            setIsSettingsOpen(false);
+          }, 500);
+        } catch (e) {
+          console.error("Failed to save sales data to IDB:", e);
+          showAlert("売上データの保存に失敗しました。");
+          setIsProcessing(false);
         }
+        return;
+      }
 
-        // Chunking logic
-        setProgressMessage("データを保存中...");
-        const entries = Object.entries(salesMap);
-        const CHUNK_SIZE = 1000;
-        const chunks = [];
+      // Chunking logic
+      setProgressMessage("データを保存中...");
+      const entries = Object.entries(salesMap);
+      const CHUNK_SIZE = 1000;
+      const chunks = [];
 
-        for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
-          const chunkEntries = entries.slice(i, i + CHUNK_SIZE);
-          const chunkData = Object.fromEntries(chunkEntries);
-          chunks.push(chunkData);
-        }
+      for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
+        const chunkEntries = entries.slice(i, i + CHUNK_SIZE);
+        const chunkData = Object.fromEntries(chunkEntries);
+        chunks.push(chunkData);
+      }
 
-        const batch = writeBatch(db);
+      const batch = writeBatch(db);
 
-        const snapshot = await getDocs(salesChunksCollection);
-        snapshot.docs.forEach(d => batch.delete(d.ref));
+      const snapshot = await getDocs(salesChunksCollection);
+      snapshot.docs.forEach(d => batch.delete(d.ref));
 
-        chunks.forEach((chunk, index) => {
-          const docRef = doc(salesChunksCollection, `chunk_${index}`);
-          batch.set(docRef, {
-            items: JSON.stringify(chunk),
-            updatedAt: serverTimestamp(),
-            chunkIndex: index
-          });
-        });
-
-        if (snapshot.size + chunks.length > 450) {
-          const deleteBatch = writeBatch(db);
-          snapshot.docs.forEach(d => deleteBatch.delete(d.ref));
-          await deleteBatch.commit();
-
-          for (let i = 0; i < chunks.length; i += 400) {
-            const writeBatchChunk = writeBatch(db);
-            chunks.slice(i, i + 400).forEach((chunk, idx) => {
-              const realIdx = i + idx;
-              const docRef = doc(salesChunksCollection, `chunk_${realIdx}`);
-              writeBatchChunk.set(docRef, {
-                items: JSON.stringify(chunk),
-                updatedAt: serverTimestamp()
-              });
-            });
-            await writeBatchChunk.commit();
-          }
-        } else {
-          await batch.commit();
-        }
-
-        await setDoc(doc(settingsCollection, 'salesDataMeta'), {
+      chunks.forEach((chunk, index) => {
+        const docRef = doc(salesChunksCollection, `chunk_${index}`);
+        batch.set(docRef, {
+          items: JSON.stringify(chunk),
           updatedAt: serverTimestamp(),
-          totalItems: entries.length
+          chunkIndex: index
         });
+      });
 
-        showAlert("売上データを取り込みました！");
-        setIsSettingsOpen(false);
+      if (snapshot.size + chunks.length > 450) {
+        const deleteBatch = writeBatch(db);
+        snapshot.docs.forEach(d => deleteBatch.delete(d.ref));
+        await deleteBatch.commit();
+
+        for (let i = 0; i < chunks.length; i += 400) {
+          const writeBatchChunk = writeBatch(db);
+          chunks.slice(i, i + 400).forEach((chunk, idx) => {
+            const realIdx = i + idx;
+            const docRef = doc(salesChunksCollection, `chunk_${realIdx}`);
+            writeBatchChunk.set(docRef, {
+              items: JSON.stringify(chunk),
+              updatedAt: serverTimestamp()
+            });
+          });
+          await writeBatchChunk.commit();
+        }
+      } else {
+        await batch.commit();
+      }
+
+      await setDoc(doc(settingsCollection, 'salesDataMeta'), {
+        updatedAt: serverTimestamp(),
+        totalItems: entries.length
+      });
+
+      showAlert("売上データを取り込みました！");
+      setIsSettingsOpen(false);
 
     } catch (err) {
       console.error(err);
@@ -3100,89 +3100,100 @@ export default function App() {
     setProgressMessage("ファイルを読み込んでいます...");
 
     try {
-        const text = await readFileAutoEncoding(file);
-        const rows = text.split(/\r\n|\n|\r/);
-        const headers = parseCSVLine(rows[0]);
-        if (headers.length < 6) throw new Error('CSVの形式が正しくありません。カラム数が足りません。');
+      const text = await readFileAutoEncoding(file);
+      const rows = text.split(/\r\n|\n|\r/);
+      const headers = parseCSVLine(rows[0]);
+      if (headers.length < 6) throw new Error('CSVの形式が正しくありません。カラム数が足りません。');
 
-        setProgressMessage("データを解析中...");
+      setProgressMessage("データを解析中...");
 
-        const searchableImages = images.map(img => ({
-          id: img.id,
-          name: img.name || '',
-          lowerName: (img.name || '').toLowerCase(),
-          data: img.data
-        }));
+      const searchableImages = images.map(img => ({
+        id: img.id,
+        name: img.name || '',
+        lowerName: (img.name || '').toLowerCase(),
+        data: img.data
+      }));
 
-        const sheetUpdates = {};
-        let maxPageIndex = -1;
+      const sheetUpdates = {};
+      let maxPageIndex = -1;
 
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i];
-          if (!row.trim()) continue;
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row.trim()) continue;
 
-          if (i % 50 === 0) {
-            setProgressValue(Math.floor((i / rows.length) * 100));
-            setProgressMessage(`解析中... (${i}/${rows.length}行)`);
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
+        if (i % 50 === 0) {
+          setProgressValue(Math.floor((i / rows.length) * 100));
+          setProgressMessage(`解析中... (${i}/${rows.length}行)`);
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
 
-          const cols = parseCSVLine(row);
-          if (cols.length < 6) continue;
+        const cols = parseCSVLine(row);
+        if (cols.length < 6) continue;
 
-          // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 7:テキスト情報
-          const genreLabel = cols[0];
-          const pageNum = parseInt(cols[1], 10);
-          const panelNumRaw = parseInt(cols[2], 10);
-          const frameNumRaw = parseInt(cols[3], 10);
-          const frameNum = (!isNaN(frameNumRaw) && frameNumRaw > 0)
-            ? frameNumRaw
-            : ((!isNaN(panelNumRaw) && panelNumRaw > 0) ? panelNumRaw : NaN);
-          const panelNum = (!isNaN(panelNumRaw) && panelNumRaw > 0)
-            ? panelNumRaw
-            : ((!isNaN(frameNumRaw) && frameNumRaw > 0) ? frameNumRaw : NaN);
-          const codeVal = cols[4] === 'ダミーコマ' ? '' : (cols[4] || '').trim();
-          const isDummyMarker = cols[4] === 'ダミーコマ';
-          const sizeVal = cols[5] || '1/16（1コマ）';
-          const textVal = (cols[7] || '').trim();
+        // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 6:ダミーラベル種別, 7:テキスト情報
+        const genreLabel = cols[0];
+        const pageNum = parseInt(cols[1], 10);
+        const panelNumRaw = parseInt(cols[2], 10);
+        const frameNumRaw = parseInt(cols[3], 10);
+        const frameNum = (!isNaN(frameNumRaw) && frameNumRaw > 0)
+          ? frameNumRaw
+          : ((!isNaN(panelNumRaw) && panelNumRaw > 0) ? panelNumRaw : NaN);
+        const panelNum = (!isNaN(panelNumRaw) && panelNumRaw > 0)
+          ? panelNumRaw
+          : ((!isNaN(frameNumRaw) && frameNumRaw > 0) ? frameNumRaw : NaN);
+        const codeVal = cols[4] === 'ダミーコマ' ? '' : (cols[4] || '').trim();
+        const isDummyMarker = cols[4] === 'ダミーコマ';
+        const sizeVal = cols[5] || '1/16（1コマ）';
+        const textVal = (cols[7] || '').trim();
 
-          const isFixed = !isNaN(frameNum) && frameNum > 0;
+        const isFixed = !isNaN(frameNum) && frameNum > 0;
 
-          // ページ番号は必須。コマ番号か追番のどちらかは必須。
-          if (isNaN(pageNum)) continue;
-          if (!isFixed && (isNaN(panelNum))) continue;
+        // ページ番号は必須。コマ番号か追番のどちらかは必須。
+        if (isNaN(pageNum)) continue;
+        if (!isFixed && (isNaN(panelNum))) continue;
 
-          const pageIndex = pageNum - 1;
-          if (pageIndex > maxPageIndex) maxPageIndex = pageIndex;
+        const pageIndex = pageNum - 1;
+        if (pageIndex > maxPageIndex) maxPageIndex = pageIndex;
 
-          if (!sheetUpdates[pageIndex]) {
-            sheetUpdates[pageIndex] = { genre: null, contentItems: [] };
-          }
+        if (!sheetUpdates[pageIndex]) {
+          sheetUpdates[pageIndex] = { genre: null, contentItems: [] };
+        }
 
-          const genreObj = GENRES.find(g => g.label === genreLabel);
-          if (genreObj) sheetUpdates[pageIndex].genre = genreObj.id;
+        const genreObj = GENRES.find(g => g.label === genreLabel);
+        if (genreObj) sheetUpdates[pageIndex].genre = genreObj.id;
 
-          let targetImageId = null;
-          let targetCode = null;
-          let targetLabel = null;
-          let isText = false;
+        let targetImageId = null;
+        let targetCode = null;
+        let targetLabel = null;
+        let isText = false;
 
-          // 優先順位: 1.テキスト 2.ダミーコマ 3.コード(画像)
-          if (textVal) {
-            targetLabel = 'テキスト';
-            isText = true;
-          } else if (isDummyMarker) {
+        // 優先順位: 1.テキスト 2.ダミーコマ 3.コード(画像)
+        if (textVal) {
+          targetLabel = 'テキスト';
+          isText = true;
+        } else if (isDummyMarker) {
+          // ダミーコマの種別を判定: cols[6]（ラベル列）、cols[5]（コマ数列）、cols[4]の順にチェック
+          const dummyLabel = (cols[6] || '').trim();
+          if (dummyLabel === 'タイトル' || sizeVal.includes('タイトル')) {
+            targetLabel = 'タイトル';
+          } else if (dummyLabel === '埋草' || sizeVal.includes('埋草')) {
+            targetLabel = '埋草';
+          } else if (dummyLabel === '新規商品' || dummyLabel === '新規商品未確定') {
             targetLabel = '新規商品未確定';
-            if (sizeVal.includes('タイトル')) targetLabel = 'タイトル';
-            else if (sizeVal.includes('埋草')) targetLabel = '埋草';
-          } else if (codeVal) {
-            const normalizedToken = codeVal.normalize('NFKC').replace(/[-\s]/g, '').toUpperCase();
-            const isLikelyProductCode = /^[A-Z]{1,2}\d{3,5}$/.test(normalizedToken);
+          } else if (dummyLabel) {
+            // CSVに記載のあるラベルをそのまま使用
+            targetLabel = dummyLabel;
+          } else {
+            targetLabel = '新規商品未確定';
+          }
+        } else if (codeVal) {
+          const normalizedToken = codeVal.normalize('NFKC').replace(/[-\s]/g, '').toUpperCase();
+          const isLikelyProductCode = /^[A-Z]{1,2}\d{3,5}$/.test(normalizedToken);
 
-            if (!isLikelyProductCode) {
-              targetLabel = codeVal;
-            } else {
-              targetCode = normalizedToken;
+          if (!isLikelyProductCode) {
+            targetLabel = codeVal;
+          } else {
+            targetCode = normalizedToken;
 
             // Helper: 全角英数字を半角に変換＆小文字化
             const normalizeStr = (s) => {
@@ -3263,306 +3274,306 @@ export default function App() {
                 bestMatch: bestMatchImg ? bestMatchImg.name : 'なし'
               });
             }
-            }
           }
-
-          sheetUpdates[pageIndex].contentItems.push({
-            isFixed: isFixed,
-            frameNo: isFixed ? frameNum : -1,
-            order: isNaN(panelNum) ? 9999 : panelNum,
-            data: {
-              code: targetCode,
-              image: null,
-              imageId: targetImageId,
-              label: targetLabel,
-              sizeType: sizeVal,
-              text: textVal,
-              isText: isText
-            }
-          });
         }
 
-        // ページを不足分作成
-        const finalPageCount = maxPageIndex + 1;
-        let localSheets = [...sheets];
+        sheetUpdates[pageIndex].contentItems.push({
+          isFixed: isFixed,
+          frameNo: isFixed ? frameNum : -1,
+          order: isNaN(panelNum) ? 9999 : panelNum,
+          data: {
+            code: targetCode,
+            image: null,
+            imageId: targetImageId,
+            label: targetLabel,
+            sizeType: sizeVal,
+            text: textVal,
+            isText: isText
+          }
+        });
+      }
 
-        // 足りないページをパディング
-        while (localSheets.length < finalPageCount) {
-          localSheets.push({
-            id: idbHelper.generateId(),
-            createdAt: { seconds: Date.now() / 1000 },
-            genre: 'none',
-            panels: Array(16).fill(null).map(() => ({
-              image: null, imageId: null, text: '', label: null, code: null,
-              rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
-            }))
-          });
-        }
+      // ページを不足分作成
+      const finalPageCount = maxPageIndex + 1;
+      let localSheets = [...sheets];
 
-        const importSummary = {
-          total: 0,
-          fixedSuccess: 0,
-          fixedFailed: 0,
-          autoSuccess: 0,
-          autoFailed: 0,
-          details: [],
-          matchedImages: [], // マッチした画像の詳細
-          notMatchedCodes: [], // マッチしなかったコードのリスト
-          imageUsageCount: {} // 画像の使用回数
-        };
-
-        setProgressMax(finalPageCount);
-        for (let i = 0; i < finalPageCount; i++) {
-          const update = sheetUpdates[i];
-          if (!update) continue;
-
-          setProgressValue(i + 1);
-          setProgressMessage(`${i + 1}ページ目を再構成中...`);
-          await new Promise(resolve => setTimeout(resolve, 0));
-
-          const currentSheet = { ...localSheets[i] };
-          if (update.genre) currentSheet.genre = update.genre;
-
-          const newPanels = Array(16).fill(null).map(() => ({
+      // 足りないページをパディング
+      while (localSheets.length < finalPageCount) {
+        localSheets.push({
+          id: idbHelper.generateId(),
+          createdAt: { seconds: Date.now() / 1000 },
+          genre: 'none',
+          panels: Array(16).fill(null).map(() => ({
             image: null, imageId: null, text: '', label: null, code: null,
             rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
-          }));
+          }))
+        });
+      }
 
-          const occupied = new Set();
+      const importSummary = {
+        total: 0,
+        fixedSuccess: 0,
+        fixedFailed: 0,
+        autoSuccess: 0,
+        autoFailed: 0,
+        details: [],
+        matchedImages: [], // マッチした画像の詳細
+        notMatchedCodes: [], // マッチしなかったコードのリスト
+        imageUsageCount: {} // 画像の使用回数
+      };
 
-          // === コマ番号順流し込み配置 ===
-          // 全アイテムをコマ番号（追番order）順にソート
-          const allItems = [...update.contentItems].sort((a, b) => {
-            const aKey = a.frameNo > 0 ? a.frameNo : Number.MAX_SAFE_INTEGER;
-            const bKey = b.frameNo > 0 ? b.frameNo : Number.MAX_SAFE_INTEGER;
-            if (aKey !== bKey) return aKey - bKey;
-            return a.order - b.order;
-          });
+      setProgressMax(finalPageCount);
+      for (let i = 0; i < finalPageCount; i++) {
+        const update = sheetUpdates[i];
+        if (!update) continue;
 
-          // アイテムを順番に、次の空き位置に配置
-          for (const item of allItems) {
-            importSummary.total++;
-            const { data } = item;
-            const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
-            const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+        setProgressValue(i + 1);
+        setProgressMessage(`${i + 1}ページ目を再構成中...`);
+        await new Promise(resolve => setTimeout(resolve, 0));
 
-            if (resolvedStartIdx === -1) {
-              if (item.isFixed) {
-                importSummary.fixedFailed++;
-              } else {
-                importSummary.autoFailed++;
-              }
-              importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
-              continue;
-            }
+        const currentSheet = { ...localSheets[i] };
+        if (update.genre) currentSheet.genre = update.genre;
 
-            newPanels[resolvedStartIdx] = {
-              ...newPanels[resolvedStartIdx],
-              ...data,
-              rowSpan,
-              colSpan,
-              hidden: false
-            };
-            fillPanelArea(newPanels, resolvedStartIdx, rowSpan, colSpan, occupied);
+        const newPanels = Array(16).fill(null).map(() => ({
+          image: null, imageId: null, text: '', label: null, code: null,
+          rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
+        }));
 
+        const occupied = new Set();
+
+        // === コマ番号順流し込み配置 ===
+        // 全アイテムをコマ番号（追番order）順にソート
+        const allItems = [...update.contentItems].sort((a, b) => {
+          const aKey = a.frameNo > 0 ? a.frameNo : Number.MAX_SAFE_INTEGER;
+          const bKey = b.frameNo > 0 ? b.frameNo : Number.MAX_SAFE_INTEGER;
+          if (aKey !== bKey) return aKey - bKey;
+          return a.order - b.order;
+        });
+
+        // アイテムを順番に、次の空き位置に配置
+        for (const item of allItems) {
+          importSummary.total++;
+          const { data } = item;
+          const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
+          const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+
+          if (resolvedStartIdx === -1) {
             if (item.isFixed) {
-              importSummary.fixedSuccess++;
+              importSummary.fixedFailed++;
             } else {
-              importSummary.autoSuccess++;
-            }
-            continue;
-
-            let placed = false;
-
-            // グリッドを先頭（0）から順にスキャンして、配置可能な位置を探す
-            for (let startIdx = 0; startIdx < 16; startIdx++) {
-              // この位置が既に占有されていたらスキップ
-              if (occupied.has(startIdx)) continue;
-
-              const startRow = Math.floor(startIdx / 4);
-              const startCol = startIdx % 4;
-
-              // この位置から(rowSpan × colSpan)分配置できるか確認
-              let canPlace = true;
-
-              // 範囲外チェック
-              if (startRow + rowSpan > 4 || startCol + colSpan > 4) {
-                canPlace = false;
-              } else {
-                // 占有チェック
-                for (let r = 0; r < rowSpan; r++) {
-                  for (let c = 0; c < colSpan; c++) {
-                    const idx = (startRow + r) * 4 + (startCol + c);
-                    if (occupied.has(idx)) {
-                      canPlace = false;
-                      break;
-                    }
-                  }
-                  if (!canPlace) break;
-                }
-              }
-
-              if (canPlace) {
-                // 配置実行
-                newPanels[startIdx] = {
-                  ...newPanels[startIdx],
-                  ...data,
-                  rowSpan,
-                  colSpan,
-                  hidden: false
-                };
-
-                // 占有領域を登録
-                for (let r = 0; r < rowSpan; r++) {
-                  for (let c = 0; c < colSpan; c++) {
-                    const idx = (startRow + r) * 4 + (startCol + c);
-                    occupied.add(idx);
-                    // 従属セル（開始位置以外）をhiddenにする
-                    if (idx !== startIdx) {
-                      newPanels[idx] = { ...newPanels[idx], hidden: true };
-                    }
-                  }
-                }
-
-                placed = true;
-                importSummary.autoSuccess++;
-                break; // 配置完了、次のアイテムへ
-              }
-            }
-
-            if (!placed) {
-              // 配置できなかった
               importSummary.autoFailed++;
-              importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
             }
+            importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
+            continue;
           }
 
-          currentSheet.panels = newPanels;
-          localSheets[i] = currentSheet;
+          newPanels[resolvedStartIdx] = {
+            ...newPanels[resolvedStartIdx],
+            ...data,
+            rowSpan,
+            colSpan,
+            hidden: false
+          };
+          fillPanelArea(newPanels, resolvedStartIdx, rowSpan, colSpan, occupied);
 
-          // マッチング詳細をサマリーに集約
-          if (update.matchDetails) {
-            update.matchDetails.forEach(detail => {
-              importSummary.matchedImages.push({
-                page: i + 1,
-                ...detail
-              });
-              // 画像使用回数をカウント
-              const imgKey = detail.imageName;
-              importSummary.imageUsageCount[imgKey] = (importSummary.imageUsageCount[imgKey] || 0) + 1;
-            });
+          if (item.isFixed) {
+            importSummary.fixedSuccess++;
+          } else {
+            importSummary.autoSuccess++;
           }
+          continue;
 
-          // 未マッチコードをサマリーに集約
-          if (update.unmatchedCodes) {
-            update.unmatchedCodes.forEach(unmatched => {
-              importSummary.notMatchedCodes.push({
-                page: i + 1,
-                ...unmatched
-              });
-            });
-          }
-        }
+          let placed = false;
 
-        let saveFailed = false;
-        let saveErrorMessage = '';
+          // グリッドを先頭（0）から順にスキャンして、配置可能な位置を探す
+          for (let startIdx = 0; startIdx < 16; startIdx++) {
+            // この位置が既に占有されていたらスキップ
+            if (occupied.has(startIdx)) continue;
 
-        if (!USE_LOCAL_STORAGE) {
-          for (let i = 0; i < localSheets.length; i++) {
-            const sheet = localSheets[i];
-            if (!sheet?.id || !String(sheet.id).startsWith('local_')) continue;
+            const startRow = Math.floor(startIdx / 4);
+            const startCol = startIdx % 4;
 
-            const newRef = await addDoc(sheetsCollection, {
-              genre: sheet.genre || 'none',
-              order: sheet.order ?? i,
-              panels: sheet.panels || [],
-              createdAt: serverTimestamp()
-            });
-            localSheets[i] = { ...sheet, id: newRef.id };
-          }
-        }
+            // この位置から(rowSpan × colSpan)分配置できるか確認
+            let canPlace = true;
 
-        if (USE_LOCAL_STORAGE) {
-          setSheets(localSheets);
-          try {
-            await idbHelper.setItem('sheets', localSheets);
-            setProgressMessage("保存完了");
-          } catch (err) {
-            console.error("IDB save failed:", err);
-            showAlert("自動保存に失敗しました。");
-            saveFailed = true;
-            saveErrorMessage = err.message;
-          }
-        } else {
-          setSheets(localSheets);
-          try {
-            let batch = writeBatch(db);
-            let opCount = 0;
-            for (let i = 0; i < finalPageCount; i++) {
-              if (!sheetUpdates[i]) continue;
-              const targetSheet = localSheets[i];
-              if (!targetSheet?.id) continue;
+            // 範囲外チェック
+            if (startRow + rowSpan > 4 || startCol + colSpan > 4) {
+              canPlace = false;
+            } else {
+              // 占有チェック
+              for (let r = 0; r < rowSpan; r++) {
+                for (let c = 0; c < colSpan; c++) {
+                  const idx = (startRow + r) * 4 + (startCol + c);
+                  if (occupied.has(idx)) {
+                    canPlace = false;
+                    break;
+                  }
+                }
+                if (!canPlace) break;
+              }
+            }
 
-              if (opCount >= 400) {
-                await batch.commit();
-                batch = writeBatch(db);
-                opCount = 0;
+            if (canPlace) {
+              // 配置実行
+              newPanels[startIdx] = {
+                ...newPanels[startIdx],
+                ...data,
+                rowSpan,
+                colSpan,
+                hidden: false
+              };
+
+              // 占有領域を登録
+              for (let r = 0; r < rowSpan; r++) {
+                for (let c = 0; c < colSpan; c++) {
+                  const idx = (startRow + r) * 4 + (startCol + c);
+                  occupied.add(idx);
+                  // 従属セル（開始位置以外）をhiddenにする
+                  if (idx !== startIdx) {
+                    newPanels[idx] = { ...newPanels[idx], hidden: true };
+                  }
+                }
               }
 
-              batch.update(doc(sheetsCollection, targetSheet.id), {
-                genre: targetSheet.genre || 'none',
-                order: targetSheet.order ?? i,
-                panels: targetSheet.panels
-              });
-              opCount++;
+              placed = true;
+              importSummary.autoSuccess++;
+              break; // 配置完了、次のアイテムへ
             }
-            if (opCount > 0) {
-              await batch.commit();
-            }
-          } catch (err) {
-            console.error("Cloud save failed:", err);
-            saveFailed = true;
-            saveErrorMessage = err.message;
+          }
+
+          if (!placed) {
+            // 配置できなかった
+            importSummary.autoFailed++;
+            importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
           }
         }
 
-        setIsProcessing(false);
+        currentSheet.panels = newPanels;
+        localSheets[i] = currentSheet;
 
-        // 重複使用されている画像を抽出
-        const duplicateImages = Object.entries(importSummary.imageUsageCount)
-          .filter(([_, count]) => count > 1)
-          .map(([name, count]) => `${name} (${count}回)`);
-
-        const report = [
-          `取り込みが完了しました。(全${importSummary.total}件)`,
-          `・指定通りの配置: ${importSummary.fixedSuccess}件`,
-          `・空きへの自動配置: ${importSummary.autoSuccess}件`,
-          importSummary.fixedFailed > 0 ? `・指定位置が重複または不足により移動: ${importSummary.fixedFailed}件` : '',
-          importSummary.autoFailed > 0 ? `・スペース不足で配置失敗: ${importSummary.autoFailed}件` : '',
-          '',
-          `【画像マッチング結果】`,
-          `・マッチング成功: ${importSummary.matchedImages.length}件`,
-          `・マッチング失敗: ${importSummary.notMatchedCodes.length}件`,
-          importSummary.notMatchedCodes.length > 0 ? `\n【マッチしなかったコード】` : '',
-          ...importSummary.notMatchedCodes.slice(0, 15).map(item =>
-            `・P${item.page} 行${item.csvRow}: ${item.code} (ベストマッチ: ${item.bestMatch}, スコア: ${item.bestScore})`
-          ),
-          importSummary.notMatchedCodes.length > 15 ? `...他 ${importSummary.notMatchedCodes.length - 15} 件` : '',
-          duplicateImages.length > 0 ? `\n【重複使用されている画像】` : '',
-          ...duplicateImages.slice(0, 10).map(item => `・${item}`),
-          duplicateImages.length > 10 ? `...他 ${duplicateImages.length - 10} 件` : '',
-          importSummary.details.length > 0 ? "\n【未配置の項目】\n" + importSummary.details.slice(0, 10).join('\n') + (importSummary.details.length > 10 ? '\n...他' : '') : ''
-        ].filter(Boolean).join('\n');
-
-        if (saveFailed) {
-          showAlert("保存に失敗したため、取り込み内容は反映されていません。\n" + saveErrorMessage);
-        } else {
-          showAlert(report, "インポート完了報告", true);
+        // マッチング詳細をサマリーに集約
+        if (update.matchDetails) {
+          update.matchDetails.forEach(detail => {
+            importSummary.matchedImages.push({
+              page: i + 1,
+              ...detail
+            });
+            // 画像使用回数をカウント
+            const imgKey = detail.imageName;
+            importSummary.imageUsageCount[imgKey] = (importSummary.imageUsageCount[imgKey] || 0) + 1;
+          });
         }
 
-      } catch (err) {
-        console.error(err);
-        showAlert('エラーが発生しました: ' + err.message);
+        // 未マッチコードをサマリーに集約
+        if (update.unmatchedCodes) {
+          update.unmatchedCodes.forEach(unmatched => {
+            importSummary.notMatchedCodes.push({
+              page: i + 1,
+              ...unmatched
+            });
+          });
+        }
+      }
+
+      let saveFailed = false;
+      let saveErrorMessage = '';
+
+      if (!USE_LOCAL_STORAGE) {
+        for (let i = 0; i < localSheets.length; i++) {
+          const sheet = localSheets[i];
+          if (!sheet?.id || !String(sheet.id).startsWith('local_')) continue;
+
+          const newRef = await addDoc(sheetsCollection, {
+            genre: sheet.genre || 'none',
+            order: sheet.order ?? i,
+            panels: sheet.panels || [],
+            createdAt: serverTimestamp()
+          });
+          localSheets[i] = { ...sheet, id: newRef.id };
+        }
+      }
+
+      if (USE_LOCAL_STORAGE) {
+        setSheets(localSheets);
+        try {
+          await idbHelper.setItem('sheets', localSheets);
+          setProgressMessage("保存完了");
+        } catch (err) {
+          console.error("IDB save failed:", err);
+          showAlert("自動保存に失敗しました。");
+          saveFailed = true;
+          saveErrorMessage = err.message;
+        }
+      } else {
+        setSheets(localSheets);
+        try {
+          let batch = writeBatch(db);
+          let opCount = 0;
+          for (let i = 0; i < finalPageCount; i++) {
+            if (!sheetUpdates[i]) continue;
+            const targetSheet = localSheets[i];
+            if (!targetSheet?.id) continue;
+
+            if (opCount >= 400) {
+              await batch.commit();
+              batch = writeBatch(db);
+              opCount = 0;
+            }
+
+            batch.update(doc(sheetsCollection, targetSheet.id), {
+              genre: targetSheet.genre || 'none',
+              order: targetSheet.order ?? i,
+              panels: targetSheet.panels
+            });
+            opCount++;
+          }
+          if (opCount > 0) {
+            await batch.commit();
+          }
+        } catch (err) {
+          console.error("Cloud save failed:", err);
+          saveFailed = true;
+          saveErrorMessage = err.message;
+        }
+      }
+
+      setIsProcessing(false);
+
+      // 重複使用されている画像を抽出
+      const duplicateImages = Object.entries(importSummary.imageUsageCount)
+        .filter(([_, count]) => count > 1)
+        .map(([name, count]) => `${name} (${count}回)`);
+
+      const report = [
+        `取り込みが完了しました。(全${importSummary.total}件)`,
+        `・指定通りの配置: ${importSummary.fixedSuccess}件`,
+        `・空きへの自動配置: ${importSummary.autoSuccess}件`,
+        importSummary.fixedFailed > 0 ? `・指定位置が重複または不足により移動: ${importSummary.fixedFailed}件` : '',
+        importSummary.autoFailed > 0 ? `・スペース不足で配置失敗: ${importSummary.autoFailed}件` : '',
+        '',
+        `【画像マッチング結果】`,
+        `・マッチング成功: ${importSummary.matchedImages.length}件`,
+        `・マッチング失敗: ${importSummary.notMatchedCodes.length}件`,
+        importSummary.notMatchedCodes.length > 0 ? `\n【マッチしなかったコード】` : '',
+        ...importSummary.notMatchedCodes.slice(0, 15).map(item =>
+          `・P${item.page} 行${item.csvRow}: ${item.code} (ベストマッチ: ${item.bestMatch}, スコア: ${item.bestScore})`
+        ),
+        importSummary.notMatchedCodes.length > 15 ? `...他 ${importSummary.notMatchedCodes.length - 15} 件` : '',
+        duplicateImages.length > 0 ? `\n【重複使用されている画像】` : '',
+        ...duplicateImages.slice(0, 10).map(item => `・${item}`),
+        duplicateImages.length > 10 ? `...他 ${duplicateImages.length - 10} 件` : '',
+        importSummary.details.length > 0 ? "\n【未配置の項目】\n" + importSummary.details.slice(0, 10).join('\n') + (importSummary.details.length > 10 ? '\n...他' : '') : ''
+      ].filter(Boolean).join('\n');
+
+      if (saveFailed) {
+        showAlert("保存に失敗したため、取り込み内容は反映されていません。\n" + saveErrorMessage);
+      } else {
+        showAlert(report, "インポート完了報告", true);
+      }
+
+    } catch (err) {
+      console.error(err);
+      showAlert('エラーが発生しました: ' + err.message);
     } finally {
       setIsProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
