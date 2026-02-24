@@ -3341,28 +3341,47 @@ export default function App() {
 
         const occupied = new Set();
 
-        // === コマ番号順流し込み配置 ===
-        // 全アイテムをコマ番号（追番order）順にソート
+        // === コマ番号順グリッド配置 ===
+        // コマ番号 N = 配置前の状態で occupied を除いた空きセルの N 番目（1始まり）
+        // 例: コマ1(1/8横 2コマ) → idx=0(X1Y1)配置 → 0,1 占有
+        //     コマ2(1/8横 2コマ) →残り空き1番=idx=2(X3Y1)配置 → 2,3 占有
+        //     コマ3              → 残り空き1番=idx=4(X1Y2)から
+
+        // コマ番号順ソート
         const allItems = [...update.contentItems].sort((a, b) => {
-          const aKey = a.frameNo > 0 ? a.frameNo : Number.MAX_SAFE_INTEGER;
-          const bKey = b.frameNo > 0 ? b.frameNo : Number.MAX_SAFE_INTEGER;
-          if (aKey !== bKey) return aKey - bKey;
-          return a.order - b.order;
+          const aKey = a.frameNo > 0 ? a.frameNo : (a.order > 0 ? a.order : Number.MAX_SAFE_INTEGER);
+          const bKey = b.frameNo > 0 ? b.frameNo : (b.order > 0 ? b.order : Number.MAX_SAFE_INTEGER);
+          return aKey - bKey;
         });
 
-        // アイテムを順番に、次の空き位置に配置
+        // occupied を除いた N 番目（1始まり）の空きスロット(0-15)を返す
+        const getNthFreeSlot = (n, occ) => {
+          let count = 0;
+          for (let idx = 0; idx < 16; idx++) {
+            if (!occ.has(idx) && ++count === n) return idx;
+          }
+          return -1;
+        };
+
         for (const item of allItems) {
           importSummary.total++;
           const { data } = item;
           const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
-          const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+
+          // コマ番号が有効なら「現在の空きスロット中の frameNo 番目」を起点にする
+          // サイズ分を配置できない位置だった場合は先頭空きにフォールバック
+          let resolvedStartIdx;
+          if (item.frameNo > 0) {
+            resolvedStartIdx = getNthFreeSlot(item.frameNo, occupied);
+            if (resolvedStartIdx === -1 || !canPlacePanelAt(resolvedStartIdx, rowSpan, colSpan, occupied)) {
+              resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+            }
+          } else {
+            resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+          }
 
           if (resolvedStartIdx === -1) {
-            if (item.isFixed) {
-              importSummary.fixedFailed++;
-            } else {
-              importSummary.autoFailed++;
-            }
+            importSummary.autoFailed++;
             importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
             continue;
           }
@@ -3375,77 +3394,7 @@ export default function App() {
             hidden: false
           };
           fillPanelArea(newPanels, resolvedStartIdx, rowSpan, colSpan, occupied);
-
-          if (item.isFixed) {
-            importSummary.fixedSuccess++;
-          } else {
-            importSummary.autoSuccess++;
-          }
-          continue;
-
-          let placed = false;
-
-          // グリッドを先頭（0）から順にスキャンして、配置可能な位置を探す
-          for (let startIdx = 0; startIdx < 16; startIdx++) {
-            // この位置が既に占有されていたらスキップ
-            if (occupied.has(startIdx)) continue;
-
-            const startRow = Math.floor(startIdx / 4);
-            const startCol = startIdx % 4;
-
-            // この位置から(rowSpan × colSpan)分配置できるか確認
-            let canPlace = true;
-
-            // 範囲外チェック
-            if (startRow + rowSpan > 4 || startCol + colSpan > 4) {
-              canPlace = false;
-            } else {
-              // 占有チェック
-              for (let r = 0; r < rowSpan; r++) {
-                for (let c = 0; c < colSpan; c++) {
-                  const idx = (startRow + r) * 4 + (startCol + c);
-                  if (occupied.has(idx)) {
-                    canPlace = false;
-                    break;
-                  }
-                }
-                if (!canPlace) break;
-              }
-            }
-
-            if (canPlace) {
-              // 配置実行
-              newPanels[startIdx] = {
-                ...newPanels[startIdx],
-                ...data,
-                rowSpan,
-                colSpan,
-                hidden: false
-              };
-
-              // 占有領域を登録
-              for (let r = 0; r < rowSpan; r++) {
-                for (let c = 0; c < colSpan; c++) {
-                  const idx = (startRow + r) * 4 + (startCol + c);
-                  occupied.add(idx);
-                  // 従属セル（開始位置以外）をhiddenにする
-                  if (idx !== startIdx) {
-                    newPanels[idx] = { ...newPanels[idx], hidden: true };
-                  }
-                }
-              }
-
-              placed = true;
-              importSummary.autoSuccess++;
-              break; // 配置完了、次のアイテムへ
-            }
-          }
-
-          if (!placed) {
-            // 配置できなかった
-            importSummary.autoFailed++;
-            importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
-          }
+          importSummary.autoSuccess++;
         }
 
         currentSheet.panels = newPanels;
