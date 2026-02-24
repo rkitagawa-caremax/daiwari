@@ -310,13 +310,17 @@ const AlertModal = React.memo(({ isOpen, message, onClose, title = "通知", clo
   return (
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm m3-animate-fade-in"
-      onClick={(e) => {
-        if (closeOnBackdrop && e.target === e.currentTarget) {
+      onClick={() => {
+        if (closeOnBackdrop) {
           onClose();
         }
       }}
     >
-      <div className="m3-dialog m3-animate-scale-in" style={{ background: 'var(--m3-surface-container-high)' }}>
+      <div
+        className="m3-dialog m3-animate-scale-in"
+        style={{ background: 'var(--m3-surface-container-high)' }}
+        onClick={(e) => e.stopPropagation()} // ダイアログ内クリックでは閉じないようにする（テキスト選択などのため）
+      >
         <div className="flex items-center gap-4 mb-6">
           <div className="p-3 rounded-full" style={{ background: 'var(--m3-primary-container)' }}>
             <Bell size={24} style={{ color: 'var(--m3-on-primary-container)' }} />
@@ -3354,48 +3358,28 @@ export default function App() {
 
         const occupied = new Set();
 
-        // === コマ番号順グリッド配置 ===
-        // コマ番号 N = 配置前の状態で occupied を除いた空きセルの N 番目（1始まり）
-        // 例: コマ1(1/8横 2コマ) → idx=0(X1Y1)配置 → 0,1 占有
-        //     コマ2(1/8横 2コマ) →残り空き1番=idx=2(X3Y1)配置 → 2,3 占有
-        //     コマ3              → 残り空き1番=idx=4(X1Y2)から
-
-        // コマ番号順ソート
+        // === コマ番号順 → 先頭空きスロットへ順次配置 ===
+        // コマ番号順にソートし、各コマを「前のコマ配置後の最初の空き位置」に配置する。
+        // 例: コマ1(1/8横 2コマ) → idx=0(X1Y1),1(X2Y1)占有
+        //     コマ2(1/8横 2コマ) → 次の空き=idx=2(X3Y1),3(X4Y1)占有
+        //     コマ3              → 次の空き=idx=4(X1Y2)から
         const allItems = [...update.contentItems].sort((a, b) => {
           const aKey = a.frameNo > 0 ? a.frameNo : (a.order > 0 ? a.order : Number.MAX_SAFE_INTEGER);
           const bKey = b.frameNo > 0 ? b.frameNo : (b.order > 0 ? b.order : Number.MAX_SAFE_INTEGER);
           return aKey - bKey;
         });
 
-        // occupied を除いた N 番目（1始まり）の空きスロット(0-15)を返す
-        const getNthFreeSlot = (n, occ) => {
-          let count = 0;
-          for (let idx = 0; idx < 16; idx++) {
-            if (!occ.has(idx) && ++count === n) return idx;
-          }
-          return -1;
-        };
-
         for (const item of allItems) {
           importSummary.total++;
           const { data } = item;
           const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
 
-          // コマ番号が有効なら「現在の空きスロット中の frameNo 番目」を起点にする
-          // サイズ分を配置できない位置だった場合は先頭空きにフォールバック
-          let resolvedStartIdx;
-          if (item.frameNo > 0) {
-            resolvedStartIdx = getNthFreeSlot(item.frameNo, occupied);
-            if (resolvedStartIdx === -1 || !canPlacePanelAt(resolvedStartIdx, rowSpan, colSpan, occupied)) {
-              resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
-            }
-          } else {
-            resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
-          }
+          // 前のコマ配置後の occupied を考慮し、先頭から最初に配置可能な位置を探す
+          const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
 
           if (resolvedStartIdx === -1) {
             importSummary.autoFailed++;
-            importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」を配置できませんでした。`);
+            importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」（${data.sizeType}）を配置できませんでした。`);
             continue;
           }
 
