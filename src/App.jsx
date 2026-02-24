@@ -3033,7 +3033,7 @@ export default function App() {
   // --- CSV Export Logic (for Pages) ---
   const handleExportCSV = () => {
     try {
-      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報'];
+      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報', '座標', 'コマID'];
       const rows = [];
 
       sheets.forEach((sheet, sheetIndex) => {
@@ -3042,7 +3042,7 @@ export default function App() {
         let visibleCounter = 0;
         let frameCounter = 0;
 
-        sheet.panels.forEach((panel) => {
+        sheet.panels.forEach((panel, panelIndex) => {
           if (panel.hidden) return;
           frameCounter++;
           const isSpecialDummy = panel.label === '埋草' || panel.label === 'タイトル';
@@ -3061,6 +3061,14 @@ export default function App() {
             textVal = `"${textVal.replace(/"/g, '""')}"`;
           }
 
+          // I列: グリッド座標 (X1Y1 〜 X4Y4)
+          const gridRow = Math.floor(panelIndex / 4) + 1; // 1始まり
+          const gridCol = (panelIndex % 4) + 1;           // 1始まり
+          const coordVal = `X${gridCol}Y${gridRow}`;
+
+          // J列: コマID（パネルデータに保持している値を出力）
+          const panelIdVal = panel.panelId || '';
+
           rows.push([
             genreLabel,
             pageNum,
@@ -3069,7 +3077,9 @@ export default function App() {
             codeVal,
             sizeVal,
             '',
-            textVal
+            textVal,
+            coordVal,
+            panelIdVal
           ].join(','));
         });
       });
@@ -3130,7 +3140,7 @@ export default function App() {
         const cols = parseCSVLine(row);
         if (cols.length < 6) continue;
 
-        // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 6:ダミーラベル種別, 7:テキスト情報
+        // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 6:ダミーラベル種別, 7:テキスト情報, 8:座標(無視), 9:コマID
         const genreLabel = cols[0];
         const pageNum = parseInt(cols[1], 10);
         const panelNumRaw = parseInt(cols[2], 10);
@@ -3145,6 +3155,8 @@ export default function App() {
         const isDummyMarker = cols[4] === 'ダミーコマ';
         const sizeVal = cols[5] || '1/16（1コマ）';
         const textVal = (cols[7] || '').trim();
+        // J列: コマID（台割には反映しない。介援隊コードに紐づけてデータとして保持）
+        const panelIdVal = (cols[9] || '').trim();
 
         const isFixed = !isNaN(frameNum) && frameNum > 0;
 
@@ -3288,7 +3300,8 @@ export default function App() {
             label: targetLabel,
             sizeType: sizeVal,
             text: textVal,
-            isText: isText
+            isText: isText,
+            panelId: panelIdVal || null  // J列から読み込んだコマID（台割には非表示）
           }
         });
       }
