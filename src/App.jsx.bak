@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -156,25 +156,6 @@ const normalizeCode = (str) => {
     .toUpperCase(); // 大文字統一
 };
 
-// UTF-8 BOM があれば UTF-8、なければ Shift-JIS として自動デコード
-const readFileAutoEncoding = (file) => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const buf = e.target.result;
-    const bytes = new Uint8Array(buf);
-    const encoding = (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
-      ? 'UTF-8' : 'Shift_JIS';
-    try {
-      const text = new TextDecoder(encoding).decode(buf).replace(/^\uFEFF/, '');
-      resolve(text);
-    } catch (err) {
-      reject(err);
-    }
-  };
-  reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
-  reader.readAsArrayBuffer(file);
-});
-
 // --- Size Definition Helper ---
 const getSizeType = (rowSpan, colSpan) => {
   if (rowSpan === 1 && colSpan === 1) return '1/16（1コマ）';
@@ -226,46 +207,6 @@ const getSpansFromSizeType = (sizeStr) => {
   return { r: 1, c: 1 };
 };
 
-// CSV表記ゆれ耐性版（NFKC正規化 + 縦横判定 + コマ数フォールバック）
-const getSpansFromSizeTypeRobust = (sizeStr) => {
-  if (!sizeStr) return { r: 1, c: 1 };
-
-  const normalized = String(sizeStr).normalize('NFKC').toLowerCase();
-  const s = normalized.replace(/\s+/g, '');
-  const hasVertical = /[\u7e26]|vertical/.test(s); // 縦
-  const hasHorizontal = /[\u6a2a]|horizontal/.test(s); // 横
-
-  if (s.includes('1/16')) return { r: 1, c: 1 };
-  if (s.includes('1/8')) return hasVertical ? { r: 2, c: 1 } : { r: 1, c: 2 };
-  if (s.includes('3/16')) return hasVertical ? { r: 3, c: 1 } : { r: 1, c: 3 };
-  if (s.includes('1/4')) {
-    if (hasVertical) return { r: 4, c: 1 };
-    if (hasHorizontal) return { r: 1, c: 4 };
-    return { r: 2, c: 2 };
-  }
-  if (s.includes('6/16')) return hasVertical ? { r: 3, c: 2 } : { r: 2, c: 3 };
-  if (s.includes('1/2')) return hasVertical ? { r: 4, c: 2 } : { r: 2, c: 4 };
-  if (s.includes('12/16')) return hasVertical ? { r: 4, c: 3 } : { r: 3, c: 4 };
-  if (s.includes('1p')) return { r: 4, c: 4 };
-
-  const countMatch = s.match(/(\d+)\s*コマ/);
-  const count = countMatch ? parseInt(countMatch[1], 10) : NaN;
-  if (count === 1) return { r: 1, c: 1 };
-  if (count === 2) return hasVertical ? { r: 2, c: 1 } : { r: 1, c: 2 };
-  if (count === 3) return hasVertical ? { r: 3, c: 1 } : { r: 1, c: 3 };
-  if (count === 4) {
-    if (hasVertical) return { r: 4, c: 1 };
-    if (hasHorizontal) return { r: 1, c: 4 };
-    return { r: 2, c: 2 };
-  }
-  if (count === 6) return hasVertical ? { r: 3, c: 2 } : { r: 2, c: 3 };
-  if (count === 8) return hasVertical ? { r: 4, c: 2 } : { r: 2, c: 4 };
-  if (count === 12) return hasVertical ? { r: 4, c: 3 } : { r: 3, c: 4 };
-  if (count === 16) return { r: 4, c: 4 };
-
-  return { r: 1, c: 1 };
-};
-
 // --- Utility: Compress Image ---
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
@@ -305,29 +246,18 @@ const compressImage = (file) => {
 // --- Components ---
 
 // メッセージ用モーダル (Alertの代わり) - Material 3 Style
-const AlertModal = React.memo(({ isOpen, message, onClose, title = "通知", closeOnBackdrop = false }) => {
+const AlertModal = React.memo(({ isOpen, message, onClose, title = "通知" }) => {
   if (!isOpen) return null;
   return (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm m3-animate-fade-in"
-      onClick={() => {
-        if (closeOnBackdrop) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        className="m3-dialog m3-animate-scale-in"
-        style={{ background: 'var(--m3-surface-container-high)' }}
-        onClick={(e) => e.stopPropagation()} // ダイアログ内クリックでは閉じないようにする（テキスト選択などのため）
-      >
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm m3-animate-fade-in" onClick={onClose}>
+      <div className="m3-dialog m3-animate-scale-in" style={{ background: 'var(--m3-surface-container-high)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-4 mb-6">
           <div className="p-3 rounded-full" style={{ background: 'var(--m3-primary-container)' }}>
             <Bell size={24} style={{ color: 'var(--m3-on-primary-container)' }} />
           </div>
           <h3 className="text-xl font-medium" style={{ color: 'var(--m3-on-surface)' }}>{title}</h3>
         </div>
-        <p className="text-sm mb-8 whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--m3-on-surface-variant)' }}>{message}</p>
+        <p className="text-sm mb-8 whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-y-auto" style={{ color: 'var(--m3-on-surface-variant)' }}>{message}</p>
         <div className="flex justify-end">
           <button
             onClick={onClose}
@@ -651,7 +581,7 @@ const ConfirmModal = React.memo(({ isOpen, message, onConfirm, onCancel }) => {
 });
 
 // Panel Component
-const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isSelected, onSelect, highlightEmpty, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById }) => {
+const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isSelected, onSelect, highlightEmpty, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales }) => {
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
@@ -708,7 +638,6 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
     // Normal Drop
     const type = e.dataTransfer.getData("type");
     const src = e.dataTransfer.getData("src");
-    const droppedImageId = e.dataTransfer.getData("imageId");
     let label = e.dataTransfer.getData("label");
     if (label === "null") label = null;
 
@@ -735,7 +664,6 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       onUpdate({
         ...data,
         image: src,
-        imageId: droppedImageId || null,
         label: label || null,
         code: code,
         isText: isText === "true",
@@ -748,7 +676,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
   };
 
   const handleDragStart = (e) => {
-    if (!resolvedImage && !data.label && !data.isText && !data.code) {
+    if (!data.image && !data.label && !data.isText && !data.code) {
       e.preventDefault();
       return;
     }
@@ -766,8 +694,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
     e.dataTransfer.dropEffect = "move";
   };
 
-  const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
-  const isEmpty = !resolvedImage && !data.label && !data.code && !data.isText;
+  const isEmpty = !data.image && !data.label && !data.code && !data.isText;
 
   const handleFocusTextarea = () => {
     if (textareaRef.current) {
@@ -807,7 +734,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       ref={panelRef}
       id={`panel-${sheetId}-${index}`}
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
-        ${(highlightEmpty && (!resolvedImage && (isEmpty || !!data.code))) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
+        ${(highlightEmpty && (!data.image && (isEmpty || !!data.code))) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
         ${!isEmpty && !isOverview ? 'cursor-grab active:cursor-grabbing' : ''}
         ${isSalesMode ? 'hover:ring-4 hover:z-40' : ''}
@@ -816,14 +743,14 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
         gridColumn: `span ${data.colSpan || 1}`,
         gridRow: `span ${data.rowSpan || 1}`,
         borderColor: 'var(--m3-outline-variant)',
-        backgroundColor: (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
+        backgroundColor: (highlightEmpty && (!data.image && (isEmpty || !!data.code)))
           ? 'var(--m3-error-container)'
           : isSalesMode && matchedSales
             ? 'var(--m3-secondary-container)'
-            : labelStyle.bg || 'var(--m3-surface)',
+            : 'var(--m3-surface)',
         '--tw-ring-color': isSelected
           ? 'var(--m3-primary)'
-          : (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
+          : (highlightEmpty && (!data.image && (isEmpty || !!data.code)))
             ? 'var(--m3-error)'
             : isSalesMode
               ? 'var(--m3-tertiary)'
@@ -838,8 +765,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       onClick={!isOverview ? onSelect : undefined}
     >
       {/* Image Layer */}
-      {resolvedImage && (
-        <img src={resolvedImage} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" />
+      {data.image && (
+        <img src={data.image} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" />
       )}
 
       {/* Sales Overlay Mode */}
@@ -871,8 +798,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       )}
 
       {/* Drop Placeholder */}
-      {!resolvedImage && (!data.code || (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))) && !data.label && !isOverview && (
-        <div className={`flex flex-col items-center justify-center transition-opacity duration-300 ${(highlightEmpty && (!resolvedImage && (isEmpty || !!data.code))) ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
+      {!data.image && (!data.code || (highlightEmpty && (!data.image && (isEmpty || !!data.code)))) && !data.label && !isOverview && (
+        <div className={`flex flex-col items-center justify-center transition-opacity duration-300 ${(highlightEmpty && (!data.image && (isEmpty || !!data.code))) ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
           <span className={`text-[10px] select-none font-bold`} style={{ color: (highlightEmpty && isEmpty) ? 'var(--m3-on-error-container)' : 'var(--m3-outline)' }}>
             {highlightEmpty && isEmpty ? '空き' : 'Drop Here'}
           </span>
@@ -939,11 +866,11 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       {/* Controls (Only in List Mode) */}
       {!isOverview && (
         <>
-          {(resolvedImage || data.label || data.isText || data.code) && isHovered && !isSalesMode && (
+          {(data.image || data.label || data.isText || data.code) && isHovered && !isSalesMode && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onUpdate({ ...data, image: null, imageId: null, label: null, code: null, isText: false, text: '' });
+                onUpdate({ ...data, image: null, label: null, code: null, isText: false, text: '' });
               }}
               className="absolute top-1.5 right-1.5 rounded-full p-1.5 shadow-lg border z-30 transition-all duration-300 transform hover:scale-110 active:scale-90"
               style={{ background: 'var(--m3-surface)', color: 'var(--m3-error)', borderColor: 'var(--m3-error)' }}
@@ -957,7 +884,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
   );
 });
 
-const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById }) => {
+const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales }) => {
   const genre = GENRES.find(g => g.id === sheet.genre) || GENRES[0];
 
   let visibleCounter = 0;
@@ -1024,7 +951,6 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
               salesData={salesData}
               onHoverSales={onHoverSales}
               onLeaveSales={onLeaveSales}
-              imageDataById={imageDataById}
             />
           );
         })}
@@ -1052,7 +978,7 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
 });
 
 // ... Sidebar Component ...
-const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded, onMoveToStock }) => {
+const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded }) => {
   const [activeTab, setActiveTab] = useState('stock');
   const [resizing, setResizing] = useState(false);
   const [statusGenreFilter, setStatusGenreFilter] = useState('all');
@@ -1124,19 +1050,6 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     }
   };
 
-  const handleDropToStock = (e) => {
-    e.preventDefault();
-    const moveSourceType = e.dataTransfer.getData("moveSourceType");
-    if (moveSourceType === "panel") {
-      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
-      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
-
-      if (sourceSheetId && !isNaN(sourceIndex)) {
-        onMoveToStock(sourceSheetId, sourceIndex);
-      }
-    }
-  };
-
   // 画像検索フィルタリング (配置済み画像を除外)
   const filteredImages = useMemo(() => {
     // 全シートで使用されている画像のSetを作成
@@ -1144,11 +1057,10 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     sheets.forEach(sheet => {
       sheet.panels.forEach(p => {
         if (p.image) usedImageSet.add(p.image);
-        if (p.imageId) usedImageSet.add(p.imageId);
       });
     });
 
-    let result = images.filter(img => !usedImageSet.has(img.data) && !usedImageSet.has(img.id));
+    let result = images.filter(img => !usedImageSet.has(img.data));
 
     if (!searchQuery) return result;
     const lowerQuery = searchQuery.toLowerCase();
@@ -1226,11 +1138,7 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
       <div className="flex-1 overflow-y-auto p-4 relative" style={{ background: 'var(--m3-surface-container-low)' }}>
 
         {activeTab === 'stock' && (
-          <div
-            className="space-y-6 min-h-full"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDropToStock}
-          >
+          <div className="space-y-6">
             <div className="space-y-2">
               <label
                 className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group"
@@ -1251,17 +1159,30 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                 {searchQuery ? '検索結果' : 'ライブラリ'}
                 <span className="px-2 py-0.5 rounded-full text-xs" style={{ background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' }}>{filteredImages.length}</span>
               </span>
-              <button
-                onClick={() => {
-                  setIsImageSelectionMode(!isImageSelectionMode);
-                  setSelectedImageIds(new Set());
-                }}
-                className={`p-2 rounded-full transition-all ${isImageSelectionMode ? 'bg-primary-container text-on-primary-container ring-1' : ''}`}
-                style={isImageSelectionMode ? { background: 'var(--m3-primary-container)', color: 'var(--m3-on-primary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
-                title="画像を選択して削除"
-              >
-                <CheckSquare size={20} />
-              </button>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => {
+                    if (filteredImages.length === 0) return;
+                    onBulkDeleteImages(filteredImages.map(i => i.id));
+                  }}
+                  disabled={filteredImages.length === 0}
+                  className="p-2 rounded-full transition-all hover:bg-red-50 text-red-500 disabled:opacity-30 disabled:hover:bg-transparent"
+                  title="リスト内の画像を全て削除"
+                >
+                  <Trash2 size={20} />
+                </button>
+                <button
+                  onClick={() => {
+                    setIsImageSelectionMode(!isImageSelectionMode);
+                    setSelectedImageIds(new Set());
+                  }}
+                  className={`p-2 rounded-full transition-all ${isImageSelectionMode ? 'bg-primary-container text-on-primary-container ring-1' : ''}`}
+                  style={isImageSelectionMode ? { background: 'var(--m3-primary-container)', color: 'var(--m3-on-primary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
+                  title="画像を選択して削除"
+                >
+                  <CheckSquare size={20} />
+                </button>
+              </div>
             </div>
 
             {isImageSelectionMode && (
@@ -1315,7 +1236,6 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                       return;
                     }
                     e.dataTransfer.setData("src", img.data);
-                    e.dataTransfer.setData("imageId", img.id);
                     e.dataTransfer.setData("type", "image");
                     e.dataTransfer.setData("name", img.name);
                   }}
@@ -1415,7 +1335,7 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                 .map((sheet, originalIndex) => ({ sheet, originalIndex }))
                 .filter(({ sheet }) => statusGenreFilter === 'all' || sheet.genre === statusGenreFilter)
                 .map(({ sheet, originalIndex }) => {
-                  const pureEmptyCount = sheet.panels.filter(p => !p.hidden && !p.image && !p.imageId && !p.label).length;
+                  const pureEmptyCount = sheet.panels.filter(p => !p.hidden && !p.image && !p.label).length;
                   const dummyCount = sheet.panels.filter(p => !p.hidden && p.label && p.label !== 'タイトル' && p.label !== '埋草' && p.label !== 'テキスト').length;
                   const totalEmpty = pureEmptyCount + dummyCount;
 
@@ -1679,7 +1599,7 @@ export default function App() {
   const [isMergeMode, setIsMergeMode] = useState(false);
   const [highlightEmpty, setHighlightEmpty] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
-  const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知', closeOnBackdrop: false });
+  const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知' });
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
@@ -1919,8 +1839,8 @@ export default function App() {
     });
   };
 
-  const showAlert = (message, title = "通知", closeOnBackdrop = false) => {
-    setAlertDialog({ isOpen: true, message, title, closeOnBackdrop });
+  const showAlert = (message, title = "通知") => {
+    setAlertDialog({ isOpen: true, message, title });
   };
 
   // --- Common CSV Parser ---
@@ -1948,155 +1868,123 @@ export default function App() {
     return result;
   };
 
-  const canPlacePanelAt = (startIdx, rowSpan, colSpan, occupied) => {
-    const startRow = Math.floor(startIdx / 4);
-    const startCol = startIdx % 4;
-    if (startRow + rowSpan > 4 || startCol + colSpan > 4) return false;
-
-    for (let r = 0; r < rowSpan; r++) {
-      for (let c = 0; c < colSpan; c++) {
-        const idx = (startRow + r) * 4 + (startCol + c);
-        if (occupied.has(idx)) return false;
-      }
-    }
-    return true;
-  };
-
-  const findFirstPlaceableIndex = (rowSpan, colSpan, occupied) => {
-    for (let startIdx = 0; startIdx < 16; startIdx++) {
-      if (occupied.has(startIdx)) continue;
-      if (canPlacePanelAt(startIdx, rowSpan, colSpan, occupied)) return startIdx;
-    }
-    return -1;
-  };
-
-  const fillPanelArea = (panels, startIdx, rowSpan, colSpan, occupied) => {
-    const startRow = Math.floor(startIdx / 4);
-    const startCol = startIdx % 4;
-
-    for (let r = 0; r < rowSpan; r++) {
-      for (let c = 0; c < colSpan; c++) {
-        const idx = (startRow + r) * 4 + (startCol + c);
-        occupied.add(idx);
-        if (idx !== startIdx) {
-          panels[idx] = { ...panels[idx], hidden: true };
-        }
-      }
-    }
-  };
-
   // --- Sales CSV Import Logic ---
-  const handleImportSalesCSV = async (file) => {
+  const handleImportSalesCSV = (file) => {
     setIsProcessing(true);
     setProgressMessage("売上データを解析中...");
-    try {
-      const text = await readFileAutoEncoding(file);
-      const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      const rows = normalizedText.split('\n');
 
-      const salesMap = {};
-      const startIndex = 2; // ヘッダー2行スキップ
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const rows = normalizedText.split('\n');
 
-      rows.slice(startIndex).forEach((row) => {
-        if (!row.trim()) return;
-        const cols = parseCSVLine(row);
+        const salesMap = {};
+        const startIndex = 2; // ヘッダー2行スキップ
 
-        if (cols.length <= 17) return;
+        rows.slice(startIndex).forEach((row) => {
+          if (!row.trim()) return;
+          const cols = parseCSVLine(row);
 
-        const rawCode = cols[3];
-        if (!rawCode) return;
-        const code = normalizeCode(rawCode);
+          if (cols.length <= 17) return;
 
-        const name = cols[1] || '';
-        const spec = cols[2] || '';
-        const countStr = cols[17].replace(/,/g, '');
-        const count = parseInt(countStr) || 0;
+          const rawCode = cols[3];
+          if (!rawCode) return;
+          const code = normalizeCode(rawCode);
 
-        if (!salesMap[code]) {
-          salesMap[code] = [];
-        }
-        salesMap[code].push({ name, spec, count });
-      });
+          const name = cols[1] || '';
+          const spec = cols[2] || '';
+          const countStr = cols[17].replace(/,/g, '');
+          const count = parseInt(countStr) || 0;
 
-      if (USE_LOCAL_STORAGE) {
-        try {
-          await idbHelper.setItem('salesData', salesMap);
-          setSalesData(salesMap);
-          setProgressMessage("完了しました");
-          setTimeout(() => {
-            setIsProcessing(false);
-            showAlert("売上データを取り込みました");
-            setIsSettingsOpen(false);
-          }, 500);
-        } catch (e) {
-          console.error("Failed to save sales data to IDB:", e);
-          showAlert("売上データの保存に失敗しました。");
-          setIsProcessing(false);
-        }
-        return;
-      }
-
-      // Chunking logic
-      setProgressMessage("データを保存中...");
-      const entries = Object.entries(salesMap);
-      const CHUNK_SIZE = 1000;
-      const chunks = [];
-
-      for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
-        const chunkEntries = entries.slice(i, i + CHUNK_SIZE);
-        const chunkData = Object.fromEntries(chunkEntries);
-        chunks.push(chunkData);
-      }
-
-      const batch = writeBatch(db);
-
-      const snapshot = await getDocs(salesChunksCollection);
-      snapshot.docs.forEach(d => batch.delete(d.ref));
-
-      chunks.forEach((chunk, index) => {
-        const docRef = doc(salesChunksCollection, `chunk_${index}`);
-        batch.set(docRef, {
-          items: JSON.stringify(chunk),
-          updatedAt: serverTimestamp(),
-          chunkIndex: index
+          if (!salesMap[code]) {
+            salesMap[code] = [];
+          }
+          salesMap[code].push({ name, spec, count });
         });
-      });
 
-      if (snapshot.size + chunks.length > 450) {
-        const deleteBatch = writeBatch(db);
-        snapshot.docs.forEach(d => deleteBatch.delete(d.ref));
-        await deleteBatch.commit();
-
-        for (let i = 0; i < chunks.length; i += 400) {
-          const writeBatchChunk = writeBatch(db);
-          chunks.slice(i, i + 400).forEach((chunk, idx) => {
-            const realIdx = i + idx;
-            const docRef = doc(salesChunksCollection, `chunk_${realIdx}`);
-            writeBatchChunk.set(docRef, {
-              items: JSON.stringify(chunk),
-              updatedAt: serverTimestamp()
-            });
-          });
-          await writeBatchChunk.commit();
+        if (USE_LOCAL_STORAGE) {
+          try {
+            await idbHelper.setItem('salesData', salesMap);
+            setSalesData(salesMap);
+            setProgressMessage("完了しました");
+            setTimeout(() => {
+              setIsProcessing(false);
+              showAlert("売上データを取り込みました");
+              setIsSettingsOpen(false);
+            }, 500);
+          } catch (e) {
+            console.error("Failed to save sales data to IDB:", e);
+            showAlert("売上データの保存に失敗しました。");
+            setIsProcessing(false);
+          }
+          return;
         }
-      } else {
-        await batch.commit();
+
+        // Chunking logic
+        setProgressMessage("データを保存中...");
+        const entries = Object.entries(salesMap);
+        const CHUNK_SIZE = 1000;
+        const chunks = [];
+
+        for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
+          const chunkEntries = entries.slice(i, i + CHUNK_SIZE);
+          const chunkData = Object.fromEntries(chunkEntries);
+          chunks.push(chunkData);
+        }
+
+        const batch = writeBatch(db);
+
+        const snapshot = await getDocs(salesChunksCollection);
+        snapshot.docs.forEach(d => batch.delete(d.ref));
+
+        chunks.forEach((chunk, index) => {
+          const docRef = doc(salesChunksCollection, `chunk_${index}`);
+          batch.set(docRef, {
+            items: JSON.stringify(chunk),
+            updatedAt: serverTimestamp(),
+            chunkIndex: index
+          });
+        });
+
+        if (snapshot.size + chunks.length > 450) {
+          const deleteBatch = writeBatch(db);
+          snapshot.docs.forEach(d => deleteBatch.delete(d.ref));
+          await deleteBatch.commit();
+
+          for (let i = 0; i < chunks.length; i += 400) {
+            const writeBatchChunk = writeBatch(db);
+            chunks.slice(i, i + 400).forEach((chunk, idx) => {
+              const realIdx = i + idx;
+              const docRef = doc(salesChunksCollection, `chunk_${realIdx}`);
+              writeBatchChunk.set(docRef, {
+                items: JSON.stringify(chunk),
+                updatedAt: serverTimestamp()
+              });
+            });
+            await writeBatchChunk.commit();
+          }
+        } else {
+          await batch.commit();
+        }
+
+        await setDoc(doc(settingsCollection, 'salesDataMeta'), {
+          updatedAt: serverTimestamp(),
+          totalItems: entries.length
+        });
+
+        showAlert("売上データを取り込みました！");
+        setIsSettingsOpen(false);
+
+      } catch (err) {
+        console.error(err);
+        showAlert("取り込みに失敗しました: " + err.message);
+      } finally {
+        setIsProcessing(false);
       }
-
-      await setDoc(doc(settingsCollection, 'salesDataMeta'), {
-        updatedAt: serverTimestamp(),
-        totalItems: entries.length
-      });
-
-      showAlert("売上データを取り込みました！");
-      setIsSettingsOpen(false);
-
-    } catch (err) {
-      console.error(err);
-      showAlert("取り込みに失敗しました: " + err.message);
-    } finally {
-      setIsProcessing(false);
-    }
+    };
+    reader.readAsText(file);
   };
 
   // --- Sales Hover Handler (Improved) ---
@@ -2307,7 +2195,6 @@ export default function App() {
     // Fix: Create independent objects for each panel to prevent reference sharing
     const defaultPanels = Array(16).fill(null).map(() => ({
       image: null,
-      imageId: null,
       text: '',
       label: null,
       code: null,
@@ -2369,13 +2256,12 @@ export default function App() {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
+    if (!panel.image && !panel.label && !panel.isText && !panel.code) return;
 
     if (USE_LOCAL_STORAGE) {
       const newTempItem = {
         id: idbHelper.generateId(),
         image: panel.image || null,
-        imageId: panel.imageId || null,
         label: panel.label || null,
         code: panel.code || null,
         text: panel.text || '',
@@ -2389,7 +2275,7 @@ export default function App() {
       // localStorageHelper.setItem('tempItems', newTempItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, label: null, code: null, text: '', isText: false };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2401,7 +2287,6 @@ export default function App() {
     const tempRef = doc(tempShelfCollection);
     batch.set(tempRef, {
       image: panel.image || null,
-      imageId: panel.imageId || null,
       label: panel.label || null,
       code: panel.code || null,
       text: panel.text || '',
@@ -2414,7 +2299,6 @@ export default function App() {
     updatedPanels[panelIndex] = {
       ...updatedPanels[panelIndex],
       image: null,
-      imageId: null,
       label: null,
       code: null,
       text: '',
@@ -2440,13 +2324,12 @@ export default function App() {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
+    if (!panel.image && !panel.label && !panel.isText && !panel.code) return;
 
     if (USE_LOCAL_STORAGE) {
       const newExcludedItem = {
         id: idbHelper.generateId(),
         image: panel.image || null,
-        imageId: panel.imageId || null,
         label: panel.label || null,
         code: panel.code || null,
         text: panel.text || '',
@@ -2460,7 +2343,7 @@ export default function App() {
       // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, label: null, code: null, text: '', isText: false };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2472,7 +2355,6 @@ export default function App() {
     const excludedRef = doc(excludedItemsCollection);
     batch.set(excludedRef, {
       image: panel.image || null,
-      imageId: panel.imageId || null,
       label: panel.label || null,
       code: panel.code || null,
       text: panel.text || '',
@@ -2485,7 +2367,6 @@ export default function App() {
     updatedPanels[panelIndex] = {
       ...updatedPanels[panelIndex],
       image: null,
-      imageId: null,
       label: null,
       code: null,
       text: '',
@@ -2538,25 +2419,6 @@ export default function App() {
         }
       }
     );
-  };
-
-  const handleMoveToStock = async (sheetId, panelIndex) => {
-    const sheet = sheets.find(s => s.id === sheetId);
-    if (!sheet) return;
-    const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
-
-    const updatedData = { ...panel, image: null, imageId: null, label: null, code: null, text: '', isText: false };
-
-    if (USE_LOCAL_STORAGE) {
-      const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: s.panels.map((p, i) => i === panelIndex ? updatedData : p) } : s);
-      setSheets(newSheets);
-      return;
-    }
-
-    await updateDoc(doc(sheetsCollection, sheetId), {
-      panels: sheet.panels.map((p, i) => i === panelIndex ? updatedData : p)
-    });
   };
 
   const handleExportExcludedCSV = () => {
@@ -2638,7 +2500,7 @@ export default function App() {
 
         newPanels[fromIndex] = {
           ...newPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false
+          image: null, label: null, code: null, text: '', isText: false
         };
 
         newPanels[toIndex] = {
@@ -2659,7 +2521,7 @@ export default function App() {
 
         newFromPanels[fromIndex] = {
           ...newFromPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false
+          image: null, label: null, code: null, text: '', isText: false
         };
 
         const newToPanels = [...toSheet.panels];
@@ -2691,7 +2553,7 @@ export default function App() {
 
       newPanels[fromIndex] = {
         ...newPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false
+        image: null, label: null, code: null, text: '', isText: false
       };
 
       newPanels[toIndex] = {
@@ -2711,7 +2573,7 @@ export default function App() {
 
       newFromPanels[fromIndex] = {
         ...newFromPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false
+        image: null, label: null, code: null, text: '', isText: false
       };
       batch.update(doc(sheetsCollection, fromSheetId), { panels: newFromPanels });
 
@@ -2988,7 +2850,6 @@ export default function App() {
                 panels: s.panels.map(p => ({
                   ...p,
                   image: null,
-                  imageId: null,
                   label: null,
                   code: null,
                   text: '',
@@ -3022,7 +2883,6 @@ export default function App() {
           const newPanels = sheet.panels.map(p => ({
             ...p,
             image: null,
-            imageId: null,
             label: null,
             code: null,
             text: '',
@@ -3073,7 +2933,7 @@ export default function App() {
   // --- CSV Export Logic (for Pages) ---
   const handleExportCSV = () => {
     try {
-      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報', '座標', 'コマID'];
+      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報'];
       const rows = [];
 
       sheets.forEach((sheet, sheetIndex) => {
@@ -3082,7 +2942,7 @@ export default function App() {
         let visibleCounter = 0;
         let frameCounter = 0;
 
-        sheet.panels.forEach((panel, panelIndex) => {
+        sheet.panels.forEach((panel) => {
           if (panel.hidden) return;
           frameCounter++;
           const isSpecialDummy = panel.label === '埋草' || panel.label === 'タイトル';
@@ -3101,14 +2961,6 @@ export default function App() {
             textVal = `"${textVal.replace(/"/g, '""')}"`;
           }
 
-          // I列: グリッド座標 (X1Y1 〜 X4Y4)
-          const gridRow = Math.floor(panelIndex / 4) + 1; // 1始まり
-          const gridCol = (panelIndex % 4) + 1;           // 1始まり
-          const coordVal = `X${gridCol}Y${gridRow}`;
-
-          // J列: コマID（パネルデータに保持している値を出力）
-          const panelIdVal = panel.panelId || '';
-
           rows.push([
             genreLabel,
             pageNum,
@@ -3117,9 +2969,7 @@ export default function App() {
             codeVal,
             sizeVal,
             '',
-            textVal,
-            coordVal,
-            panelIdVal
+            textVal
           ].join(','));
         });
       });
@@ -3139,8 +2989,41 @@ export default function App() {
     }
   };
 
+  // Helper for size calculation
+  const getSpansFromSizeType = (sizeType) => {
+    // デフォルトは1x1
+    let r = 1;
+    let c = 1;
+
+    if (!sizeType) return { r, c };
+
+    if (sizeType.includes('1/16') || sizeType.includes('1コマ')) {
+      r = 1; c = 1;
+    } else if (sizeType.includes('1/8') || sizeType.includes('2コマ')) {
+      // 縦長か横長か不明だが、一旦横長(1x2)とするケースが多い
+      // 必要に応じて判定ロジックを追加
+      r = 1; c = 2;
+    } else if (sizeType.includes('1/4') || sizeType.includes('4コマ')) {
+      r = 2; c = 2;
+    } else if (sizeType.includes('1/2') || sizeType.includes('8コマ')) {
+      r = 2; c = 4; // 横半分
+    } else if (sizeType.includes('全面') || sizeType.includes('16コマ')) {
+      r = 4; c = 4;
+    }
+
+    return { r, c };
+  };
+
   // --- CSV Import Logic (for Pages) ---
-  const handleImportCSV = async (e) => {
+  const handleImportCSV = (e) => {
+    // Helper: 全角数字を半角に変換
+    const toHalfWidthNum = (str) => {
+      if (!str) return '';
+      return str.toString()
+        .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+        .trim();
+    };
+
     const file = e.target.files[0];
     if (!file) return;
 
@@ -3149,110 +3032,88 @@ export default function App() {
     setProgressMax(100);
     setProgressMessage("ファイルを読み込んでいます...");
 
-    try {
-      const text = await readFileAutoEncoding(file);
-      const rows = text.split(/\r\n|\n|\r/);
-      const headers = parseCSVLine(rows[0]);
-      if (headers.length < 6) throw new Error('CSVの形式が正しくありません。カラム数が足りません。');
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const rows = text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
+        const headers = parseCSVLine(rows[0]);
+        if (headers.length < 6) throw new Error('CSVの形式が正しくありません。カラム数が足りません。');
 
-      setProgressMessage("データを解析中...");
+        setProgressMessage("データを解析中...");
 
-      const searchableImages = images.map(img => ({
-        id: img.id,
-        name: img.name || '',
-        lowerName: (img.name || '').toLowerCase(),
-        data: img.data
-      }));
+        const searchableImages = images.map(img => ({
+          name: img.name || '',
+          lowerName: (img.name || '').toLowerCase(),
+          data: img.data
+        }));
 
-      const sheetUpdates = {};
-      let maxPageIndex = -1;
+        const sheetUpdates = {};
+        let maxPageIndex = -1;
 
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row.trim()) continue;
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row.trim()) continue;
 
-        if (i % 50 === 0) {
-          setProgressValue(Math.floor((i / rows.length) * 100));
-          setProgressMessage(`解析中... (${i}/${rows.length}行)`);
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-
-        const cols = parseCSVLine(row);
-        if (cols.length < 6) continue;
-
-        // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 6:ダミーラベル種別, 7:テキスト情報, 8:座標(無視), 9:コマID
-        const genreLabel = cols[0];
-        const pageNum = parseInt(cols[1], 10);
-        const panelNumRaw = parseInt(cols[2], 10);
-        const frameNumRaw = parseInt(cols[3], 10);
-        const frameNum = (!isNaN(frameNumRaw) && frameNumRaw > 0)
-          ? frameNumRaw
-          : ((!isNaN(panelNumRaw) && panelNumRaw > 0) ? panelNumRaw : NaN);
-        const panelNum = (!isNaN(panelNumRaw) && panelNumRaw > 0)
-          ? panelNumRaw
-          : ((!isNaN(frameNumRaw) && frameNumRaw > 0) ? frameNumRaw : NaN);
-        const codeVal = cols[4] === 'ダミーコマ' ? '' : (cols[4] || '').trim();
-        const isDummyMarker = cols[4] === 'ダミーコマ';
-        const sizeVal = cols[5] || '1/16（1コマ）';
-        const textVal = (cols[7] || '').trim();
-        // J列: コマID（台割には反映しない。介援隊コードに紐づけてデータとして保持）
-        const panelIdVal = (cols[9] || '').trim();
-
-        const isFixed = !isNaN(frameNum) && frameNum > 0;
-
-        // ページ番号は必須。コマ番号か追番のどちらかは必須。
-        if (isNaN(pageNum)) continue;
-        if (!isFixed && (isNaN(panelNum))) continue;
-
-        const pageIndex = pageNum - 1;
-        if (pageIndex > maxPageIndex) maxPageIndex = pageIndex;
-
-        if (!sheetUpdates[pageIndex]) {
-          sheetUpdates[pageIndex] = { genre: null, contentItems: [] };
-        }
-
-        const genreObj = GENRES.find(g => g.label === genreLabel);
-        if (genreObj) sheetUpdates[pageIndex].genre = genreObj.id;
-
-        let targetImageId = null;
-        let targetCode = null;
-        let targetLabel = null;
-        let isText = false;
-
-        // 優先順位: 1.テキスト 2.ダミーコマ 3.コード(画像)
-        if (textVal) {
-          targetLabel = 'テキスト';
-          isText = true;
-        } else if (isDummyMarker) {
-          // ダミーコマの種別を判定: cols[6]（ラベル列）、cols[5]（コマ数列）、cols[4]の順にチェック
-          const dummyLabel = (cols[6] || '').trim();
-          if (dummyLabel === 'タイトル' || sizeVal.includes('タイトル')) {
-            targetLabel = 'タイトル';
-          } else if (dummyLabel === '埋草' || sizeVal.includes('埋草')) {
-            targetLabel = '埋草';
-          } else if (dummyLabel === '新規商品' || dummyLabel === '新規商品未確定') {
-            targetLabel = '新規商品未確定';
-          } else if (dummyLabel) {
-            // CSVに記載のあるラベルをそのまま使用
-            targetLabel = dummyLabel;
-          } else {
-            targetLabel = '新規商品未確定';
+          if (i % 50 === 0) {
+            setProgressValue(Math.floor((i / rows.length) * 100));
+            setProgressMessage(`解析中... (${i}/${rows.length}行)`);
+            await new Promise(resolve => setTimeout(resolve, 0));
           }
-        } else if (codeVal) {
-          const normalizedToken = codeVal.normalize('NFKC').replace(/[-\s]/g, '').toUpperCase();
-          const isLikelyProductCode = /^[A-Z]{1,2}\d{3,5}$/.test(normalizedToken);
 
-          if (!isLikelyProductCode) {
-            targetLabel = codeVal;
-          } else {
-            targetCode = normalizedToken;
+          const cols = parseCSVLine(row);
+          console.log(`[CSV Debug] Row ${i}:`, cols); // Debug Output
+          if (cols.length < 6) continue;
+
+          // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 7:テキスト情報
+          const genreLabel = cols[0];
+          const pageNum = parseInt(toHalfWidthNum(cols[1]), 10);
+          const panelNum = parseInt(toHalfWidthNum(cols[2]), 10);
+          let frameNum = parseInt(toHalfWidthNum(cols[3]), 10);
+          console.log(`[CSV Debug] FrameNum Raw: "${cols[3]}", Normalized: "${toHalfWidthNum(cols[3])}", Parsed: ${frameNum}`); // Debug Output
+          const codeVal = cols[4] === 'ダミーコマ' ? '' : (cols[4] || '').trim();
+          const isDummyMarker = cols[4] === 'ダミーコマ';
+          const sizeVal = cols[5] || '1/16（1コマ）';
+          const textVal = (cols[7] || '').trim();
+
+          const isFixed = !isNaN(frameNum) && frameNum > 0;
+
+          // ページ番号は必須。コマ番号か追番のどちらかは必須。
+          if (isNaN(pageNum)) continue;
+          if (!isFixed && (isNaN(panelNum))) continue;
+
+          const pageIndex = pageNum - 1;
+          if (pageIndex > maxPageIndex) maxPageIndex = pageIndex;
+
+          if (!sheetUpdates[pageIndex]) {
+            sheetUpdates[pageIndex] = { genre: null, contentItems: [] };
+          }
+
+          const genreObj = GENRES.find(g => g.label === genreLabel);
+          if (genreObj) sheetUpdates[pageIndex].genre = genreObj.id;
+
+          let targetImage = null;
+          let targetCode = null;
+          let targetLabel = null;
+          let isText = false;
+
+          // 優先順位: 1.テキスト 2.ダミーコマ 3.コード(画像)
+          if (textVal) {
+            targetLabel = 'テキスト';
+            isText = true;
+          } else if (isDummyMarker) {
+            targetLabel = '新規商品未確定';
+            if (sizeVal.includes('タイトル')) targetLabel = 'タイトル';
+            else if (sizeVal.includes('埋草')) targetLabel = '埋草';
+          } else if (codeVal) {
+            targetCode = codeVal;
 
             // Helper: 全角英数字を半角に変換＆小文字化
             const normalizeStr = (s) => {
               return s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).toLowerCase();
             };
 
-            const searchCode = normalizeStr(targetCode);
+            const searchCode = normalizeStr(codeVal);
             const isNumericSearch = /^\d+$/.test(searchCode);
             const searchNum = isNumericSearch ? parseInt(searchCode, 10) : null;
 
@@ -3307,259 +3168,296 @@ export default function App() {
             // スコア90以上のマッチングのみを有効とする
             const MATCH_THRESHOLD = 90;
             if (bestMatchImg && bestScore >= MATCH_THRESHOLD) {
-              targetImageId = bestMatchImg.id || null;
+              targetImage = bestMatchImg.data;
               // マッチング詳細を記録
               sheetUpdates[pageIndex].matchDetails = sheetUpdates[pageIndex].matchDetails || [];
               sheetUpdates[pageIndex].matchDetails.push({
-                code: targetCode,
+                code: codeVal,
                 imageName: bestMatchImg.name,
                 score: bestScore,
                 csvRow: i + 1
               });
-            } else if (targetCode) {
+            } else if (codeVal) {
               // マッチしなかったコードを記録
               sheetUpdates[pageIndex].unmatchedCodes = sheetUpdates[pageIndex].unmatchedCodes || [];
               sheetUpdates[pageIndex].unmatchedCodes.push({
-                code: targetCode,
+                code: codeVal,
                 csvRow: i + 1,
                 bestScore: bestScore,
                 bestMatch: bestMatchImg ? bestMatchImg.name : 'なし'
               });
             }
           }
+
+          sheetUpdates[pageIndex].contentItems.push({
+            isFixed: isFixed,
+            frameIndex: isFixed ? frameNum - 1 : -1,
+            order: isNaN(panelNum) ? 9999 : panelNum,
+            data: {
+              code: targetCode,
+              image: targetImage,
+              label: targetLabel,
+              sizeType: sizeVal,
+              text: textVal,
+              isText: isText
+            }
+          });
         }
 
-        sheetUpdates[pageIndex].contentItems.push({
-          isFixed: isFixed,
-          frameNo: isFixed ? frameNum : -1,
-          order: isNaN(panelNum) ? 9999 : panelNum,
-          data: {
-            code: targetCode,
-            image: null,
-            imageId: targetImageId,
-            label: targetLabel,
-            sizeType: sizeVal,
-            text: textVal,
-            isText: isText,
-            panelId: panelIdVal || null  // J列から読み込んだコマID（台割には非表示）
-          }
-        });
-      }
+        // ページを不足分作成
+        const finalPageCount = maxPageIndex + 1;
+        let localSheets = [...sheets];
 
-      // ページを不足分作成
-      const finalPageCount = maxPageIndex + 1;
-      let localSheets = [...sheets];
+        // 足りないページをパディング
+        while (localSheets.length < finalPageCount) {
+          localSheets.push({
+            id: idbHelper.generateId(),
+            createdAt: { seconds: Date.now() / 1000 },
+            genre: 'none',
+            panels: Array(16).fill(null).map(() => ({
+              image: null, text: '', label: null, code: null,
+              rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
+            }))
+          });
+        }
 
-      // 足りないページをパディング
-      while (localSheets.length < finalPageCount) {
-        localSheets.push({
-          id: idbHelper.generateId(),
-          createdAt: { seconds: Date.now() / 1000 },
-          genre: 'none',
-          panels: Array(16).fill(null).map(() => ({
-            image: null, imageId: null, text: '', label: null, code: null,
+        const importSummary = {
+          total: 0,
+          fixedSuccess: 0,
+          fixedFailed: 0,
+          autoSuccess: 0,
+          autoFailed: 0,
+          details: [],
+          matchedImages: [], // マッチした画像の詳細
+          notMatchedCodes: [], // マッチしなかったコードのリスト
+          imageUsageCount: {} // 画像の使用回数
+        };
+
+        setProgressMax(finalPageCount);
+        for (let i = 0; i < finalPageCount; i++) {
+          const update = sheetUpdates[i];
+          if (!update) continue;
+
+          setProgressValue(i + 1);
+          setProgressMessage(`${i + 1}ページ目を再構成中...`);
+          await new Promise(resolve => setTimeout(resolve, 0));
+
+          const currentSheet = { ...localSheets[i] };
+          if (update.genre) currentSheet.genre = update.genre;
+
+          const newPanels = Array(16).fill(null).map(() => ({
+            image: null, text: '', label: null, code: null,
             rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
-          }))
-        });
-      }
+          }));
 
-      const importSummary = {
-        total: 0,
-        fixedSuccess: 0,
-        fixedFailed: 0,
-        autoSuccess: 0,
-        autoFailed: 0,
-        details: [],
-        matchedImages: [], // マッチした画像の詳細
-        notMatchedCodes: [], // マッチしなかったコードのリスト
-        imageUsageCount: {} // 画像の使用回数
-      };
+          const occupied = new Set();
 
-      setProgressMax(finalPageCount);
-      for (let i = 0; i < finalPageCount; i++) {
-        const update = sheetUpdates[i];
-        if (!update) continue;
+          // === Phase 1: 固定配置 (コマ番号指定あり) ===
+          const fixedItems = update.contentItems.filter(item => item.isFixed).sort((a, b) => a.order - b.order);
+          console.log(`[Phase 1] Page ${i + 1}: Found ${fixedItems.length} fixed items`); // Debug Output
+          for (const item of fixedItems) {
+            importSummary.total++;
+            const { data, frameIndex } = item;
+            const { r: rowSpan, c: colSpan } = getSpansFromSizeType(data.sizeType);
+            console.log(`[Phase 1] Placing item: Code=${data.code}, Frame=${frameIndex}, Size=${data.sizeType}, Span=${rowSpan}x${colSpan}`); // Debug Output
 
-        setProgressValue(i + 1);
-        setProgressMessage(`${i + 1}ページ目を再構成中...`);
-        await new Promise(resolve => setTimeout(resolve, 0));
-
-        const currentSheet = { ...localSheets[i] };
-        if (update.genre) currentSheet.genre = update.genre;
-
-        const newPanels = Array(16).fill(null).map(() => ({
-          image: null, imageId: null, text: '', label: null, code: null,
-          rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
-        }));
-
-        const occupied = new Set();
-
-        // === コマ番号順 → 先頭空きスロットへ順次配置 ===
-        // コマ番号順にソートし、各コマを「前のコマ配置後の最初の空き位置」に配置する。
-        // 例: コマ1(1/8横 2コマ) → idx=0(X1Y1),1(X2Y1)占有
-        //     コマ2(1/8横 2コマ) → 次の空き=idx=2(X3Y1),3(X4Y1)占有
-        //     コマ3              → 次の空き=idx=4(X1Y2)から
-        const allItems = [...update.contentItems].sort((a, b) => {
-          const aKey = a.frameNo > 0 ? a.frameNo : (a.order > 0 ? a.order : Number.MAX_SAFE_INTEGER);
-          const bKey = b.frameNo > 0 ? b.frameNo : (b.order > 0 ? b.order : Number.MAX_SAFE_INTEGER);
-          return aKey - bKey;
-        });
-
-        for (const item of allItems) {
-          importSummary.total++;
-          const { data } = item;
-          const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
-
-          // 前のコマ配置後の occupied を考慮し、先頭から最初に配置可能な位置を探す
-          const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
-
-          if (resolvedStartIdx === -1) {
-            importSummary.autoFailed++;
-            importSummary.details.push(`・ページ ${i + 1}: 「${data.code || data.label || data.text || '不明'}」（${data.sizeType}）を配置できませんでした。`);
-            continue;
-          }
-
-          newPanels[resolvedStartIdx] = {
-            ...newPanels[resolvedStartIdx],
-            ...data,
-            rowSpan,
-            colSpan,
-            hidden: false
-          };
-          fillPanelArea(newPanels, resolvedStartIdx, rowSpan, colSpan, occupied);
-          importSummary.autoSuccess++;
-        }
-
-        currentSheet.panels = newPanels;
-        localSheets[i] = currentSheet;
-
-        // マッチング詳細をサマリーに集約
-        if (update.matchDetails) {
-          update.matchDetails.forEach(detail => {
-            importSummary.matchedImages.push({
-              page: i + 1,
-              ...detail
-            });
-            // 画像使用回数をカウント
-            const imgKey = detail.imageName;
-            importSummary.imageUsageCount[imgKey] = (importSummary.imageUsageCount[imgKey] || 0) + 1;
-          });
-        }
-
-        // 未マッチコードをサマリーに集約
-        if (update.unmatchedCodes) {
-          update.unmatchedCodes.forEach(unmatched => {
-            importSummary.notMatchedCodes.push({
-              page: i + 1,
-              ...unmatched
-            });
-          });
-        }
-      }
-
-      let saveFailed = false;
-      let saveErrorMessage = '';
-
-      if (!USE_LOCAL_STORAGE) {
-        for (let i = 0; i < localSheets.length; i++) {
-          const sheet = localSheets[i];
-          if (!sheet?.id || !String(sheet.id).startsWith('local_')) continue;
-
-          const newRef = await addDoc(sheetsCollection, {
-            genre: sheet.genre || 'none',
-            order: sheet.order ?? i,
-            panels: sheet.panels || [],
-            createdAt: serverTimestamp()
-          });
-          localSheets[i] = { ...sheet, id: newRef.id };
-        }
-      }
-
-      if (USE_LOCAL_STORAGE) {
-        setSheets(localSheets);
-        try {
-          await idbHelper.setItem('sheets', localSheets);
-          setProgressMessage("保存完了");
-        } catch (err) {
-          console.error("IDB save failed:", err);
-          showAlert("自動保存に失敗しました。");
-          saveFailed = true;
-          saveErrorMessage = err.message;
-        }
-      } else {
-        setSheets(localSheets);
-        try {
-          let batch = writeBatch(db);
-          let opCount = 0;
-          for (let i = 0; i < finalPageCount; i++) {
-            if (!sheetUpdates[i]) continue;
-            const targetSheet = localSheets[i];
-            if (!targetSheet?.id) continue;
-
-            if (opCount >= 400) {
-              await batch.commit();
-              batch = writeBatch(db);
-              opCount = 0;
+            // 指定位置が範囲外ならスキップ
+            if (frameIndex < 0 || frameIndex >= 16) {
+              importSummary.fixedFailed++;
+              importSummary.details.push(`・ページ ${i + 1}: 位置指定不正 (${frameIndex + 1}) - ${data.code || data.label || '不明'}`);
+              continue;
             }
 
-            batch.update(doc(sheetsCollection, targetSheet.id), {
-              genre: targetSheet.genre || 'none',
-              order: targetSheet.order ?? i,
-              panels: targetSheet.panels
+            // 占有チェック
+            let canPlace = true;
+            const startRow = Math.floor(frameIndex / 4);
+            const startCol = frameIndex % 4;
+
+            // 範囲外チェック (サイズ超過)
+            if (startRow + rowSpan > 4 || startCol + colSpan > 4) {
+              canPlace = false;
+            } else {
+              // 既に占有されているかチェック
+              for (let r = 0; r < rowSpan; r++) {
+                for (let c = 0; c < colSpan; c++) {
+                  const idx = (startRow + r) * 4 + (startCol + c);
+                  if (occupied.has(idx)) {
+                    canPlace = false;
+                    break;
+                  }
+                }
+                if (!canPlace) break;
+              }
+            }
+
+            if (canPlace) {
+              // 配置実行
+              newPanels[frameIndex] = {
+                ...newPanels[frameIndex],
+                ...data,
+                rowSpan,
+                colSpan,
+                hidden: false
+              };
+
+              // 占有領域を登録
+              for (let r = 0; r < rowSpan; r++) {
+                for (let c = 0; c < colSpan; c++) {
+                  const idx = (startRow + r) * 4 + (startCol + c);
+                  occupied.add(idx);
+                  if (idx !== frameIndex) {
+                    newPanels[idx] = { ...newPanels[idx], hidden: true };
+                  }
+                }
+              }
+              importSummary.fixedSuccess++;
+            } else {
+              // 配置失敗
+              importSummary.fixedFailed++;
+              importSummary.details.push(`・ページ ${i + 1}: 配置失敗(重複/範囲外) - ${data.code || data.label || '不明'} (コマ:${frameIndex + 1})`);
+            }
+          }
+
+          // === Phase 2: 自動配置 (指定なし) ===
+          const autoItems = update.contentItems.filter(item => !item.isFixed).sort((a, b) => a.order - b.order);
+          for (const item of autoItems) {
+            importSummary.total++;
+            const { data } = item;
+            const { r: rowSpan, c: colSpan } = getSpansFromSizeType(data.sizeType);
+
+            let placed = false;
+
+            // グリッドを先頭から順にスキャン
+            for (let startIdx = 0; startIdx < 16; startIdx++) {
+              if (occupied.has(startIdx)) continue;
+
+              const startRow = Math.floor(startIdx / 4);
+              const startCol = startIdx % 4;
+              let canPlace = true;
+
+              if (startRow + rowSpan > 4 || startCol + colSpan > 4) {
+                canPlace = false;
+              } else {
+                for (let r = 0; r < rowSpan; r++) {
+                  for (let c = 0; c < colSpan; c++) {
+                    const idx = (startRow + r) * 4 + (startCol + c);
+                    if (occupied.has(idx)) {
+                      canPlace = false;
+                      break;
+                    }
+                  }
+                  if (!canPlace) break;
+                }
+              }
+
+              if (canPlace) {
+                newPanels[startIdx] = {
+                  ...newPanels[startIdx],
+                  ...data,
+                  rowSpan,
+                  colSpan,
+                  hidden: false
+                };
+                // 占有登録
+                for (let r = 0; r < rowSpan; r++) {
+                  for (let c = 0; c < colSpan; c++) {
+                    const idx = (startRow + r) * 4 + (startCol + c);
+                    occupied.add(idx);
+                    if (idx !== startIdx) {
+                      newPanels[idx] = { ...newPanels[idx], hidden: true };
+                    }
+                  }
+                }
+                placed = true;
+                importSummary.autoSuccess++;
+                break;
+              }
+            }
+
+            if (!placed) {
+              importSummary.autoFailed++;
+              importSummary.details.push(`・ページ ${i + 1}: 自動配置失敗(空きなし) - ${data.code || data.label || '不明'}`);
+            }
+          }
+
+          currentSheet.panels = newPanels;
+          localSheets[i] = currentSheet;
+
+          // マッチング詳細をサマリーに集約
+          if (update.matchDetails) {
+            update.matchDetails.forEach(detail => {
+              importSummary.matchedImages.push({
+                page: i + 1,
+                ...detail
+              });
+              // 画像使用回数をカウント
+              const imgKey = detail.imageName;
+              importSummary.imageUsageCount[imgKey] = (importSummary.imageUsageCount[imgKey] || 0) + 1;
             });
-            opCount++;
           }
-          if (opCount > 0) {
-            await batch.commit();
+
+          // 未マッチコードをサマリーに集約
+          if (update.unmatchedCodes) {
+            update.unmatchedCodes.forEach(unmatched => {
+              importSummary.notMatchedCodes.push({
+                page: i + 1,
+                ...unmatched
+              });
+            });
           }
-        } catch (err) {
-          console.error("Cloud save failed:", err);
-          saveFailed = true;
-          saveErrorMessage = err.message;
         }
+
+        if (USE_LOCAL_STORAGE) {
+          setSheets(localSheets);
+          try {
+            await idbHelper.setItem('sheets', localSheets);
+            setProgressMessage("保存完了");
+          } catch (err) {
+            console.error("IDB save failed:", err);
+            showAlert("自動保存に失敗しました。");
+          }
+        }
+
+        setIsProcessing(false);
+
+        // 重複使用されている画像を抽出
+        const duplicateImages = Object.entries(importSummary.imageUsageCount)
+          .filter(([_, count]) => count > 1)
+          .map(([name, count]) => `${name} (${count}回)`);
+
+        const report = [
+          `取り込みが完了しました。(全${importSummary.total}件)`,
+          `・指定通りの配置: ${importSummary.fixedSuccess}件`,
+          `・空きへの自動配置: ${importSummary.autoSuccess}件`,
+          importSummary.fixedFailed > 0 ? `・指定位置が重複または不足により移動: ${importSummary.fixedFailed}件` : '',
+          importSummary.autoFailed > 0 ? `・スペース不足で配置失敗: ${importSummary.autoFailed}件` : '',
+          '',
+          `【画像マッチング結果】`,
+          `・マッチング成功: ${importSummary.matchedImages.length}件`,
+          `・マッチング失敗: ${importSummary.notMatchedCodes.length}件`,
+          importSummary.notMatchedCodes.length > 0 ? `\n【マッチしなかったコード】` : '',
+          ...importSummary.notMatchedCodes.slice(0, 15).map(item =>
+            `・P${item.page} 行${item.csvRow}: ${item.code} (ベストマッチ: ${item.bestMatch}, スコア: ${item.bestScore})`
+          ),
+          importSummary.notMatchedCodes.length > 15 ? `...他 ${importSummary.notMatchedCodes.length - 15} 件` : '',
+          duplicateImages.length > 0 ? `\n【重複使用されている画像】` : '',
+          ...duplicateImages.slice(0, 10).map(item => `・${item}`),
+          duplicateImages.length > 10 ? `...他 ${duplicateImages.length - 10} 件` : '',
+          importSummary.details.length > 0 ? "\n【未配置の項目】\n" + importSummary.details.slice(0, 10).join('\n') + (importSummary.details.length > 10 ? '\n...他' : '') : ''
+        ].filter(Boolean).join('\n');
+
+        showAlert(report, "インポート完了報告");
+
+      } catch (err) {
+        console.error(err);
+        showAlert('エラーが発生しました: ' + err.message);
+      } finally {
+        setIsProcessing(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
-
-      setIsProcessing(false);
-
-      // 重複使用されている画像を抽出
-      const duplicateImages = Object.entries(importSummary.imageUsageCount)
-        .filter(([_, count]) => count > 1)
-        .map(([name, count]) => `${name} (${count}回)`);
-
-      const report = [
-        `取り込みが完了しました。(全${importSummary.total}件)`,
-        `・指定通りの配置: ${importSummary.fixedSuccess}件`,
-        `・空きへの自動配置: ${importSummary.autoSuccess}件`,
-        importSummary.fixedFailed > 0 ? `・指定位置が重複または不足により移動: ${importSummary.fixedFailed}件` : '',
-        importSummary.autoFailed > 0 ? `・スペース不足で配置失敗: ${importSummary.autoFailed}件` : '',
-        '',
-        `【画像マッチング結果】`,
-        `・マッチング成功: ${importSummary.matchedImages.length}件`,
-        `・マッチング失敗: ${importSummary.notMatchedCodes.length}件`,
-        importSummary.notMatchedCodes.length > 0 ? `\n【マッチしなかったコード】` : '',
-        ...importSummary.notMatchedCodes.slice(0, 15).map(item =>
-          `・P${item.page} 行${item.csvRow}: ${item.code} (ベストマッチ: ${item.bestMatch}, スコア: ${item.bestScore})`
-        ),
-        importSummary.notMatchedCodes.length > 15 ? `...他 ${importSummary.notMatchedCodes.length - 15} 件` : '',
-        duplicateImages.length > 0 ? `\n【重複使用されている画像】` : '',
-        ...duplicateImages.slice(0, 10).map(item => `・${item}`),
-        duplicateImages.length > 10 ? `...他 ${duplicateImages.length - 10} 件` : '',
-        importSummary.details.length > 0 ? "\n【未配置の項目】\n" + importSummary.details.slice(0, 10).join('\n') + (importSummary.details.length > 10 ? '\n...他' : '') : ''
-      ].filter(Boolean).join('\n');
-
-      if (saveFailed) {
-        showAlert("保存に失敗したため、取り込み内容は反映されていません。\n" + saveErrorMessage);
-      } else {
-        showAlert(report, "インポート完了報告", true);
-      }
-
-    } catch (err) {
-      console.error(err);
-      showAlert('エラーが発生しました: ' + err.message);
-    } finally {
-      setIsProcessing(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+    };
+    reader.onerror = () => { showAlert("ファイルの読み込みに失敗しました"); setIsProcessing(false); };
+    reader.readAsText(file);
   };
 
   const displaySheets = useMemo(() => {
@@ -3567,16 +3465,6 @@ export default function App() {
     if (viewMode === 'single' && activeSheetId) result = result.filter(s => s.id === activeSheetId);
     return result;
   }, [sheets, genreFilter, viewMode, activeSheetId]);
-
-  const imageDataById = useMemo(() => {
-    const map = {};
-    images.forEach((img) => {
-      if (img?.id && img?.data) {
-        map[img.id] = img.data;
-      }
-    });
-    return map;
-  }, [images]);
 
   const currentList = useMemo(() => {
     return genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
@@ -3838,7 +3726,6 @@ export default function App() {
           onDeleteFromExcluded={handleDeleteFromExcluded}
           onExportExcludedCSV={handleExportExcludedCSV}
           onBulkDeleteExcluded={handleBulkDeleteExcluded}
-          onMoveToStock={handleMoveToStock}
         />
 
         <div
@@ -3908,7 +3795,7 @@ export default function App() {
             </div>
 
             <div className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}>
-              {displaySheets.map((sheet) => {
+              {displaySheets.map((sheet, idx) => {
                 const isPageSelected = selectedSheetIds.has(sheet.id);
                 return (
                   <div
@@ -3967,7 +3854,6 @@ export default function App() {
                           salesData={salesData}
                           onHoverSales={handleHoverSales}
                           onLeaveSales={handleLeaveSales}
-                          imageDataById={imageDataById}
                         />
                       </div>
                     </div>
@@ -4006,7 +3892,6 @@ export default function App() {
         isOpen={alertDialog.isOpen}
         message={alertDialog.message}
         title={alertDialog.title}
-        closeOnBackdrop={alertDialog.closeOnBackdrop}
         onClose={() => setAlertDialog({ ...alertDialog, isOpen: false })}
       />
 
