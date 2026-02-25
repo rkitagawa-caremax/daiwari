@@ -719,6 +719,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
     const isText = e.dataTransfer.getData("isText");
     const fromTempId = e.dataTransfer.getData("fromTempId");
     const fromExcludedId = e.dataTransfer.getData("fromExcludedId");
+    const droppedPanelId = e.dataTransfer.getData("panelId");
 
     if (src) {
       let code = droppedCode || null;
@@ -741,7 +742,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
         isText: isText === "true",
         text: initialText,
         fromTempId: fromTempId || null,
-        fromExcludedId: fromExcludedId || null
+        fromExcludedId: fromExcludedId || null,
+        panelId: droppedPanelId || null
       });
       setLocalText(initialText);
     }
@@ -1525,6 +1527,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                         e.dataTransfer.setData("label", item.label || "");
                         e.dataTransfer.setData("code", item.code || "");
                         e.dataTransfer.setData("fromExcludedId", item.id);
+                        if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
+                        if (item.panelId) e.dataTransfer.setData("panelId", item.panelId);
                       }}
                     >
                       <div className="w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
@@ -1595,6 +1599,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                     e.dataTransfer.setData("label", item.label || "");
                     e.dataTransfer.setData("code", item.code || "");
                     e.dataTransfer.setData("fromTempId", item.id);
+                    if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
+                    if (item.panelId) e.dataTransfer.setData("panelId", item.panelId);
                   }}
                 >
                   {item.image ? (
@@ -2380,6 +2386,7 @@ export default function App() {
         code: panel.code || null,
         text: panel.text || '',
         isText: panel.isText || false,
+        panelId: panel.panelId || null,
         originalName: "退避アイテム",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -2389,7 +2396,7 @@ export default function App() {
       // localStorageHelper.setItem('tempItems', newTempItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2406,6 +2413,7 @@ export default function App() {
       code: panel.code || null,
       text: panel.text || '',
       isText: panel.isText || false,
+      panelId: panel.panelId || null,
       originalName: "退避アイテム",
       createdAt: serverTimestamp()
     });
@@ -2418,7 +2426,8 @@ export default function App() {
       label: null,
       code: null,
       text: '',
-      isText: false
+      isText: false,
+      panelId: null
     };
     const sheetRef = doc(sheetsCollection, sheetId);
     batch.update(sheetRef, { panels: updatedPanels });
@@ -2451,6 +2460,7 @@ export default function App() {
         code: panel.code || null,
         text: panel.text || '',
         isText: panel.isText || false,
+        panelId: panel.panelId || null,
         originalName: "掲載除外",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -2460,7 +2470,7 @@ export default function App() {
       // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2477,6 +2487,7 @@ export default function App() {
       code: panel.code || null,
       text: panel.text || '',
       isText: panel.isText || false,
+      panelId: panel.panelId || null,
       originalName: "掲載除外",
       createdAt: serverTimestamp()
     });
@@ -2489,7 +2500,8 @@ export default function App() {
       label: null,
       code: null,
       text: '',
-      isText: false
+      isText: false,
+      panelId: null
     };
     const sheetRef = doc(sheetsCollection, sheetId);
     batch.update(sheetRef, { panels: updatedPanels });
@@ -2546,7 +2558,7 @@ export default function App() {
     const panel = sheet.panels[panelIndex];
     if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
 
-    const updatedData = { ...panel, image: null, imageId: null, label: null, code: null, text: '', isText: false };
+    const updatedData = { ...panel, image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null };
 
     if (USE_LOCAL_STORAGE) {
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: s.panels.map((p, i) => i === panelIndex ? updatedData : p) } : s);
@@ -2638,16 +2650,18 @@ export default function App() {
 
         newPanels[fromIndex] = {
           ...newPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false
+          image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
         };
 
         newPanels[toIndex] = {
           ...newPanels[toIndex],
           image: dataToMove.image,
+          imageId: dataToMove.imageId,
           label: dataToMove.label,
           code: dataToMove.code,
           text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText
+          isText: !!dataToMove.isText,
+          panelId: dataToMove.panelId
         };
 
         const newSheets = sheets.map(s => s.id === fromSheetId ? { ...s, panels: newPanels } : s);
@@ -2659,17 +2673,19 @@ export default function App() {
 
         newFromPanels[fromIndex] = {
           ...newFromPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false
+          image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
         };
 
         const newToPanels = [...toSheet.panels];
         newToPanels[toIndex] = {
           ...newToPanels[toIndex],
           image: dataToMove.image,
+          imageId: dataToMove.imageId,
           label: dataToMove.label,
           code: dataToMove.code,
           text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText
+          isText: !!dataToMove.isText,
+          panelId: dataToMove.panelId
         };
 
         const newSheets = sheets.map(s => {
@@ -2691,16 +2707,18 @@ export default function App() {
 
       newPanels[fromIndex] = {
         ...newPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false
+        image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
       };
 
       newPanels[toIndex] = {
         ...newPanels[toIndex],
         image: dataToMove.image,
+        imageId: dataToMove.imageId,
         label: dataToMove.label,
         code: dataToMove.code,
         text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-        isText: !!dataToMove.isText
+        isText: !!dataToMove.isText,
+        panelId: dataToMove.panelId
       };
 
       const sheetRef = doc(sheetsCollection, fromSheetId);
@@ -2711,7 +2729,7 @@ export default function App() {
 
       newFromPanels[fromIndex] = {
         ...newFromPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false
+        image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
       };
       batch.update(doc(sheetsCollection, fromSheetId), { panels: newFromPanels });
 
@@ -2719,10 +2737,12 @@ export default function App() {
       newToPanels[toIndex] = {
         ...newToPanels[toIndex],
         image: dataToMove.image,
+        imageId: dataToMove.imageId,
         label: dataToMove.label,
         code: dataToMove.code,
         text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-        isText: !!dataToMove.isText
+        isText: !!dataToMove.isText,
+        panelId: dataToMove.panelId
       };
       batch.update(doc(sheetsCollection, toSheetId), { panels: newToPanels });
     }
