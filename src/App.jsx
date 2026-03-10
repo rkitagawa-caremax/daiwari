@@ -155,6 +155,11 @@ const FREE_LABEL_COLORS = [
   { bg: '#60a5fa', border: '#2563eb', text: '#ffffff' }, // blue
   { bg: '#f472b6', border: '#db2777', text: '#ffffff' }, // pink
   { bg: '#a78bfa', border: '#7c3aed', text: '#ffffff' }, // purple
+  { bg: '#fb7185', border: '#e11d48', text: '#ffffff' }, // rose
+  { bg: '#22d3ee', border: '#0891b2', text: '#ffffff' }, // cyan
+  { bg: '#4ade80', border: '#15803d', text: '#ffffff' }, // green
+  { bg: '#f97316', border: '#c2410c', text: '#ffffff' }, // orange
+  { bg: '#94a3b8', border: '#475569', text: '#ffffff' }, // slate
 ];
 const FREE_LABEL_HALF_WIDTH_PX = 44;
 const FREE_LABEL_HALF_HEIGHT_PX = 20;
@@ -181,6 +186,57 @@ const isPanelDataEqual = (a, b) => {
       continue;
     }
     if (av !== bv) return false;
+  }
+  return true;
+};
+
+const hashString = (value = '') => {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+};
+
+const normalizeStockImageEntry = (item, imageDataById = {}) => {
+  if (!item) return null;
+  const resolvedData = item.data || item.image || (item.imageId ? imageDataById[item.imageId] : null);
+  if (!resolvedData) return null;
+
+  const stableId = item.id || item.imageId || `legacy-${hashString(resolvedData)}`;
+  return {
+    id: stableId,
+    name: item.name || item.originalName || item.code || `stock-${stableId}.png`,
+    data: resolvedData,
+    createdAt: item.createdAt || { seconds: Date.now() / 1000 }
+  };
+};
+
+const normalizeStockImages = (items = [], imageDataById = {}) => {
+  const normalized = [];
+  const seenIds = new Set();
+  const seenData = new Set();
+
+  items.forEach((item) => {
+    const next = normalizeStockImageEntry(item, imageDataById);
+    if (!next) return;
+    if (seenIds.has(next.id) || seenData.has(next.data)) return;
+    seenIds.add(next.id);
+    seenData.add(next.data);
+    normalized.push(next);
+  });
+
+  return normalized;
+};
+
+const isSameStockImageList = (a = [], b = []) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if ((left?.id || null) !== (right?.id || null)) return false;
+    if ((left?.data || null) !== (right?.data || null)) return false;
+    if ((left?.name || null) !== (right?.name || null)) return false;
   }
   return true;
 };
@@ -465,6 +521,50 @@ const SettingsModal = React.memo(({ isOpen, onClose, onImportSalesCSV, salesData
   );
 });
 
+const HiddenImportModal = React.memo(({ isOpen, onClose, onOpenPageCsvImport, onOpenSalesCsvImport }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[85] flex items-center justify-center bg-black/45 backdrop-blur-sm m3-animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="m3-dialog w-[420px] overflow-hidden p-0 m3-animate-scale-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-5 border-b flex justify-between items-center" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
+          <h3 className="text-lg font-medium flex items-center gap-2" style={{ color: 'var(--m3-on-surface)' }}>
+            <Upload size={18} />
+            取込メニュー
+          </h3>
+          <button onClick={onClose} className="m3-icon-btn">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-3" style={{ background: 'var(--m3-surface-container-high)' }}>
+          <button
+            onClick={onOpenPageCsvImport}
+            className="w-full m3-btn-tonal flex items-center justify-center gap-2"
+          >
+            <FileText size={16} />
+            台割CSVを取り込む
+          </button>
+
+          <button
+            onClick={onOpenSalesCsvImport}
+            className="w-full m3-btn-tonal flex items-center justify-center gap-2"
+          >
+            <TrendingUp size={16} />
+            販売数量CSVを取り込む
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 // 売上詳細ポップアップ
 const SalesPopup = React.memo(({ data, position, onMouseEnter, onMouseLeave }) => {
   const popupRef = useRef(null);
@@ -695,7 +795,9 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
+  const [labelDrafts, setLabelDrafts] = useState({});
   const isFocusedRef = useRef(false);
+  const editingLabelIdRef = useRef(null);
   const panelRef = useRef(null);
 
 
@@ -712,6 +814,21 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
       setLocalText(data.text || '');
     }
   }, [data.text]);
+
+  useEffect(() => {
+    const labels = data.freeLabels || (data.freeText ? [{ id: 'legacy', text: data.freeText, x: 50, y: 50, colorIndex: 0 }] : []);
+    setLabelDrafts((prev) => {
+      const next = {};
+      labels.forEach((label) => {
+        if (editingLabelIdRef.current === label.id && prev[label.id] !== undefined) {
+          next[label.id] = prev[label.id];
+        } else {
+          next[label.id] = label.text || '';
+        }
+      });
+      return next;
+    });
+  }, [data.freeLabels, data.freeText]);
 
 
 
@@ -765,6 +882,10 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
 
     const fileName = e.dataTransfer.getData("name");
     const isText = e.dataTransfer.getData("isText");
+    const hasTextPayload = e.dataTransfer.getData("hasTextPayload") === "1";
+    const transferredText = hasTextPayload
+      ? e.dataTransfer.getData("textPayload")
+      : e.dataTransfer.getData("text");
 
     let fromTempId = e.dataTransfer.getData("fromTempId");
     if (fromTempId === "null" || fromTempId === "undefined" || !fromTempId) fromTempId = null;
@@ -782,7 +903,9 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
         }
       }
 
-      const initialText = isText === "true" ? (data.text || "テキストを入力") : "";
+      const initialText = isText === "true"
+        ? ((hasTextPayload || transferredText !== "") ? transferredText : (data.text || "テキストを入力"))
+        : "";
 
       onUpdate({
         ...data,
@@ -805,11 +928,12 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
       return;
     }
 
+    const currentText = textareaRef.current ? textareaRef.current.value : localText;
     e.dataTransfer.setData("moveSourceType", "panel");
     e.dataTransfer.setData("sourceSheetId", sheetId);
     e.dataTransfer.setData("sourceIndex", index);
     // 編集中のテキストも転送データに含める
-    e.dataTransfer.setData("textData", localText);
+    e.dataTransfer.setData("textData", currentText || "");
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -1008,6 +1132,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
 
         return labels.map((label, i) => {
           const color = FREE_LABEL_COLORS[label.colorIndex % FREE_LABEL_COLORS.length];
+          const draftText = labelDrafts[label.id] ?? label.text ?? '';
           return (
             <div
               key={label.id}
@@ -1024,14 +1149,22 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
                     color: '#334155', // slate-700
                     '--tw-ring-color': color.border
                   }}
-                  value={label.text || ''}
+                  value={draftText}
                   onChange={(e) => {
+                    const nextText = e.target.value;
+                    setLabelDrafts((prev) => ({ ...prev, [label.id]: nextText }));
+                  }}
+                  onFocus={() => { editingLabelIdRef.current = label.id; }}
+                  onBlur={(e) => {
+                    const committedText = (e.target.value || '').toString();
+                    editingLabelIdRef.current = null;
+                    if (committedText === (label.text || '')) return;
                     const newLabels = [...labels];
-                    newLabels[i] = { ...label, text: e.target.value };
+                    newLabels[i] = { ...label, text: committedText };
                     onUpdate({ ...data, freeLabels: newLabels, freeText: null });
                   }}
                   placeholder="入力"
-                  rows={Math.max(1, (label.text || '').split('\n').length)}
+                  rows={Math.max(1, draftText.split('\n').length)}
                 />
                 {!isOverview && (
                   <button
@@ -1346,9 +1479,10 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     if (moveSourceType === "panel") {
       const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
       const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
+      const movedText = e.dataTransfer.getData("textData");
 
       if (sourceSheetId && !isNaN(sourceIndex)) {
-        onMoveToTemp(sourceSheetId, sourceIndex);
+        onMoveToTemp(sourceSheetId, sourceIndex, movedText);
       }
     }
   };
@@ -1371,9 +1505,10 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     if (moveSourceType === "panel") {
       const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
       const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
+      const movedText = e.dataTransfer.getData("textData");
 
       if (sourceSheetId && !isNaN(sourceIndex)) {
-        onMoveToExcluded(sourceSheetId, sourceIndex);
+        onMoveToExcluded(sourceSheetId, sourceIndex, movedText);
       }
     }
   };
@@ -1766,11 +1901,16 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                         className="group relative border border-rose-100 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex flex-col items-center transition-all"
                         draggable
                         onDragStart={(e) => {
+                          const payloadText = typeof item.text === 'string' ? item.text : '';
                           e.dataTransfer.setData("src", resolvedImg || "");
                           e.dataTransfer.setData("type", "image");
                           e.dataTransfer.setData("name", item.originalName || "excluded");
                           e.dataTransfer.setData("label", item.label || "");
                           e.dataTransfer.setData("code", item.code || "");
+                          e.dataTransfer.setData("isText", item.isText ? "true" : "false");
+                          e.dataTransfer.setData("hasTextPayload", "1");
+                          e.dataTransfer.setData("textPayload", payloadText);
+                          e.dataTransfer.setData("text", payloadText);
                           e.dataTransfer.setData("fromExcludedId", item.id);
                           if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
                         }}
@@ -1840,11 +1980,16 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                     className="group relative border border-slate-200 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center min-h-[80px] transition-all"
                     draggable
                     onDragStart={(e) => {
+                      const payloadText = typeof item.text === 'string' ? item.text : '';
                       e.dataTransfer.setData("src", resolvedImg || "");
                       e.dataTransfer.setData("type", "image");
                       e.dataTransfer.setData("name", item.originalName || "temp");
                       e.dataTransfer.setData("label", item.label || "");
                       e.dataTransfer.setData("code", item.code || "");
+                      e.dataTransfer.setData("isText", item.isText ? "true" : "false");
+                      e.dataTransfer.setData("hasTextPayload", "1");
+                      e.dataTransfer.setData("textPayload", payloadText);
+                      e.dataTransfer.setData("text", payloadText);
                       e.dataTransfer.setData("fromTempId", item.id);
                       if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
                     }}
@@ -1936,6 +2081,9 @@ export default function App() {
   const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知', closeOnBackdrop: false });
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
+  const logoTapCountRef = useRef(0);
+  const logoTapTimeoutRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
 
@@ -2007,11 +2155,24 @@ export default function App() {
             localStorage.setItem('daiwari_migrated_to_idb', 'true');
           }
 
+          const loadedImages = Array.isArray(savedImages) ? savedImages : [];
+          const loadedImageDataById = {};
+          loadedImages.forEach((img) => {
+            if (img?.id && (img?.data || img?.image)) {
+              loadedImageDataById[img.id] = img.data || img.image;
+            }
+          });
+          const normalizedSavedImages = normalizeStockImages(loadedImages, loadedImageDataById);
+
           setSheets(savedSheets || []);
-          setImages(savedImages || []);
+          setImages(normalizedSavedImages);
           setTempItems(savedTempItems || []);
           setExcludedItems(savedExcludedItems || []);
           if (savedSalesData) setSalesData(savedSalesData);
+
+          if (!isSameStockImageList(loadedImages, normalizedSavedImages)) {
+            await idbHelper.setItem('images', normalizedSavedImages);
+          }
 
           setIsDataLoaded(true);
         } catch (err) {
@@ -2100,6 +2261,30 @@ export default function App() {
   }, [viewMode]);
 
   useEffect(() => {
+    return () => {
+      if (logoTapTimeoutRef.current) {
+        clearTimeout(logoTapTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDataLoaded || images.length === 0) return;
+
+    const imageDataMap = {};
+    images.forEach((img) => {
+      if (img?.id && (img?.data || img?.image)) {
+        imageDataMap[img.id] = img.data || img.image;
+      }
+    });
+
+    const normalizedImages = normalizeStockImages(images, imageDataMap);
+    if (!isSameStockImageList(images, normalizedImages)) {
+      setImages(normalizedImages);
+    }
+  }, [images, isDataLoaded]);
+
+  useEffect(() => {
     // 詳細単一表示以外ではラベル配置モードを自動解除
     if (viewMode !== 'single' && isLabelSelectionMode) {
       setIsLabelSelectionMode(false);
@@ -2133,7 +2318,14 @@ export default function App() {
 
     const unsubscribeImages = onSnapshot(imagesCollection, (snapshot) => {
       const loadedImages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setImages(loadedImages);
+      const loadedImageDataById = {};
+      loadedImages.forEach((img) => {
+        if (img?.id && (img?.data || img?.image)) {
+          loadedImageDataById[img.id] = img.data || img.image;
+        }
+      });
+      const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
+      setImages(normalizedLoadedImages);
     }, (err) => console.error("Image Sync Error", err));
 
     const unsubscribeTemp = onSnapshot(tempShelfCollection, (snapshot) => {
@@ -2645,7 +2837,7 @@ export default function App() {
 
   // --- Temp & Excluded Logic (Restored) ---
 
-  const handleMoveToTemp = async (sheetId, panelIndex) => {
+  const handleMoveToTemp = async (sheetId, panelIndex, movedText) => {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
@@ -2658,7 +2850,7 @@ export default function App() {
         imageId: panel.imageId || null,
         label: panel.label || null,
         code: panel.code || null,
-        text: panel.text || '',
+        text: movedText !== undefined ? movedText : (panel.text || ''),
         isText: panel.isText || false,
         originalName: "退避アイテム",
         createdAt: { seconds: Date.now() / 1000 }
@@ -2684,7 +2876,7 @@ export default function App() {
       imageId: panel.imageId || null,
       label: panel.label || null,
       code: panel.code || null,
-      text: panel.text || '',
+      text: movedText !== undefined ? movedText : (panel.text || ''),
       isText: panel.isText || false,
       originalName: "退避アイテム",
       createdAt: serverTimestamp()
@@ -2716,7 +2908,7 @@ export default function App() {
     await deleteDoc(doc(tempShelfCollection, id));
   };
 
-  const handleMoveToExcluded = async (sheetId, panelIndex) => {
+  const handleMoveToExcluded = async (sheetId, panelIndex, movedText) => {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
@@ -2729,7 +2921,7 @@ export default function App() {
         imageId: panel.imageId || null,
         label: panel.label || null,
         code: panel.code || null,
-        text: panel.text || '',
+        text: movedText !== undefined ? movedText : (panel.text || ''),
         isText: panel.isText || false,
         originalName: "掲載除外",
         createdAt: { seconds: Date.now() / 1000 }
@@ -2755,7 +2947,7 @@ export default function App() {
       imageId: panel.imageId || null,
       label: panel.label || null,
       code: panel.code || null,
-      text: panel.text || '',
+      text: movedText !== undefined ? movedText : (panel.text || ''),
       isText: panel.isText || false,
       originalName: "掲載除外",
       createdAt: serverTimestamp()
@@ -2855,15 +3047,6 @@ export default function App() {
     }
     if (sanitizedData.fromExcludedId) {
       if (USE_LOCAL_STORAGE) {
-        // 除外リストから復帰する際、画像を未配置（ストック）に戻す
-        const itemToRestore = excludedItems.find(item => item.id === sanitizedData.fromExcludedId);
-        if (itemToRestore) {
-          // 画像データがある場合はimagesに追加
-          setImages(prev => [...prev, itemToRestore]);
-          // 自動保存useEffectが処理するのでここでの保存は必須ではないが、即時反映のため
-          // imagesの保存は省略可(state更新でtriggerされる)
-        }
-
         const newExcludedItems = excludedItems.filter(item => item.id !== sanitizedData.fromExcludedId);
         setExcludedItems(newExcludedItems);
         // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-saveに任せる
@@ -3278,14 +3461,13 @@ export default function App() {
           const sheet = sheets.find(s => s.id === id);
           if (sheet) {
             sheet.panels.forEach(p => {
-              if (p.image) {
+              const resolvedImage = p.image || (p.imageId ? imageDataById?.[p.imageId] : null);
+              if (resolvedImage) {
+                const recoveredId = idbHelper.generateId();
                 recoveredImages.push({
-                  id: idbHelper.generateId(),
-                  image: p.image,
-                  label: p.label,
-                  code: p.code,
-                  text: p.text,
-                  isText: p.isText,
+                  id: recoveredId,
+                  name: p.code ? `${p.code}.png` : `recovered-${recoveredId}.png`,
+                  data: resolvedImage,
                   createdAt: { seconds: Date.now() / 1000 }
                 });
               }
@@ -3312,7 +3494,7 @@ export default function App() {
             return s;
           });
 
-          setImages(prev => [...prev, ...recoveredImages]);
+          setImages(prev => normalizeStockImages([...prev, ...recoveredImages]));
           setSheets(newSheets);
           // localStorageHelper.setItem('sheets', newSheets); // Auto-save handles this
           setSelectedSheetIds(new Set());
@@ -3325,7 +3507,11 @@ export default function App() {
         // Recovered images to Firestore
         recoveredImages.forEach(img => {
           const ref = doc(imagesCollection);
-          batch.set(ref, { ...img, createdAt: serverTimestamp() });
+          batch.set(ref, {
+            name: img.name,
+            data: img.data,
+            createdAt: serverTimestamp()
+          });
         });
 
         selectedSheetIds.forEach(id => {
@@ -3955,6 +4141,40 @@ export default function App() {
     );
   }, [viewMode, activeSheetId, sheets, activeSheetLabelCount, sheetsCollection, requestConfirm, showAlert]);
 
+  const handleLogoSecretTap = useCallback(() => {
+    logoTapCountRef.current += 1;
+
+    if (logoTapTimeoutRef.current) {
+      clearTimeout(logoTapTimeoutRef.current);
+    }
+
+    logoTapTimeoutRef.current = setTimeout(() => {
+      logoTapCountRef.current = 0;
+    }, 1500);
+
+    if (logoTapCountRef.current >= 5) {
+      logoTapCountRef.current = 0;
+      if (logoTapTimeoutRef.current) {
+        clearTimeout(logoTapTimeoutRef.current);
+        logoTapTimeoutRef.current = null;
+      }
+      setIsHiddenImportModalOpen(true);
+    }
+  }, []);
+
+  const openPageCsvImportFromHiddenMenu = useCallback(() => {
+    setIsHiddenImportModalOpen(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  }, []);
+
+  const openSalesCsvImportFromHiddenMenu = useCallback(() => {
+    setIsHiddenImportModalOpen(false);
+    setIsSettingsOpen(true);
+  }, []);
+
   // --- Render ---
   // --- Render ---
   if (!isAuthenticated) return <AuthGate onAuthenticated={handleAuthenticated} defaultAppId={appId} />;
@@ -3966,11 +4186,16 @@ export default function App() {
       <div className="h-20 flex items-center justify-between px-6 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
         <div className="flex items-center gap-4 flex-shrink-0">
           <div className="flex items-center">
-            <div className="p-0.5 bg-white shadow-sm" style={{ borderRadius: 'var(--m3-shape-corner-md)' }}>
+            <div
+              className="p-0.5 bg-white shadow-sm cursor-pointer select-none"
+              style={{ borderRadius: 'var(--m3-shape-corner-md)' }}
+              onClick={handleLogoSecretTap}
+              title="台"
+            >
               <img
                 src="/logo.jpg"
                 alt="台割君"
-                className="h-16 w-16 object-contain transition-transform cursor-pointer hover:scale-105"
+                className="h-16 w-16 object-contain transition-transform hover:scale-105"
                 style={{ borderRadius: 'calc(var(--m3-shape-corner-md) - 2px)' }}
               />
             </div>
@@ -4156,35 +4381,12 @@ export default function App() {
             <AlertCircle size={16} /> <span>空き強調</span>
           </button>
 
-          <label
-            className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl hover:bg-amber-100 text-sm font-medium transition-all duration-200 cursor-pointer shadow-sm hover:shadow whitespace-nowrap"
-            title="CSVファイルを取り込んで反映"
-          >
-            <Upload size={16} /> <span>取込</span>
-            <input
-              type="file"
-              accept=".csv"
-              ref={fileInputRef}
-              onChange={handleImportCSV}
-              className="hidden"
-            />
-          </label>
-
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-100 text-sm font-medium transition-all duration-200 shadow-sm hover:shadow whitespace-nowrap"
             title="ページ情報をCSVでダウンロード"
           >
             <FileSpreadsheet size={16} /> <span>出力</span>
-          </button>
-
-          {/* 設定ボタン */}
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className={`p-2 rounded-xl transition-all ${isSalesMode ? 'text-slate-400 hover:bg-slate-800 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'}`}
-            title="設定・データ取り込み"
-          >
-            <Settings size={20} />
           </button>
 
           <div className="h-8 w-px bg-black/5 mx-2"></div>
@@ -4222,7 +4424,7 @@ export default function App() {
         />
 
         <div
-          className={`flex-1 overflow-auto p-8 transition-all relative ${isSalesMode ? 'text-slate-300' : 'text-slate-800'}`}
+          className={`flex-1 overflow-auto transition-all relative ${viewMode === 'single' ? 'px-6 pt-1 pb-6' : 'p-8'} ${isSalesMode ? 'text-slate-300' : 'text-slate-800'}`}
           style={{ marginLeft: sidebarOpen ? sidebarWidth : 32 }}
         >
           {/* Background Pattern */}
@@ -4230,20 +4432,21 @@ export default function App() {
 
           {/* Main Content (Sheets) */}
           <div
-            className="relative z-10 flex flex-col gap-8 transition-transform duration-200 ease-out origin-top"
-            style={{
-              transform: `scale(${zoomScale})`,
-              minHeight: zoomScale > 1 ? `${zoomScale * 100}%` : 'auto' // 拡大時にスクロール領域を確保
-            }}
+            className={`relative z-10 flex flex-col ${viewMode === 'single' ? 'gap-4' : 'gap-8'}`}
           >
             {/* Header Controls inside content area */}
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-100">
-                <span className="text-sm font-bold text-slate-600">ジャンル:</span>
+            <div className={`flex justify-between items-center gap-2 flex-wrap ${viewMode === 'single'
+              ? `sticky top-0 z-40 rounded-xl border px-2 py-1.5 backdrop-blur ${isSalesMode
+                ? 'bg-slate-900/85 border-slate-700 shadow-lg shadow-slate-900/20'
+                : 'bg-white/90 border-slate-200 shadow-lg shadow-slate-200/70'}`
+              : ''
+              }`}>
+              <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg shadow-sm border border-slate-100">
+                <span className="text-xs font-bold text-slate-600">ジャンル:</span>
                 <select
                   value={genreFilter}
                   onChange={(e) => setGenreFilter(e.target.value)}
-                  className="bg-slate-50 border-none rounded-lg px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 font-medium cursor-pointer hover:bg-slate-100 transition-colors"
+                  className="bg-slate-50 border-none rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 font-medium cursor-pointer hover:bg-slate-100 transition-colors"
                 >
                   <option value="all">全て表示</option>
                   {GENRES.map(g => (
@@ -4253,55 +4456,55 @@ export default function App() {
               </div>
 
               {/* Page Nav */}
-              <div className={`flex items-center gap-6 px-6 py-2 rounded-xl shadow-sm border ${isSalesMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+              <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg shadow-sm border ${isSalesMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                 <button
                   onClick={() => handleNavigatePage('prev')}
                   disabled={viewMode !== 'single' || currentIndex <= 0}
-                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
+                  className="p-1.5 hover:bg-slate-100 rounded-md text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
                 >
-                  <ChevronLeft size={24} />
+                  <ChevronLeft size={18} />
                 </button>
-                <div className="flex flex-col items-center min-w-[6rem]">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-1">Page</span>
-                  <span className="font-mono text-xl font-bold leading-none flex items-baseline">
+                <div className="flex flex-col items-center min-w-[5rem]">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">Page</span>
+                  <span className="font-mono text-base font-bold leading-none flex items-baseline">
                     {viewMode === 'single' && activeSheetId ? currentIndex + 1 : '-'}
-                    <span className="text-slate-400 text-sm mx-1 font-normal">/</span>
-                    <span className="text-base text-slate-500 font-medium">{currentList.length}</span>
+                    <span className="text-slate-400 text-xs mx-1 font-normal">/</span>
+                    <span className="text-sm text-slate-500 font-medium">{currentList.length}</span>
                   </span>
                 </div>
                 <button
                   onClick={() => handleNavigatePage('next')}
                   disabled={viewMode !== 'single' || currentIndex === -1 || currentIndex >= currentList.length - 1}
-                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
+                  className="p-1.5 hover:bg-slate-100 rounded-md text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
                 >
-                  <ChevronRight size={24} />
+                  <ChevronRight size={18} />
                 </button>
               </div>
 
               {/* Header Controls inside Detail Area */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
                 {viewMode === 'single' && (
-                  <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={handleBulkDeletePageLabels}
                       disabled={activeSheetLabelCount === 0}
-                      className={`flex items-center gap-2 px-5 py-2 rounded-xl shadow-sm transition-all active:scale-95 font-bold text-xs ${activeSheetLabelCount > 0
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${activeSheetLabelCount > 0
                         ? 'bg-rose-600 text-white hover:bg-rose-700'
                         : 'bg-slate-200 text-slate-500 cursor-not-allowed'
                         }`}
                     >
-                      <Trash2 size={16} strokeWidth={3} />
+                      <Trash2 size={14} strokeWidth={3} />
                       ラベル一括削除
                     </button>
 
                     <button
                       onClick={() => setIsLabelSelectionMode(!isLabelSelectionMode)}
-                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl shadow-lg transition-all active:scale-95 font-bold ${isLabelSelectionMode
-                        ? 'bg-emerald-600 text-white shadow-emerald-200 ring-4 ring-emerald-500/30'
-                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 shadow-slate-100'
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${isLabelSelectionMode
+                        ? 'bg-emerald-600 text-white shadow-emerald-200 ring-2 ring-emerald-500/30'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                         }`}
                     >
-                      <Tag size={20} strokeWidth={3} className={isLabelSelectionMode ? 'animate-pulse' : ''} />
+                      <Tag size={14} strokeWidth={3} className={isLabelSelectionMode ? 'animate-pulse' : ''} />
                       {isLabelSelectionMode ? '配置中...' : 'ラベル追加'}
                     </button>
                   </div>
@@ -4310,15 +4513,22 @@ export default function App() {
                 {/* Add Page Button */}
                 <button
                   onClick={handleAddSheet}
-                  className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:bg-indigo-700 transition-all active:scale-95 font-bold"
+                  className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap"
                 >
-                  <Plus size={20} strokeWidth={3} /> ページ追加
+                  <Plus size={14} strokeWidth={3} /> +ページ追加
                 </button>
               </div>
 
             </div>
 
-            <div className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}>
+            <div
+              className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}
+              style={{
+                transform: `scale(${zoomScale})`,
+                transformOrigin: 'top center',
+                minHeight: zoomScale > 1 ? `${zoomScale * 100}%` : 'auto'
+              }}
+            >
               {displaySheets.map((sheet) => {
                 const isPageSelected = selectedSheetIds.has(sheet.id);
                 return (
@@ -4400,6 +4610,21 @@ export default function App() {
         position={salesPopupPos}
         onMouseEnter={() => handleHoverSales(hoveredSalesData, null)}
         onMouseLeave={handleLeaveSales}
+      />
+
+      <input
+        type="file"
+        accept=".csv"
+        ref={fileInputRef}
+        onChange={handleImportCSV}
+        className="hidden"
+      />
+
+      <HiddenImportModal
+        isOpen={isHiddenImportModalOpen}
+        onClose={() => setIsHiddenImportModalOpen(false)}
+        onOpenPageCsvImport={openPageCsvImportFromHiddenMenu}
+        onOpenSalesCsvImport={openSalesCsvImportFromHiddenMenu}
       />
 
       {/* Settings Modal */}
