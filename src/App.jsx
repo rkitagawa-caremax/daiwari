@@ -64,9 +64,11 @@ import {
   Database,
   Bell,
   CheckCircle2,
+  Tag,
   ChevronDown,
   MoreHorizontal
 } from 'lucide-react';
+
 import { idbHelper } from './idbHelper';
 
 // --- Firebase Configuration / Local Storage Mode ---
@@ -145,6 +147,43 @@ const GENRES = [
 ];
 
 const PASSCODE = "CMC8610";
+
+// --- Free Label Colors ---
+const FREE_LABEL_COLORS = [
+  { bg: '#34d399', border: '#059669', text: '#ffffff' }, // emerald
+  { bg: '#fbbf24', border: '#d97706', text: '#ffffff' }, // amber
+  { bg: '#60a5fa', border: '#2563eb', text: '#ffffff' }, // blue
+  { bg: '#f472b6', border: '#db2777', text: '#ffffff' }, // pink
+  { bg: '#a78bfa', border: '#7c3aed', text: '#ffffff' }, // purple
+];
+const FREE_LABEL_HALF_WIDTH_PX = 44;
+const FREE_LABEL_HALF_HEIGHT_PX = 20;
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const normalizeComparableValue = (value) => (value === undefined ? null : value);
+
+const isPanelDataEqual = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  keys.delete('fromTempId');
+  keys.delete('fromExcludedId');
+
+  for (const key of keys) {
+    const av = normalizeComparableValue(a[key]);
+    const bv = normalizeComparableValue(b[key]);
+
+    const isObjectLike = (v) => v !== null && typeof v === 'object';
+    if (isObjectLike(av) || isObjectLike(bv)) {
+      if (JSON.stringify(av) !== JSON.stringify(bv)) return false;
+      continue;
+    }
+    if (av !== bv) return false;
+  }
+  return true;
+};
 
 // --- Normalization Utility for Product Codes ---
 const normalizeCode = (str) => {
@@ -651,12 +690,14 @@ const ConfirmModal = React.memo(({ isOpen, message, onConfirm, onCancel }) => {
 });
 
 // Panel Component
-const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isSelected, onSelect, highlightEmpty, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById }) => {
+const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex, panels, isOverview, isSelected, onSelect, highlightEmpty, highlightLabels, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById, isLabelMode }) => {
+
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
   const isFocusedRef = useRef(false);
   const panelRef = useRef(null);
+
 
   // 売上データマッチング
   const matchedSales = useMemo(() => {
@@ -671,6 +712,9 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       setLocalText(data.text || '');
     }
   }, [data.text]);
+
+
+
 
   const handleMouseEnter = (e) => {
     setIsHovered(true);
@@ -776,6 +820,10 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
 
   const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
   const isEmpty = !resolvedImage && !data.label && !data.code && !data.isText;
+  const freeLabelsCount = data.freeLabels?.length || 0;
+  const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
+  const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
+  const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
 
   const handleFocusTextarea = () => {
     if (textareaRef.current) {
@@ -805,7 +853,102 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
     }
   };
 
+  const handlePanelClick = (e) => {
+    if (isOverview) return;
+
+    if (isLabelMode) {
+      e.stopPropagation();
+      if (!panelRef.current) return;
+
+      const currentRect = panelRef.current.getBoundingClientRect();
+      let targetIndex = index;
+      let targetPanelEl = panelRef.current;
+
+      const overflowDirections = [];
+      if ((e.clientX - currentRect.left) < FREE_LABEL_HALF_WIDTH_PX) overflowDirections.push('left');
+      if ((currentRect.right - e.clientX) < FREE_LABEL_HALF_WIDTH_PX) overflowDirections.push('right');
+      if ((e.clientY - currentRect.top) < FREE_LABEL_HALF_HEIGHT_PX) overflowDirections.push('up');
+      if ((currentRect.bottom - e.clientY) < FREE_LABEL_HALF_HEIGHT_PX) overflowDirections.push('down');
+
+      if (overflowDirections.length > 0 && typeof document !== 'undefined') {
+        const idPrefix = `panel-${sheetId}-`;
+        const viewportMaxX = Math.max(0, window.innerWidth - 1);
+        const viewportMaxY = Math.max(0, window.innerHeight - 1);
+
+        for (const direction of overflowDirections) {
+          let probeX = e.clientX;
+          let probeY = e.clientY;
+
+          if (direction === 'left') probeX = currentRect.left - 1;
+          if (direction === 'right') probeX = currentRect.right + 1;
+          if (direction === 'up') probeY = currentRect.top - 1;
+          if (direction === 'down') probeY = currentRect.bottom + 1;
+
+          const candidate = document.elementFromPoint(
+            clamp(probeX, 0, viewportMaxX),
+            clamp(probeY, 0, viewportMaxY)
+          );
+          const panelEl = candidate?.closest?.(`[id^="${idPrefix}"]`);
+          if (!panelEl || panelEl === panelRef.current) continue;
+
+          const rawIndex = (panelEl.id || '').slice(idPrefix.length);
+          const parsedIndex = Number.parseInt(rawIndex, 10);
+          if (Number.isNaN(parsedIndex)) continue;
+          if (panels?.[parsedIndex]?.hidden) continue;
+
+          targetIndex = parsedIndex;
+          targetPanelEl = panelEl;
+          break;
+        }
+      }
+
+      const targetRect = targetPanelEl.getBoundingClientRect();
+      const rawXPercent = ((e.clientX - targetRect.left) / targetRect.width) * 100;
+      const rawYPercent = ((e.clientY - targetRect.top) / targetRect.height) * 100;
+
+      const minXPercent = (FREE_LABEL_HALF_WIDTH_PX / targetRect.width) * 100;
+      const maxXPercent = 100 - minXPercent;
+      const minYPercent = (FREE_LABEL_HALF_HEIGHT_PX / targetRect.height) * 100;
+      const maxYPercent = 100 - minYPercent;
+
+      const xPercent = minXPercent <= maxXPercent ? clamp(rawXPercent, minXPercent, maxXPercent) : 50;
+      const yPercent = minYPercent <= maxYPercent ? clamp(rawYPercent, minYPercent, maxYPercent) : 50;
+
+      const targetPanelData = targetIndex === index ? data : (panels?.[targetIndex] || {});
+      const prevLabels = targetPanelData.freeLabels || [];
+      const migratedLabels = targetPanelData.freeText && prevLabels.length === 0
+        ? [{ id: 'legacy', text: targetPanelData.freeText, x: 50, y: 50, colorIndex: 0 }]
+        : prevLabels;
+
+      const colorIndex = migratedLabels.length % FREE_LABEL_COLORS.length;
+
+      const newLabel = {
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 7),
+        text: 'ラベル',
+        x: xPercent,
+        y: yPercent,
+        colorIndex
+      };
+
+      const nextPanelData = {
+        ...targetPanelData,
+        freeText: null,
+        freeLabels: [...migratedLabels, newLabel]
+      };
+
+      if (targetIndex === index || !onUpdateByIndex) {
+        onUpdate(nextPanelData);
+      } else {
+        onUpdateByIndex(targetIndex, nextPanelData);
+      }
+      return;
+    }
+
+    if (onSelect) onSelect();
+  };
+
   const labelStyle = data.label ? getLabelStyle(data.label) : {};
+
 
   // 売上合計
   const salesTotal = matchedSales ? matchedSales.reduce((acc, item) => acc + (parseInt(item.count) || 0), 0) : 0;
@@ -815,40 +958,101 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
       ref={panelRef}
       id={`panel-${sheetId}-${index}`}
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
-        ${(highlightEmpty && (!resolvedImage && (isEmpty || !!data.code))) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
+        ${(shouldHighlightLabel || shouldHighlightEmpty) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
-        ${!isEmpty && !isOverview ? 'cursor-grab active:cursor-grabbing' : ''}
+        ${!isEmpty && !isOverview && !data.isText ? 'cursor-grab active:cursor-grabbing' : ''}
         ${isSalesMode ? 'hover:ring-4 hover:z-40' : ''}
       `}
-      style={{
-        gridColumn: `span ${data.colSpan || 1}`,
-        gridRow: `span ${data.rowSpan || 1}`,
-        borderColor: 'var(--m3-outline-variant)',
-        backgroundColor: (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
-          ? 'var(--m3-error-container)'
-          : isSalesMode && matchedSales
-            ? 'var(--m3-secondary-container)'
-            : 'var(--m3-surface)',
-        '--tw-ring-color': isSelected
-          ? 'var(--m3-primary)'
-          : (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
-            ? 'var(--m3-error)'
-            : isSalesMode
-              ? 'var(--m3-tertiary)'
-              : 'transparent'
-      }}
-      draggable={!isEmpty && !isOverview}
+      draggable={!isEmpty && !isOverview && !isLabelMode && !data.isText}
       onDragStart={handleDragStart}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onClick={!isOverview ? onSelect : undefined}
+      onClick={handlePanelClick}
+      style={{
+        ... (shouldHighlightEmpty ? {} : {}),
+        '--tw-ring-color': shouldHighlightLabel
+          ? '#22c55e'
+          : shouldHighlightEmpty
+            ? 'var(--m3-error)'
+            : 'transparent',
+        cursor: isLabelMode
+          ? 'crosshair'
+          : (isOverview ? 'pointer' : (!isEmpty && !data.isText ? 'cursor-grab' : 'default')),
+        gridColumn: `span ${data.colSpan || 1}`,
+        gridRow: `span ${data.rowSpan || 1}`,
+        borderColor: shouldHighlightLabel ? '#16a34a' : 'var(--m3-outline-variant)',
+        backgroundColor: shouldHighlightLabel
+          ? 'rgba(34, 197, 94, 0.16)'
+          : shouldHighlightEmpty
+          ? 'var(--m3-error-container)'
+          : isSalesMode && matchedSales
+            ? 'var(--m3-secondary-container)'
+            : 'var(--m3-surface)',
+        boxShadow: shouldHighlightLabel
+          ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
+          : undefined,
+      }}
     >
+
       {/* Image Layer */}
       {resolvedImage && (
         <img src={resolvedImage} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" />
       )}
+
+      {/* Free Labels Layer (Overlays everything) */}
+      {(() => {
+        const labels = data.freeLabels || (data.freeText ? [{ id: 'legacy', text: data.freeText, x: 50, y: 50, colorIndex: 0 }] : []);
+        if (labels.length === 0) return null;
+
+        return labels.map((label, i) => {
+          const color = FREE_LABEL_COLORS[label.colorIndex % FREE_LABEL_COLORS.length];
+          return (
+            <div
+              key={label.id}
+              className="absolute z-[25] transform -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${label.x}%`, top: `${label.y}%`, minWidth: '80px', maxWidth: '90%' }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()} // ドラッグ誤動作防止
+            >
+              <div className="relative group flex items-center justify-center">
+                <textarea
+                  className="w-full bg-white/95 backdrop-blur-sm rounded-lg p-1.5 text-xs font-bold text-center resize-none focus:outline-none shadow-lg min-h-[2.5em] overflow-hidden transition-shadow focus:ring-2"
+                  style={{
+                    border: `2px solid ${color.border}`,
+                    color: '#334155', // slate-700
+                    '--tw-ring-color': color.border
+                  }}
+                  value={label.text || ''}
+                  onChange={(e) => {
+                    const newLabels = [...labels];
+                    newLabels[i] = { ...label, text: e.target.value };
+                    onUpdate({ ...data, freeLabels: newLabels, freeText: null });
+                  }}
+                  placeholder="入力"
+                  rows={Math.max(1, (label.text || '').split('\n').length)}
+                />
+                {!isOverview && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newLabels = labels.filter((_, idx) => idx !== i);
+                      onUpdate({ ...data, freeLabels: newLabels, freeText: null });
+                    }}
+                    className="absolute -top-2 -right-2 text-white rounded-full p-1 shadow-md transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 z-10"
+                    style={{ backgroundColor: color.border }}
+                    title="ラベルを削除"
+                  >
+                    <X size={12} strokeWidth={3} />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        });
+      })()}
+
 
       {/* Sales Overlay Mode */}
       {isSalesMode && matchedSales && (
@@ -908,12 +1112,23 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
           </div>
         ) : (
           <div
+            data-text-editor="true"
             className="absolute inset-0 z-20 flex items-center justify-center p-4 cursor-text transition-colors hover:brightness-95 focus-within:brightness-100"
             style={{ background: labelStyle.bg || 'rgba(255,255,255,0.4)' }}
             onClick={(e) => { e.stopPropagation(); handleFocusTextarea(); }}
-            draggable="true"
-            onDragStart={handleDragStart}
+            onMouseDown={(e) => e.stopPropagation()}
           >
+            <button
+              className="absolute top-1 left-1 rounded-md p-1.5 cursor-grab active:cursor-grabbing border shadow-sm z-30"
+              style={{ background: 'var(--m3-surface)', borderColor: 'var(--m3-outline-variant)', color: 'var(--m3-on-surface-variant)' }}
+              title="ドラッグして移動"
+              draggable
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onDragStart={handleDragStart}
+            >
+              <GripVertical size={12} />
+            </button>
             <textarea
               ref={textareaRef}
               className={`w-full bg-transparent resize-none focus:outline-none text-sm font-bold text-center overflow-hidden font-sans placeholder:text-slate-400/70 ${labelStyle.text || 'text-slate-800'}`}
@@ -924,6 +1139,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
               placeholder="テキストを入力"
               rows={Math.max(2, (localText || '').split('\n').length)}
               style={{ maxHeight: '100%' }}
+              draggable={false}
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             />
           </div>
@@ -965,7 +1182,8 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
   );
 });
 
-const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById }) => {
+const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, highlightLabels, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById, isLabelMode }) => {
+
   const genre = GENRES.find(g => g.id === sheet.genre) || GENRES[0];
 
   let visibleCounter = 0;
@@ -1022,10 +1240,13 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
               data={panelData}
               globalNumber={panelNumber}
               onUpdate={(newData) => updatePanel(sheet.id, i, newData)}
+              onUpdateByIndex={(targetIndex, newData) => updatePanel(sheet.id, targetIndex, newData)}
+              panels={panels}
               isOverview={isOverview}
               isSelected={isSelected}
               onSelect={() => onSelectPanel && onSelectPanel(sheet.id, i)}
               highlightEmpty={highlightEmpty}
+              highlightLabels={highlightLabels}
               sheetId={sheet.id}
               onMove={onMovePanel}
               isSalesMode={isSalesMode}
@@ -1033,7 +1254,9 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
               onHoverSales={onHoverSales}
               onLeaveSales={onLeaveSales}
               imageDataById={imageDataById}
+              isLabelMode={isLabelMode}
             />
+
           );
         })}
       </div>
@@ -1067,22 +1290,33 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
   const [isImageSelectionMode, setIsImageSelectionMode] = useState(false);
   const [selectedImageIds, setSelectedImageIds] = useState(new Set());
 
+  const getImageSelectionKey = useCallback((img) => {
+    if (img?.id) return `id:${img.id}`;
+    const data = img?.data || '';
+    const head = data.slice(0, 32);
+    const tail = data.slice(-32);
+    return `legacy:${img?.name || ''}:${data.length}:${head}:${tail}`;
+  }, []);
+
   useEffect(() => {
     setSelectedImageIds(new Set());
     setIsImageSelectionMode(false);
   }, [activeTab]);
 
-  const toggleImageSelection = (id) => {
+  const toggleImageSelection = (selectionKey) => {
     setSelectedImageIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(id)) newSet.delete(id);
-      else newSet.add(id);
+      if (newSet.has(selectionKey)) newSet.delete(selectionKey);
+      else newSet.add(selectionKey);
       return newSet;
     });
   };
 
   const handleBulkDelete = () => {
-    onBulkDeleteImages(Array.from(selectedImageIds));
+    const selectedTargets = filteredImages
+      .filter((img) => selectedImageIds.has(getImageSelectionKey(img)))
+      .map((img) => ({ id: img.id || null, data: img.data || null }));
+    onBulkDeleteImages(selectedTargets);
     setIsImageSelectionMode(false);
     setSelectedImageIds(new Set());
   };
@@ -1277,7 +1511,7 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                 <span className="text-sm font-bold" style={{ color: 'var(--m3-primary)' }}>{selectedImageIds.size}枚選択中</span>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setSelectedImageIds(new Set(filteredImages.map(i => i.id)))}
+                    onClick={() => setSelectedImageIds(new Set(filteredImages.map((i) => getImageSelectionKey(i))))}
                     className="text-xs font-medium px-3 py-1.5 rounded-full hover:bg-black/5"
                     style={{ color: 'var(--m3-primary)' }}
                   >
@@ -1296,25 +1530,27 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
             )}
 
             <div className="grid grid-cols-2 gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
-              {filteredImages.map((img) => (
+              {filteredImages.map((img) => {
+                const selectionKey = getImageSelectionKey(img);
+                return (
                 <div
-                  key={img.id}
+                  key={selectionKey}
                   className={`group relative border rounded-xl p-2 transition-all duration-200
                     ${isImageSelectionMode
                       ? 'cursor-pointer'
                       : 'cursor-grab active:cursor-grabbing hover:shadow-md hover:-translate-y-0.5'} 
-                    ${selectedImageIds.has(img.id)
+                    ${selectedImageIds.has(selectionKey)
                       ? 'ring-2'
                       : ''}`}
                   style={{
                     background: 'var(--m3-surface)',
-                    borderColor: selectedImageIds.has(img.id) ? 'var(--m3-primary)' : 'var(--m3-outline-variant)',
-                    backgroundColor: selectedImageIds.has(img.id) ? 'var(--m3-primary-container)' : 'var(--m3-surface)'
+                    borderColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary)' : 'var(--m3-outline-variant)',
+                    backgroundColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary-container)' : 'var(--m3-surface)'
                   }}
                   draggable={!isImageSelectionMode}
                   onClick={() => {
                     if (isImageSelectionMode) {
-                      toggleImageSelection(img.id);
+                      toggleImageSelection(selectionKey);
                     }
                   }}
                   onDragStart={(e) => {
@@ -1337,14 +1573,14 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
 
                   {isImageSelectionMode ? (
                     <div className="absolute top-2 left-2 w-6 h-6 rounded-full flex items-center justify-center transition-all"
-                      style={{ background: selectedImageIds.has(img.id) ? 'var(--m3-primary)' : 'rgba(255,255,255,0.8)', border: selectedImageIds.has(img.id) ? 'none' : '1px solid var(--m3-outline)' }}>
-                      {selectedImageIds.has(img.id) && <Check size={14} style={{ color: 'var(--m3-on-primary)' }} />}
+                      style={{ background: selectedImageIds.has(selectionKey) ? 'var(--m3-primary)' : 'rgba(255,255,255,0.8)', border: selectedImageIds.has(selectionKey) ? 'none' : '1px solid var(--m3-outline)' }}>
+                      {selectedImageIds.has(selectionKey) && <Check size={14} style={{ color: 'var(--m3-on-primary)' }} />}
                     </div>
                   ) : (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        onDeleteImage(img.id);
+                        onDeleteImage(img.id, img.data);
                       }}
                       className="absolute top-2 right-2 rounded-full p-2 opacity-0 group-hover:opacity-100 shadow-sm transition-all hover:scale-110"
                       style={{ background: 'var(--m3-surface)', color: 'var(--m3-error)', border: '1px solid var(--m3-outline-variant)' }}
@@ -1353,7 +1589,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                     </button>
                   )}
                 </div>
-              ))}
+                );
+              })}
 
               {filteredImages.length === 0 && (
                 <div className="col-span-full flex flex-col items-center justify-center py-16 text-center" style={{ color: 'var(--m3-outline)' }}>
@@ -1694,11 +1931,13 @@ export default function App() {
   const [selection, setSelection] = useState({ sheetId: null, indices: [] });
   const [isMergeMode, setIsMergeMode] = useState(false);
   const [highlightEmpty, setHighlightEmpty] = useState(false);
+  const [highlightLabels, setHighlightLabels] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
   const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知', closeOnBackdrop: false });
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
+  const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
 
   // Sales Popup State
   const [hoveredSalesData, setHoveredSalesData] = useState(null);
@@ -1859,6 +2098,23 @@ export default function App() {
       setIsSalesMode(false);
     }
   }, [viewMode]);
+
+  useEffect(() => {
+    // 詳細単一表示以外ではラベル配置モードを自動解除
+    if (viewMode !== 'single' && isLabelSelectionMode) {
+      setIsLabelSelectionMode(false);
+    }
+  }, [viewMode, isLabelSelectionMode]);
+
+  useEffect(() => {
+    // 単一表示時に対象ページIDが不整合なら先頭ページへ補正
+    if (viewMode !== 'single' || sheets.length === 0) return;
+    const exists = sheets.some((sheet) => sheet.id === activeSheetId);
+    if (!exists) {
+      setActiveSheetId(sheets[0].id);
+      setIsLabelSelectionMode(false);
+    }
+  }, [viewMode, sheets, activeSheetId]);
 
 
   useEffect(() => {
@@ -2369,6 +2625,9 @@ export default function App() {
   const handleUpdatePanel = useCallback(async (sheetId, panelIndex, newData) => {
     const sheetToUpdate = sheets.find(s => s.id === sheetId);
     if (!sheetToUpdate) return;
+    const currentPanel = sheetToUpdate.panels[panelIndex] || {};
+    if (isPanelDataEqual(currentPanel, newData)) return;
+
     const updatedPanels = [...sheetToUpdate.panels];
     updatedPanels[panelIndex] = newData;
 
@@ -2588,14 +2847,16 @@ export default function App() {
   };
 
   const handlePanelUpdateWithCheck = (sheetId, panelIndex, newData) => {
-    if (newData.fromTempId) {
-      handleDeleteFromTemp(newData.fromTempId);
-      delete newData.fromTempId;
+    const sanitizedData = { ...newData };
+
+    if (sanitizedData.fromTempId) {
+      handleDeleteFromTemp(sanitizedData.fromTempId);
+      delete sanitizedData.fromTempId;
     }
-    if (newData.fromExcludedId) {
+    if (sanitizedData.fromExcludedId) {
       if (USE_LOCAL_STORAGE) {
         // 除外リストから復帰する際、画像を未配置（ストック）に戻す
-        const itemToRestore = excludedItems.find(item => item.id === newData.fromExcludedId);
+        const itemToRestore = excludedItems.find(item => item.id === sanitizedData.fromExcludedId);
         if (itemToRestore) {
           // 画像データがある場合はimagesに追加
           setImages(prev => [...prev, itemToRestore]);
@@ -2603,24 +2864,24 @@ export default function App() {
           // imagesの保存は省略可(state更新でtriggerされる)
         }
 
-        const newExcludedItems = excludedItems.filter(item => item.id !== newData.fromExcludedId);
+        const newExcludedItems = excludedItems.filter(item => item.id !== sanitizedData.fromExcludedId);
         setExcludedItems(newExcludedItems);
         // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-saveに任せる
       } else {
-        deleteDoc(doc(excludedItemsCollection, newData.fromExcludedId));
+        deleteDoc(doc(excludedItemsCollection, sanitizedData.fromExcludedId));
       }
-      delete newData.fromExcludedId;
+      delete sanitizedData.fromExcludedId;
     }
     const currentSheet = sheets.find(s => s.id === sheetId);
     const currentPanel = currentSheet?.panels[panelIndex];
 
-    if (newData.image && newData.image !== currentPanel?.image && !newData.label) {
-      if (checkImageUsage(newData.image)) {
-        requestConfirm("同じ画像が既にはめ込まれています。\n配置しますか？", () => handleUpdatePanel(sheetId, panelIndex, newData));
+    if (sanitizedData.image && sanitizedData.image !== currentPanel?.image && !sanitizedData.label) {
+      if (checkImageUsage(sanitizedData.image)) {
+        requestConfirm("同じ画像が既にはめ込まれています。\n配置しますか？", () => handleUpdatePanel(sheetId, panelIndex, sanitizedData));
         return;
       }
     }
-    handleUpdatePanel(sheetId, panelIndex, newData);
+    handleUpdatePanel(sheetId, panelIndex, sanitizedData);
   };
 
   const handleMoveToStock = useCallback(async (sheetId, panelIndex) => {
@@ -2803,14 +3064,22 @@ export default function App() {
     e.target.value = '';
   };
 
-  const handleDeleteImage = (imgId) => {
+  const handleDeleteImage = (imgId, fallbackData = null) => {
     requestConfirm(
       "画像をストックから削除しますか？",
       async () => {
         if (USE_LOCAL_STORAGE) {
-          const newImages = images.filter(img => img.id !== imgId);
+          const newImages = images.filter(img => {
+            if (imgId) return img.id !== imgId;
+            if (fallbackData) return img.data !== fallbackData;
+            return true;
+          });
           setImages(newImages);
           // localStorageHelper.setItem('images', newImages); // Auto-save handles this
+          return;
+        }
+        if (!imgId) {
+          showAlert("削除対象の画像IDが見つかりませんでした。");
           return;
         }
         await deleteDoc(doc(imagesCollection, imgId));
@@ -2818,28 +3087,53 @@ export default function App() {
     );
   };
 
-  const handleBulkDeleteImages = async (imageIds) => {
-    if (!imageIds || imageIds.length === 0) return;
+  const handleBulkDeleteImages = async (imageTargets) => {
+    if (!imageTargets || imageTargets.length === 0) return;
 
     requestConfirm(
-      `${imageIds.length}枚の画像を削除しますか？`,
+      `${imageTargets.length}枚の画像を削除しますか？`,
       async () => {
+        const idSet = new Set();
+        const dataSet = new Set();
+
+        imageTargets.forEach((target) => {
+          if (!target) return;
+          if (typeof target === 'string') {
+            if (target) idSet.add(target);
+            return;
+          }
+          if (target.id) idSet.add(target.id);
+          else if (target.data) dataSet.add(target.data);
+        });
+
         if (USE_LOCAL_STORAGE) {
-          const idsToDelete = new Set(imageIds);
-          const newImages = images.filter(img => !idsToDelete.has(img.id));
+          const newImages = images.filter(img => {
+            if (img.id) return !idSet.has(img.id);
+            if (img.data) return !dataSet.has(img.data);
+            return true;
+          });
           setImages(newImages);
           // localStorageHelper.setItem('images', newImages); // Auto-save handles this
           return;
         }
 
-        const batch = writeBatch(db);
-        imageIds.forEach(id => {
-          const ref = doc(imagesCollection, id);
-          batch.delete(ref);
-        });
+        const imageIds = Array.from(idSet).filter(Boolean);
+        if (imageIds.length === 0) {
+          showAlert("削除可能な画像IDが見つかりませんでした。");
+          return;
+        }
 
         try {
-          await batch.commit();
+          const BATCH_LIMIT = 450;
+          for (let i = 0; i < imageIds.length; i += BATCH_LIMIT) {
+            const chunk = imageIds.slice(i, i + BATCH_LIMIT);
+            const batch = writeBatch(db);
+            chunk.forEach(id => {
+              const ref = doc(imagesCollection, id);
+              batch.delete(ref);
+            });
+            await batch.commit();
+          }
         } catch (err) {
           console.error("Bulk image delete failed", err);
           showAlert("一括削除に失敗しました");
@@ -2851,17 +3145,18 @@ export default function App() {
   // --- Page Actions ---
 
   const handleNavigatePage = (direction) => {
-    const currentList = genreFilter === 'all'
-      ? sheets
-      : sheets.filter(s => s.genre === genreFilter);
+    const navigationList = sheets;
+    if (!navigationList || navigationList.length === 0) return;
 
-    const currentIndex = currentList.findIndex(s => s.id === activeSheetId);
-    if (currentIndex === -1) return;
+    const foundIndex = navigationList.findIndex(s => s.id === activeSheetId);
+    const currentIndex = foundIndex === -1 ? 0 : foundIndex;
 
     if (direction === 'prev' && currentIndex > 0) {
-      setActiveSheetId(currentList[currentIndex - 1].id);
-    } else if (direction === 'next' && currentIndex < currentList.length - 1) {
-      setActiveSheetId(currentList[currentIndex + 1].id);
+      setActiveSheetId(navigationList[currentIndex - 1].id);
+      setIsLabelSelectionMode(false);
+    } else if (direction === 'next' && currentIndex < navigationList.length - 1) {
+      setActiveSheetId(navigationList[currentIndex + 1].id);
+      setIsLabelSelectionMode(false);
     }
   };
 
@@ -2898,6 +3193,7 @@ export default function App() {
     } else {
       setViewMode('overview');
       setActiveSheetId(null);
+      setIsLabelSelectionMode(false);
     }
   };
 
@@ -3600,19 +3896,71 @@ export default function App() {
   }, [images]);
 
   const currentList = useMemo(() => {
+    if (viewMode === 'single') return sheets;
     return genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
-  }, [sheets, genreFilter]);
+  }, [sheets, genreFilter, viewMode]);
 
   const currentIndex = useMemo(() => {
     return currentList.findIndex(s => s.id === activeSheetId);
   }, [currentList, activeSheetId]);
+
+  const activeSheetLabelCount = useMemo(() => {
+    if (viewMode !== 'single' || !activeSheetId) return 0;
+    const targetSheet = sheets.find((s) => s.id === activeSheetId);
+    if (!targetSheet?.panels) return 0;
+
+    return targetSheet.panels.reduce((count, panel) => {
+      const freeLabelsCount = panel?.freeLabels?.length || 0;
+      const hasLegacy = !!panel?.freeText && freeLabelsCount === 0;
+      return count + freeLabelsCount + (hasLegacy ? 1 : 0);
+    }, 0);
+  }, [viewMode, activeSheetId, sheets]);
+
+  const handleBulkDeletePageLabels = useCallback(() => {
+    if (viewMode !== 'single' || !activeSheetId) return;
+
+    const targetSheet = sheets.find((s) => s.id === activeSheetId);
+    if (!targetSheet?.panels) return;
+
+    if (activeSheetLabelCount === 0) {
+      showAlert("このページには削除対象のラベルがありません。");
+      return;
+    }
+
+    requestConfirm(
+      `このページの自由ラベルを ${activeSheetLabelCount} 件すべて削除しますか？`,
+      async () => {
+        const updatedPanels = targetSheet.panels.map((panel) => ({
+          ...panel,
+          freeLabels: [],
+          freeText: null
+        }));
+
+        if (USE_LOCAL_STORAGE) {
+          setSheets((prev) =>
+            prev.map((sheet) =>
+              sheet.id === activeSheetId ? { ...sheet, panels: updatedPanels } : sheet
+            )
+          );
+          return;
+        }
+
+        try {
+          await updateDoc(doc(sheetsCollection, activeSheetId), { panels: updatedPanels });
+        } catch (err) {
+          console.error("Bulk label delete failed", err);
+          showAlert("ラベル一括削除に失敗しました。");
+        }
+      }
+    );
+  }, [viewMode, activeSheetId, sheets, activeSheetLabelCount, sheetsCollection, requestConfirm, showAlert]);
 
   // --- Render ---
   // --- Render ---
   if (!isAuthenticated) return <AuthGate onAuthenticated={handleAuthenticated} defaultAppId={appId} />;
 
   return (
-    <div className={`flex flex-col h-screen overflow-hidden transition-all duration-700 ease-in-out`} style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
+    <div className={`flex flex-col h-screen overflow-hidden transition-all duration-700 ease-in-out`} style={{ background: 'var(--app-bg)', color: 'var(--m3-on-surface)' }}>
 
       {/* Top Navigation Bar - M3 Expressive Style */}
       <div className="h-20 flex items-center justify-between px-6 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
@@ -3653,14 +4001,14 @@ export default function App() {
 
           <div className="flex p-1 rounded-full transition-all" style={{ border: '1px solid var(--m3-outline)', background: 'var(--m3-surface)' }}>
             <button
-              onClick={() => { setViewMode('list'); setActiveSheetId(null); setIsPageSelectionMode(false); }}
+              onClick={() => { setViewMode('list'); setActiveSheetId(null); setIsPageSelectionMode(false); setIsLabelSelectionMode(false); }}
               className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
               style={viewMode === 'list' || viewMode === 'single' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
               <List size={18} /> <span className="hidden sm:inline">詳細</span>
             </button>
             <button
-              onClick={() => { setViewMode('overview'); setActiveSheetId(null); setIsPageSelectionMode(false); }}
+              onClick={() => { setViewMode('overview'); setActiveSheetId(null); setIsPageSelectionMode(false); setIsLabelSelectionMode(false); }}
               className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
               style={viewMode === 'overview' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
@@ -3788,6 +4136,16 @@ export default function App() {
                 <ZoomIn size={16} />
               </button>
             </div>
+          )}
+
+          {!isPageSelectionMode && viewMode === 'overview' && (
+            <button
+              onClick={() => setHighlightLabels(!highlightLabels)}
+              className={`flex items-center gap-2 px-3 py-2 border rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap ${highlightLabels ? 'bg-emerald-500 text-white border-emerald-600 shadow-md shadow-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              title="自由ラベルがあるコマを緑色で強調表示"
+            >
+              <Tag size={16} /> <span>ラベル強調</span>
+            </button>
           )}
 
           <button
@@ -3920,13 +4278,44 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Add Page Button */}
-              <button
-                onClick={handleAddSheet}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:bg-indigo-700 transition-all active:scale-95 font-bold"
-              >
-                <Plus size={20} strokeWidth={3} /> ページ追加
-              </button>
+              {/* Header Controls inside Detail Area */}
+              <div className="flex items-center gap-3">
+                {viewMode === 'single' && (
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={handleBulkDeletePageLabels}
+                      disabled={activeSheetLabelCount === 0}
+                      className={`flex items-center gap-2 px-5 py-2 rounded-xl shadow-sm transition-all active:scale-95 font-bold text-xs ${activeSheetLabelCount > 0
+                        ? 'bg-rose-600 text-white hover:bg-rose-700'
+                        : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        }`}
+                    >
+                      <Trash2 size={16} strokeWidth={3} />
+                      ラベル一括削除
+                    </button>
+
+                    <button
+                      onClick={() => setIsLabelSelectionMode(!isLabelSelectionMode)}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl shadow-lg transition-all active:scale-95 font-bold ${isLabelSelectionMode
+                        ? 'bg-emerald-600 text-white shadow-emerald-200 ring-4 ring-emerald-500/30'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 shadow-slate-100'
+                        }`}
+                    >
+                      <Tag size={20} strokeWidth={3} className={isLabelSelectionMode ? 'animate-pulse' : ''} />
+                      {isLabelSelectionMode ? '配置中...' : 'ラベル追加'}
+                    </button>
+                  </div>
+                )}
+
+                {/* Add Page Button */}
+                <button
+                  onClick={handleAddSheet}
+                  className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:bg-indigo-700 transition-all active:scale-95 font-bold"
+                >
+                  <Plus size={20} strokeWidth={3} /> ページ追加
+                </button>
+              </div>
+
             </div>
 
             <div className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}>
@@ -3941,6 +4330,7 @@ export default function App() {
                         handleToggleSheetSelection(sheet.id);
                       } else if (viewMode === 'overview') {
                         setActiveSheetId(sheet.id);
+                        setIsLabelSelectionMode(false);
                         setViewMode('single');
                       }
                     }}
@@ -3984,13 +4374,16 @@ export default function App() {
                           onSelectPanel={isMergeMode ? handleSelectPanel : undefined}
                           onDeleteSheet={handleDeleteSheet}
                           highlightEmpty={highlightEmpty}
+                          highlightLabels={highlightLabels}
                           onMovePanel={handleMovePanel}
                           isSalesMode={isSalesMode}
                           salesData={salesData}
                           onHoverSales={handleHoverSales}
                           onLeaveSales={handleLeaveSales}
                           imageDataById={imageDataById}
+                          isLabelMode={isLabelSelectionMode}
                         />
+
                       </div>
                     </div>
                   </div>

@@ -1,5 +1,14 @@
 # React + Vite
 
+## Demo起動
+
+```powershell
+npm run demo
+```
+
+- 開発サーバーを自動起動し、`http://127.0.0.1:5173/?mode=local` を開きます。
+- 5173 が使用中でも、空きポートを探してデモ画面を開きます。
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
