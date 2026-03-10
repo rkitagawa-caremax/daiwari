@@ -707,21 +707,28 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
 
     // Normal Drop
     const type = e.dataTransfer.getData("type");
-    const src = e.dataTransfer.getData("src");
-    const droppedImageId = e.dataTransfer.getData("imageId");
+    let src = e.dataTransfer.getData("src");
+    if (src === "null" || src === "undefined") src = "";
+
+    let droppedImageId = e.dataTransfer.getData("imageId");
+    if (droppedImageId === "null" || droppedImageId === "undefined" || !droppedImageId) droppedImageId = null;
+
     let label = e.dataTransfer.getData("label");
-    if (label === "null") label = null;
+    if (label === "null" || label === "undefined" || !label) label = null;
 
     let droppedCode = e.dataTransfer.getData("code");
-    if (droppedCode === "null") droppedCode = null;
+    if (droppedCode === "null" || droppedCode === "undefined" || !droppedCode) droppedCode = null;
 
     const fileName = e.dataTransfer.getData("name");
     const isText = e.dataTransfer.getData("isText");
-    const fromTempId = e.dataTransfer.getData("fromTempId");
-    const fromExcludedId = e.dataTransfer.getData("fromExcludedId");
-    const droppedPanelId = e.dataTransfer.getData("panelId");
 
-    if (src) {
+    let fromTempId = e.dataTransfer.getData("fromTempId");
+    if (fromTempId === "null" || fromTempId === "undefined" || !fromTempId) fromTempId = null;
+
+    let fromExcludedId = e.dataTransfer.getData("fromExcludedId");
+    if (fromExcludedId === "null" || fromExcludedId === "undefined" || !fromExcludedId) fromExcludedId = null;
+
+    if (src || droppedImageId || label || droppedCode || isText === "true" || fromTempId || fromExcludedId) {
       let code = droppedCode || null;
 
       if (!code && fileName && !isText) {
@@ -735,15 +742,14 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
 
       onUpdate({
         ...data,
-        image: src,
+        image: src || null,
         imageId: droppedImageId || null,
         label: label || null,
         code: code,
         isText: isText === "true",
         text: initialText,
         fromTempId: fromTempId || null,
-        fromExcludedId: fromExcludedId || null,
-        panelId: droppedPanelId || null
+        fromExcludedId: fromExcludedId || null
       });
       setLocalText(initialText);
     }
@@ -822,7 +828,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, isOverview, isS
           ? 'var(--m3-error-container)'
           : isSalesMode && matchedSales
             ? 'var(--m3-secondary-container)'
-            : labelStyle.bg || 'var(--m3-surface)',
+            : 'var(--m3-surface)',
         '--tw-ring-color': isSelected
           ? 'var(--m3-primary)'
           : (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))
@@ -1054,7 +1060,7 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
 });
 
 // ... Sidebar Component ...
-const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded, onMoveToStock }) => {
+const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded, onMoveToStock, imageDataById }) => {
   const [activeTab, setActiveTab] = useState('stock');
   const [resizing, setResizing] = useState(false);
   const [statusGenreFilter, setStatusGenreFilter] = useState('all');
@@ -1113,6 +1119,18 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     }
   };
 
+  const handleDropToStock = (e) => {
+    e.preventDefault();
+    const moveSourceType = e.dataTransfer.getData("moveSourceType");
+    if (moveSourceType === "panel") {
+      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
+      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
+      if (sourceSheetId && !isNaN(sourceIndex) && onMoveToStock) {
+        onMoveToStock(sourceSheetId, sourceIndex);
+      }
+    }
+  };
+
   const handleDropToExcluded = (e) => {
     e.preventDefault();
     const moveSourceType = e.dataTransfer.getData("moveSourceType");
@@ -1122,19 +1140,6 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
 
       if (sourceSheetId && !isNaN(sourceIndex)) {
         onMoveToExcluded(sourceSheetId, sourceIndex);
-      }
-    }
-  };
-
-  const handleDropToStock = (e) => {
-    e.preventDefault();
-    const moveSourceType = e.dataTransfer.getData("moveSourceType");
-    if (moveSourceType === "panel") {
-      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
-      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
-
-      if (sourceSheetId && !isNaN(sourceIndex)) {
-        onMoveToStock(sourceSheetId, sourceIndex);
       }
     }
   };
@@ -1225,14 +1230,15 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 relative" style={{ background: 'var(--m3-surface-container-low)' }}>
+      <div
+        className="flex-1 overflow-y-auto p-4 relative"
+        style={{ background: 'var(--m3-surface-container-low)' }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={activeTab === 'stock' ? handleDropToStock : undefined}
+      >
 
         {activeTab === 'stock' && (
-          <div
-            className="space-y-6 min-h-full"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDropToStock}
-          >
+          <div className="space-y-6">
             <div className="space-y-2">
               <label
                 className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group"
@@ -1317,7 +1323,7 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                       return;
                     }
                     e.dataTransfer.setData("src", img.data);
-                    e.dataTransfer.setData("imageId", img.id);
+                    if (img.id) e.dataTransfer.setData("imageId", img.id);
                     e.dataTransfer.setData("type", "image");
                     e.dataTransfer.setData("name", img.name);
                   }}
@@ -1515,48 +1521,50 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  {excludedItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="group relative border border-rose-100 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex flex-col items-center transition-all"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData("src", item.image);
-                        e.dataTransfer.setData("type", "image");
-                        e.dataTransfer.setData("name", item.originalName || "excluded");
-                        e.dataTransfer.setData("label", item.label || "");
-                        e.dataTransfer.setData("code", item.code || "");
-                        e.dataTransfer.setData("fromExcludedId", item.id);
-                        if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
-                        if (item.panelId) e.dataTransfer.setData("panelId", item.panelId);
-                      }}
-                    >
-                      <div className="w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
-                        {item.image ? (
-                          <img src={item.image} alt="excluded" className="w-full h-full object-contain" />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
-                            <Ban size={16} />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="w-full flex justify-between items-center text-[9px]">
-                        <span className="font-bold text-rose-500 truncate max-w-[60px] font-mono">{item.code || 'No Code'}</span>
-                        {item.label && (
-                          <span className="bg-slate-100 text-slate-500 px-1 rounded truncate max-w-[50px]">{item.label}</span>
-                        )}
-                      </div>
-
-                      <button
-                        onClick={() => onDeleteFromExcluded(item.id)}
-                        className="absolute -top-1.5 -right-1.5 bg-white rounded-full p-1 shadow-sm text-rose-400 hover:text-rose-600 hover:bg-rose-50 border border-rose-100 opacity-0 group-hover:opacity-100 transition-all"
-                        title="完全に削除"
+                  {excludedItems.map((item) => {
+                    const resolvedImg = item.image || (item.imageId ? imageDataById?.[item.imageId] : null);
+                    return (
+                      <div
+                        key={item.id}
+                        className="group relative border border-rose-100 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex flex-col items-center transition-all"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("src", resolvedImg || "");
+                          e.dataTransfer.setData("type", "image");
+                          e.dataTransfer.setData("name", item.originalName || "excluded");
+                          e.dataTransfer.setData("label", item.label || "");
+                          e.dataTransfer.setData("code", item.code || "");
+                          e.dataTransfer.setData("fromExcludedId", item.id);
+                          if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
+                        }}
                       >
-                        <X size={12} strokeWidth={3} />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
+                          {resolvedImg ? (
+                            <img src={resolvedImg} alt="excluded" className="w-full h-full object-contain" />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                              <Ban size={16} />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="w-full flex justify-between items-center text-[9px]">
+                          <span className="font-bold text-rose-500 truncate max-w-[60px] font-mono">{item.code || 'No Code'}</span>
+                          {item.label && (
+                            <span className="bg-slate-100 text-slate-500 px-1 rounded truncate max-w-[50px]">{item.label}</span>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={() => onDeleteFromExcluded(item.id)}
+                          className="absolute -top-1.5 -right-1.5 bg-white rounded-full p-1 shadow-sm text-rose-400 hover:text-rose-600 hover:bg-rose-50 border border-rose-100 opacity-0 group-hover:opacity-100 transition-all"
+                          title="完全に削除"
+                        >
+                          <X size={12} strokeWidth={3} />
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1587,43 +1595,45 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {tempItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="group relative border border-slate-200 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center min-h-[80px] transition-all"
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("src", item.image);
-                    e.dataTransfer.setData("type", "image");
-                    e.dataTransfer.setData("name", item.originalName || "temp");
-                    e.dataTransfer.setData("label", item.label || "");
-                    e.dataTransfer.setData("code", item.code || "");
-                    e.dataTransfer.setData("fromTempId", item.id);
-                    if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
-                    if (item.panelId) e.dataTransfer.setData("panelId", item.panelId);
-                  }}
-                >
-                  {item.image ? (
-                    <img src={item.image} alt="temp" className="w-full h-16 object-contain rounded" />
-                  ) : (
-                    <div className="w-full h-16 flex flex-col items-center justify-center bg-slate-50 rounded text-slate-400">
-                      <span className="text-[10px] font-mono">{item.code || 'No Image'}</span>
-                    </div>
-                  )}
-
-                  {item.label && (
-                    <div className="absolute top-1 left-1 bg-slate-800/80 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded shadow-sm">
-                      {item.label}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => onDeleteFromTemp(item.id)}
-                    className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all border border-slate-100"
+              {tempItems.map((item) => {
+                const resolvedImg = item.image || (item.imageId ? imageDataById?.[item.imageId] : null);
+                return (
+                  <div
+                    key={item.id}
+                    className="group relative border border-slate-200 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center min-h-[80px] transition-all"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("src", resolvedImg || "");
+                      e.dataTransfer.setData("type", "image");
+                      e.dataTransfer.setData("name", item.originalName || "temp");
+                      e.dataTransfer.setData("label", item.label || "");
+                      e.dataTransfer.setData("code", item.code || "");
+                      e.dataTransfer.setData("fromTempId", item.id);
+                      if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
+                    }}
                   >
-                    <X size={12} strokeWidth={3} />
-                  </button>
-                </div>
-              ))}
+                    {resolvedImg ? (
+                      <img src={resolvedImg} alt="temp" className="w-full h-16 object-contain rounded" />
+                    ) : (
+                      <div className="w-full h-16 flex flex-col items-center justify-center bg-slate-50 rounded text-slate-400">
+                        <span className="text-[10px] font-mono">{item.code || 'No Image'}</span>
+                      </div>
+                    )}
+
+                    {item.label && (
+                      <div className="absolute top-1 left-1 bg-slate-800/80 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded shadow-sm">
+                        {item.label}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => onDeleteFromTemp(item.id)}
+                      className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all border border-slate-100"
+                    >
+                      <X size={12} strokeWidth={3} />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -1968,10 +1978,15 @@ export default function App() {
     return true;
   };
 
-  const findFirstPlaceableIndex = (rowSpan, colSpan, occupied) => {
-    for (let startIdx = 0; startIdx < 16; startIdx++) {
-      if (occupied.has(startIdx)) continue;
-      if (canPlacePanelAt(startIdx, rowSpan, colSpan, occupied)) return startIdx;
+  const findFirstPlaceableIndex = (rowSpan, colSpan, occupied, startIndex = 0) => {
+    for (let i = startIndex; i < 16; i++) {
+      if (canPlacePanelAt(i, rowSpan, colSpan, occupied)) return i;
+    }
+    // もし指定の開始位置から見つからなければ、最初から探し直す (フォールバック)
+    if (startIndex > 0) {
+      for (let i = 0; i < startIndex; i++) {
+        if (canPlacePanelAt(i, rowSpan, colSpan, occupied)) return i;
+      }
     }
     return -1;
   };
@@ -2386,7 +2401,6 @@ export default function App() {
         code: panel.code || null,
         text: panel.text || '',
         isText: panel.isText || false,
-        panelId: panel.panelId || null,
         originalName: "退避アイテム",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -2396,7 +2410,7 @@ export default function App() {
       // localStorageHelper.setItem('tempItems', newTempItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2413,7 +2427,6 @@ export default function App() {
       code: panel.code || null,
       text: panel.text || '',
       isText: panel.isText || false,
-      panelId: panel.panelId || null,
       originalName: "退避アイテム",
       createdAt: serverTimestamp()
     });
@@ -2426,8 +2439,7 @@ export default function App() {
       label: null,
       code: null,
       text: '',
-      isText: false,
-      panelId: null
+      isText: false
     };
     const sheetRef = doc(sheetsCollection, sheetId);
     batch.update(sheetRef, { panels: updatedPanels });
@@ -2460,7 +2472,6 @@ export default function App() {
         code: panel.code || null,
         text: panel.text || '',
         isText: panel.isText || false,
-        panelId: panel.panelId || null,
         originalName: "掲載除外",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -2470,7 +2481,7 @@ export default function App() {
       // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null };
+      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2487,7 +2498,6 @@ export default function App() {
       code: panel.code || null,
       text: panel.text || '',
       isText: panel.isText || false,
-      panelId: panel.panelId || null,
       originalName: "掲載除外",
       createdAt: serverTimestamp()
     });
@@ -2500,8 +2510,7 @@ export default function App() {
       label: null,
       code: null,
       text: '',
-      isText: false,
-      panelId: null
+      isText: false
     };
     const sheetRef = doc(sheetsCollection, sheetId);
     batch.update(sheetRef, { panels: updatedPanels });
@@ -2550,25 +2559,6 @@ export default function App() {
         }
       }
     );
-  };
-
-  const handleMoveToStock = async (sheetId, panelIndex) => {
-    const sheet = sheets.find(s => s.id === sheetId);
-    if (!sheet) return;
-    const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
-
-    const updatedData = { ...panel, image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null };
-
-    if (USE_LOCAL_STORAGE) {
-      const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: s.panels.map((p, i) => i === panelIndex ? updatedData : p) } : s);
-      setSheets(newSheets);
-      return;
-    }
-
-    await updateDoc(doc(sheetsCollection, sheetId), {
-      panels: sheet.panels.map((p, i) => i === panelIndex ? updatedData : p)
-    });
   };
 
   const handleExportExcludedCSV = () => {
@@ -2633,6 +2623,17 @@ export default function App() {
     handleUpdatePanel(sheetId, panelIndex, newData);
   };
 
+  const handleMoveToStock = useCallback(async (sheetId, panelIndex) => {
+    const sheet = sheets.find(s => s.id === sheetId);
+    if (!sheet) return;
+    const panel = sheet.panels[panelIndex];
+    if (!panel) return;
+    handlePanelUpdateWithCheck(sheetId, panelIndex, {
+      ...panel,
+      image: null, imageId: null, label: null, code: null, text: '', isText: false
+    });
+  }, [sheets]);
+
   const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
 
@@ -2650,18 +2651,17 @@ export default function App() {
 
         newPanels[fromIndex] = {
           ...newPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
+          image: null, imageId: null, label: null, code: null, text: '', isText: false
         };
 
         newPanels[toIndex] = {
           ...newPanels[toIndex],
           image: dataToMove.image,
-          imageId: dataToMove.imageId,
+          imageId: dataToMove.imageId || null,
           label: dataToMove.label,
           code: dataToMove.code,
           text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText,
-          panelId: dataToMove.panelId
+          isText: !!dataToMove.isText
         };
 
         const newSheets = sheets.map(s => s.id === fromSheetId ? { ...s, panels: newPanels } : s);
@@ -2673,19 +2673,18 @@ export default function App() {
 
         newFromPanels[fromIndex] = {
           ...newFromPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
+          image: null, imageId: null, label: null, code: null, text: '', isText: false
         };
 
         const newToPanels = [...toSheet.panels];
         newToPanels[toIndex] = {
           ...newToPanels[toIndex],
           image: dataToMove.image,
-          imageId: dataToMove.imageId,
+          imageId: dataToMove.imageId || null,
           label: dataToMove.label,
           code: dataToMove.code,
           text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText,
-          panelId: dataToMove.panelId
+          isText: !!dataToMove.isText
         };
 
         const newSheets = sheets.map(s => {
@@ -2707,18 +2706,17 @@ export default function App() {
 
       newPanels[fromIndex] = {
         ...newPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
+        image: null, imageId: null, label: null, code: null, text: '', isText: false
       };
 
       newPanels[toIndex] = {
         ...newPanels[toIndex],
         image: dataToMove.image,
-        imageId: dataToMove.imageId,
+        imageId: dataToMove.imageId || null,
         label: dataToMove.label,
         code: dataToMove.code,
         text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-        isText: !!dataToMove.isText,
-        panelId: dataToMove.panelId
+        isText: !!dataToMove.isText
       };
 
       const sheetRef = doc(sheetsCollection, fromSheetId);
@@ -2729,7 +2727,7 @@ export default function App() {
 
       newFromPanels[fromIndex] = {
         ...newFromPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false, panelId: null
+        image: null, imageId: null, label: null, code: null, text: '', isText: false
       };
       batch.update(doc(sheetsCollection, fromSheetId), { panels: newFromPanels });
 
@@ -2737,12 +2735,11 @@ export default function App() {
       newToPanels[toIndex] = {
         ...newToPanels[toIndex],
         image: dataToMove.image,
-        imageId: dataToMove.imageId,
+        imageId: dataToMove.imageId || null,
         label: dataToMove.label,
         code: dataToMove.code,
         text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-        isText: !!dataToMove.isText,
-        panelId: dataToMove.panelId
+        isText: !!dataToMove.isText
       };
       batch.update(doc(sheetsCollection, toSheetId), { panels: newToPanels });
     }
@@ -3431,7 +3428,11 @@ export default function App() {
           const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
 
           // 前のコマ配置後の occupied を考慮し、先頭から最初に配置可能な位置を探す
-          const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied);
+          // コマ番号 (item.order) を開始座標のヒントとして使用
+          // ユーザーの要件: コマ番号1→X1Y1, 2→X2Y1 ... 等。
+          // findFirstPlaceableIndex に第4引数として (order-1) を渡す。
+          const startCandidate = (item.order > 0 && item.order <= 16) ? item.order - 1 : 0;
+          const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied, startCandidate);
 
           if (resolvedStartIdx === -1) {
             importSummary.autoFailed++;
@@ -3859,6 +3860,7 @@ export default function App() {
           onExportExcludedCSV={handleExportExcludedCSV}
           onBulkDeleteExcluded={handleBulkDeleteExcluded}
           onMoveToStock={handleMoveToStock}
+          imageDataById={imageDataById}
         />
 
         <div
