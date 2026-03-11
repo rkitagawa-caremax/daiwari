@@ -19,7 +19,8 @@ import {
   serverTimestamp,
   writeBatch,
   getDoc,
-  getDocs
+  getDocs,
+  runTransaction
 } from 'firebase/firestore';
 import {
   Plus,
@@ -240,6 +241,41 @@ const isSameStockImageList = (a = [], b = []) => {
   }
   return true;
 };
+
+const getPanelDataPatch = (currentPanel = {}, nextPanel = {}) => {
+  const patch = {};
+  const keys = new Set([...Object.keys(currentPanel), ...Object.keys(nextPanel)]);
+
+  keys.forEach((key) => {
+    const currentValue = normalizeComparableValue(currentPanel[key]);
+    const nextValue = normalizeComparableValue(nextPanel[key]);
+    const isObjectLike = (v) => v !== null && typeof v === 'object';
+
+    const isChanged = (isObjectLike(currentValue) || isObjectLike(nextValue))
+      ? JSON.stringify(currentValue) !== JSON.stringify(nextValue)
+      : currentValue !== nextValue;
+
+    if (isChanged) {
+      patch[key] = nextPanel[key];
+    }
+  });
+
+  return patch;
+};
+
+const hasPanelTransferableContent = (panel = {}) => {
+  return !!(panel.image || panel.imageId || panel.label || panel.isText || panel.code);
+};
+
+const clearPanelTransferableContent = (panel = {}) => ({
+  ...panel,
+  image: null,
+  imageId: null,
+  label: null,
+  code: null,
+  text: '',
+  isText: false
+});
 
 // --- Normalization Utility for Product Codes ---
 const normalizeCode = (str) => {
@@ -626,11 +662,6 @@ const SalesPopup = React.memo(({ data, position, onMouseEnter, onMouseLeave }) =
           </li>
         ))}
       </ul>
-      {data.length > 5 && (
-        <div className="text-[10px] text-center text-slate-400 mt-3 font-medium bg-slate-50 py-1 rounded-full border border-dashed border-slate-200">
-          他 {data.length - 5} 件の商品
-        </div>
-      )}
     </div>
   );
 });
@@ -1416,12 +1447,19 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
 });
 
 // ... Sidebar Component ...
-const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded, onMoveToStock, imageDataById }) => {
+const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded, onMoveToStock, imageDataById, onShowQuickHelp, onHideQuickHelp }) => {
   const [activeTab, setActiveTab] = useState('stock');
   const [resizing, setResizing] = useState(false);
   const [statusGenreFilter, setStatusGenreFilter] = useState('all');
   const [isImageSelectionMode, setIsImageSelectionMode] = useState(false);
   const [selectedImageIds, setSelectedImageIds] = useState(new Set());
+
+  const sidebarTabHelp = {
+    stock: { title: '画像', description: '画像ライブラリを表示します。画像の検索・アップロード・配置ができます。' },
+    dummy: { title: 'ダミー', description: 'ダミー素材をドラッグしてコマに配置します。テキストダミーもここから使えます。' },
+    status: { title: '空き', description: 'ページごとの空きコマ状況を確認できます。ジャンル絞り込みにも対応しています。' },
+    excluded: { title: '除外', description: '掲載除外リストです。除外した素材の確認・復帰・削除ができます。' }
+  };
 
   const getImageSelectionKey = useCallback((img) => {
     if (img?.id) return `id:${img.id}`;
@@ -1561,6 +1599,11 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              onMouseEnter={(e) => {
+                const help = sidebarTabHelp[tab.id];
+                if (help) onShowQuickHelp?.(e, help.title, help.description);
+              }}
+              onMouseLeave={() => onHideQuickHelp?.()}
               className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-full transition-all duration-200 whitespace-nowrap ${activeTab === tab.id ? 'bg-white shadow-sm' : 'hover:bg-black/5 opacity-70'}`}
               style={activeTab === tab.id ? { color: 'var(--m3-primary)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
@@ -1583,6 +1626,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
               placeholder="画像検索..."
               value={searchQuery}
               onChange={(e) => onSearch(e.target.value)}
+              onMouseEnter={(e) => onShowQuickHelp?.(e, '画像検索', '画像名でライブラリを絞り込みます。キーワード入力で候補を素早く探せます。')}
+              onMouseLeave={() => onHideQuickHelp?.()}
               className="w-full p-3 pl-12 rounded-full transition-all"
               style={{ background: 'var(--m3-surface-container-high)', color: 'var(--m3-on-surface)' }}
             />
@@ -1612,6 +1657,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
               <label
                 className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group"
                 style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface)' }}
+                onMouseEnter={(e) => onShowQuickHelp?.(e, 'クリックしてアップロード', '画像ファイルを選択してライブラリに追加します。複数選択アップロードにも対応します。')}
+                onMouseLeave={() => onHideQuickHelp?.()}
               >
                 <div className="flex flex-col items-center pt-2 pb-3">
                   <div className="p-3 rounded-full mb-3 transition-colors" style={{ background: 'var(--m3-primary-container)' }}>
@@ -1633,6 +1680,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                   setIsImageSelectionMode(!isImageSelectionMode);
                   setSelectedImageIds(new Set());
                 }}
+                onMouseEnter={(e) => onShowQuickHelp?.(e, 'ライブラリのチェックボックス', '複数画像を選択するモードです。ONで一括選択・一括削除が使えます。')}
+                onMouseLeave={() => onHideQuickHelp?.()}
                 className={`p-2 rounded-full transition-all ${isImageSelectionMode ? 'bg-primary-container text-on-primary-container ring-1' : ''}`}
                 style={isImageSelectionMode ? { background: 'var(--m3-primary-container)', color: 'var(--m3-on-primary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
                 title="画像を選択して削除"
@@ -1955,7 +2004,11 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDropToTemp}
       >
-        <div className="px-4 py-2 border-b border-slate-200 flex items-center justify-between bg-white">
+        <div
+          className="px-4 py-2 border-b border-slate-200 flex items-center justify-between bg-white"
+          onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ドラッグで戻せるので並べ替えや調整に使えます。')}
+          onMouseLeave={() => onHideQuickHelp?.()}
+        >
           <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
             <div className="p-1 bg-indigo-100 text-indigo-600 rounded">
               <ClipboardList size={14} />
@@ -2082,8 +2135,11 @@ export default function App() {
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
+  const [isQuickHelpMode, setIsQuickHelpMode] = useState(false);
+  const [quickHelpPopup, setQuickHelpPopup] = useState(null);
   const logoTapCountRef = useRef(0);
   const logoTapTimeoutRef = useRef(null);
+  const quickHelpHighlightRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
 
@@ -2818,12 +2874,12 @@ export default function App() {
     const sheetToUpdate = sheets.find(s => s.id === sheetId);
     if (!sheetToUpdate) return;
     const currentPanel = sheetToUpdate.panels[panelIndex] || {};
-    if (isPanelDataEqual(currentPanel, newData)) return;
-
-    const updatedPanels = [...sheetToUpdate.panels];
-    updatedPanels[panelIndex] = newData;
+    const panelPatch = getPanelDataPatch(currentPanel, newData);
+    if (Object.keys(panelPatch).length === 0) return;
 
     if (USE_LOCAL_STORAGE) {
+      const updatedPanels = [...sheetToUpdate.panels];
+      updatedPanels[panelIndex] = { ...currentPanel, ...panelPatch };
       const newSheets = sheets.map(s =>
         s.id === sheetId ? { ...s, panels: updatedPanels } : s
       );
@@ -2832,18 +2888,37 @@ export default function App() {
       return;
     }
 
-    await updateDoc(doc(sheetsCollection, sheetId), { panels: updatedPanels });
-  }, [sheets, sheetsCollection]);
+    if (!sheetsCollection || !tempShelfCollection) return;
+
+    try {
+      const sheetRef = doc(sheetsCollection, sheetId);
+      await runTransaction(db, async (transaction) => {
+        const sheetSnap = await transaction.get(sheetRef);
+        if (!sheetSnap.exists()) return;
+
+        const serverPanels = [...(sheetSnap.data().panels || [])];
+        const serverPanel = serverPanels[panelIndex] || {};
+        const mergedPanel = { ...serverPanel, ...panelPatch };
+
+        if (isPanelDataEqual(serverPanel, mergedPanel)) return;
+        serverPanels[panelIndex] = mergedPanel;
+        transaction.update(sheetRef, { panels: serverPanels });
+      });
+    } catch (error) {
+      console.error("Panel update transaction failed:", error);
+      showAlert("同時編集との競合が発生しました。再度お試しください。");
+    }
+  }, [sheets, sheetsCollection, showAlert]);
 
   // --- Temp & Excluded Logic (Restored) ---
 
   const handleMoveToTemp = async (sheetId, panelIndex, movedText) => {
-    const sheet = sheets.find(s => s.id === sheetId);
-    if (!sheet) return;
-    const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
-
     if (USE_LOCAL_STORAGE) {
+      const sheet = sheets.find(s => s.id === sheetId);
+      if (!sheet) return;
+      const panel = sheet.panels[panelIndex];
+      if (!hasPanelTransferableContent(panel)) return;
+
       const newTempItem = {
         id: idbHelper.generateId(),
         image: panel.image || null,
@@ -2861,7 +2936,7 @@ export default function App() {
       // localStorageHelper.setItem('tempItems', newTempItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = clearPanelTransferableContent(updatedPanels[panelIndex]);
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2869,33 +2944,38 @@ export default function App() {
       return;
     }
 
-    const batch = writeBatch(db);
-    const tempRef = doc(tempShelfCollection);
-    batch.set(tempRef, {
-      image: panel.image || null,
-      imageId: panel.imageId || null,
-      label: panel.label || null,
-      code: panel.code || null,
-      text: movedText !== undefined ? movedText : (panel.text || ''),
-      isText: panel.isText || false,
-      originalName: "退避アイテム",
-      createdAt: serverTimestamp()
-    });
+    if (!sheetsCollection || !excludedItemsCollection) return;
 
-    const updatedPanels = [...sheet.panels];
-    updatedPanels[panelIndex] = {
-      ...updatedPanels[panelIndex],
-      image: null,
-      imageId: null,
-      label: null,
-      code: null,
-      text: '',
-      isText: false
-    };
-    const sheetRef = doc(sheetsCollection, sheetId);
-    batch.update(sheetRef, { panels: updatedPanels });
+    try {
+      const sheetRef = doc(sheetsCollection, sheetId);
+      const tempRef = doc(tempShelfCollection);
 
-    await batch.commit();
+      await runTransaction(db, async (transaction) => {
+        const sheetSnap = await transaction.get(sheetRef);
+        if (!sheetSnap.exists()) return;
+
+        const serverPanels = [...(sheetSnap.data().panels || [])];
+        const sourcePanel = serverPanels[panelIndex] || {};
+        if (!hasPanelTransferableContent(sourcePanel)) return;
+
+        transaction.set(tempRef, {
+          image: sourcePanel.image || null,
+          imageId: sourcePanel.imageId || null,
+          label: sourcePanel.label || null,
+          code: sourcePanel.code || null,
+          text: movedText !== undefined ? movedText : (sourcePanel.text || ''),
+          isText: sourcePanel.isText || false,
+          originalName: "退避アイテム",
+          createdAt: serverTimestamp()
+        });
+
+        serverPanels[panelIndex] = clearPanelTransferableContent(sourcePanel);
+        transaction.update(sheetRef, { panels: serverPanels });
+      });
+    } catch (error) {
+      console.error("Move to temp transaction failed:", error);
+      showAlert("仮置き場への移動に失敗しました。再度お試しください。");
+    }
   };
 
   const handleDeleteFromTemp = async (id) => {
@@ -2909,12 +2989,12 @@ export default function App() {
   };
 
   const handleMoveToExcluded = async (sheetId, panelIndex, movedText) => {
-    const sheet = sheets.find(s => s.id === sheetId);
-    if (!sheet) return;
-    const panel = sheet.panels[panelIndex];
-    if (!panel.image && !panel.imageId && !panel.label && !panel.isText && !panel.code) return;
-
     if (USE_LOCAL_STORAGE) {
+      const sheet = sheets.find(s => s.id === sheetId);
+      if (!sheet) return;
+      const panel = sheet.panels[panelIndex];
+      if (!hasPanelTransferableContent(panel)) return;
+
       const newExcludedItem = {
         id: idbHelper.generateId(),
         image: panel.image || null,
@@ -2932,7 +3012,7 @@ export default function App() {
       // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
 
       const updatedPanels = [...sheet.panels];
-      updatedPanels[panelIndex] = { ...updatedPanels[panelIndex], image: null, imageId: null, label: null, code: null, text: '', isText: false };
+      updatedPanels[panelIndex] = clearPanelTransferableContent(updatedPanels[panelIndex]);
 
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
       setSheets(newSheets);
@@ -2940,33 +3020,38 @@ export default function App() {
       return;
     }
 
-    const batch = writeBatch(db);
-    const excludedRef = doc(excludedItemsCollection);
-    batch.set(excludedRef, {
-      image: panel.image || null,
-      imageId: panel.imageId || null,
-      label: panel.label || null,
-      code: panel.code || null,
-      text: movedText !== undefined ? movedText : (panel.text || ''),
-      isText: panel.isText || false,
-      originalName: "掲載除外",
-      createdAt: serverTimestamp()
-    });
+    if (!sheetsCollection) return;
 
-    const updatedPanels = [...sheet.panels];
-    updatedPanels[panelIndex] = {
-      ...updatedPanels[panelIndex],
-      image: null,
-      imageId: null,
-      label: null,
-      code: null,
-      text: '',
-      isText: false
-    };
-    const sheetRef = doc(sheetsCollection, sheetId);
-    batch.update(sheetRef, { panels: updatedPanels });
+    try {
+      const sheetRef = doc(sheetsCollection, sheetId);
+      const excludedRef = doc(excludedItemsCollection);
 
-    await batch.commit();
+      await runTransaction(db, async (transaction) => {
+        const sheetSnap = await transaction.get(sheetRef);
+        if (!sheetSnap.exists()) return;
+
+        const serverPanels = [...(sheetSnap.data().panels || [])];
+        const sourcePanel = serverPanels[panelIndex] || {};
+        if (!hasPanelTransferableContent(sourcePanel)) return;
+
+        transaction.set(excludedRef, {
+          image: sourcePanel.image || null,
+          imageId: sourcePanel.imageId || null,
+          label: sourcePanel.label || null,
+          code: sourcePanel.code || null,
+          text: movedText !== undefined ? movedText : (sourcePanel.text || ''),
+          isText: sourcePanel.isText || false,
+          originalName: "掲載除外",
+          createdAt: serverTimestamp()
+        });
+
+        serverPanels[panelIndex] = clearPanelTransferableContent(sourcePanel);
+        transaction.update(sheetRef, { panels: serverPanels });
+      });
+    } catch (error) {
+      console.error("Move to excluded transaction failed:", error);
+      showAlert("除外リストへの移動に失敗しました。再度お試しください。");
+    }
   };
 
   const handleDeleteFromExcluded = async (id) => {
@@ -3081,29 +3166,26 @@ export default function App() {
   const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
 
-    const fromSheet = sheets.find(s => s.id === fromSheetId);
-    const toSheet = sheets.find(s => s.id === toSheetId);
-    if (!fromSheet || !toSheet) return;
-
-    const fromPanel = fromSheet.panels[fromIndex];
-    if (!fromPanel.image && !fromPanel.label && !fromPanel.isText && !fromPanel.code) return;
-
     if (USE_LOCAL_STORAGE) {
+      const fromSheet = sheets.find(s => s.id === fromSheetId);
+      const toSheet = sheets.find(s => s.id === toSheetId);
+      if (!fromSheet || !toSheet) return;
+
+      const fromPanel = fromSheet.panels[fromIndex];
+      if (!hasPanelTransferableContent(fromPanel)) return;
+
       if (fromSheetId === toSheetId) {
         const newPanels = [...fromSheet.panels];
         const dataToMove = { ...newPanels[fromIndex] };
 
-        newPanels[fromIndex] = {
-          ...newPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false
-        };
+        newPanels[fromIndex] = clearPanelTransferableContent(newPanels[fromIndex]);
 
         newPanels[toIndex] = {
           ...newPanels[toIndex],
-          image: dataToMove.image,
+          image: dataToMove.image || null,
           imageId: dataToMove.imageId || null,
-          label: dataToMove.label,
-          code: dataToMove.code,
+          label: dataToMove.label || null,
+          code: dataToMove.code || null,
           text: movedText !== undefined ? movedText : (dataToMove.text || ''),
           isText: !!dataToMove.isText
         };
@@ -3115,18 +3197,15 @@ export default function App() {
         const newFromPanels = [...fromSheet.panels];
         const dataToMove = { ...newFromPanels[fromIndex] };
 
-        newFromPanels[fromIndex] = {
-          ...newFromPanels[fromIndex],
-          image: null, imageId: null, label: null, code: null, text: '', isText: false
-        };
+        newFromPanels[fromIndex] = clearPanelTransferableContent(newFromPanels[fromIndex]);
 
         const newToPanels = [...toSheet.panels];
         newToPanels[toIndex] = {
           ...newToPanels[toIndex],
-          image: dataToMove.image,
+          image: dataToMove.image || null,
           imageId: dataToMove.imageId || null,
-          label: dataToMove.label,
-          code: dataToMove.code,
+          label: dataToMove.label || null,
+          code: dataToMove.code || null,
           text: movedText !== undefined ? movedText : (dataToMove.text || ''),
           isText: !!dataToMove.isText
         };
@@ -3142,53 +3221,57 @@ export default function App() {
       return;
     }
 
-    const batch = writeBatch(db);
+    try {
+      const fromSheetRef = doc(sheetsCollection, fromSheetId);
+      const toSheetRef = doc(sheetsCollection, toSheetId);
 
-    if (fromSheetId === toSheetId) {
-      const newPanels = [...fromSheet.panels];
-      const dataToMove = { ...newPanels[fromIndex] };
+      await runTransaction(db, async (transaction) => {
+        const fromSnap = await transaction.get(fromSheetRef);
+        if (!fromSnap.exists()) return;
 
-      newPanels[fromIndex] = {
-        ...newPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false
-      };
+        const fromPanels = [...(fromSnap.data().panels || [])];
+        const dataToMove = { ...(fromPanels[fromIndex] || {}) };
+        if (!hasPanelTransferableContent(dataToMove)) return;
 
-      newPanels[toIndex] = {
-        ...newPanels[toIndex],
-        image: dataToMove.image,
-        imageId: dataToMove.imageId || null,
-        label: dataToMove.label,
-        code: dataToMove.code,
-        text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-        isText: !!dataToMove.isText
-      };
+        if (fromSheetId === toSheetId) {
+          fromPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
+          const targetPanel = fromPanels[toIndex] || {};
+          fromPanels[toIndex] = {
+            ...targetPanel,
+            image: dataToMove.image || null,
+            imageId: dataToMove.imageId || null,
+            label: dataToMove.label || null,
+            code: dataToMove.code || null,
+            text: movedText !== undefined ? movedText : (dataToMove.text || ''),
+            isText: !!dataToMove.isText
+          };
+          transaction.update(fromSheetRef, { panels: fromPanels });
+          return;
+        }
 
-      const sheetRef = doc(sheetsCollection, fromSheetId);
-      batch.update(sheetRef, { panels: newPanels });
-    } else {
-      const newFromPanels = [...fromSheet.panels];
-      const dataToMove = { ...newFromPanels[fromIndex] };
+        const toSnap = await transaction.get(toSheetRef);
+        if (!toSnap.exists()) return;
 
-      newFromPanels[fromIndex] = {
-        ...newFromPanels[fromIndex],
-        image: null, imageId: null, label: null, code: null, text: '', isText: false
-      };
-      batch.update(doc(sheetsCollection, fromSheetId), { panels: newFromPanels });
+        const toPanels = [...(toSnap.data().panels || [])];
+        fromPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
+        const targetPanel = toPanels[toIndex] || {};
+        toPanels[toIndex] = {
+          ...targetPanel,
+          image: dataToMove.image || null,
+          imageId: dataToMove.imageId || null,
+          label: dataToMove.label || null,
+          code: dataToMove.code || null,
+          text: movedText !== undefined ? movedText : (dataToMove.text || ''),
+          isText: !!dataToMove.isText
+        };
 
-      const newToPanels = [...toSheet.panels];
-      newToPanels[toIndex] = {
-        ...newToPanels[toIndex],
-        image: dataToMove.image,
-        imageId: dataToMove.imageId || null,
-        label: dataToMove.label,
-        code: dataToMove.code,
-        text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-        isText: !!dataToMove.isText
-      };
-      batch.update(doc(sheetsCollection, toSheetId), { panels: newToPanels });
+        transaction.update(fromSheetRef, { panels: fromPanels });
+        transaction.update(toSheetRef, { panels: toPanels });
+      });
+    } catch (error) {
+      console.error("Move panel transaction failed:", error);
+      showAlert("同時編集との競合が発生しました。再度お試しください。");
     }
-
-    await batch.commit();
   };
 
   // --- Image & Bulk Actions ---
@@ -4175,6 +4258,53 @@ export default function App() {
     setIsSettingsOpen(true);
   }, []);
 
+  const clearQuickHelpHighlight = useCallback(() => {
+    const target = quickHelpHighlightRef.current;
+    if (!target) return;
+
+    const prevBoxShadow = target.dataset.quickHelpPrevBoxShadow ?? '';
+    target.style.boxShadow = prevBoxShadow;
+    delete target.dataset.quickHelpPrevBoxShadow;
+    quickHelpHighlightRef.current = null;
+  }, []);
+
+  const showQuickHelp = useCallback((event, title, description) => {
+    if (!isQuickHelpMode) return;
+    const target = event.currentTarget;
+    if (target && quickHelpHighlightRef.current !== target) {
+      clearQuickHelpHighlight();
+      target.dataset.quickHelpPrevBoxShadow = target.style.boxShadow || '';
+      target.style.boxShadow = '0 0 0 2px rgba(56, 189, 248, 0.75), 0 0 18px rgba(56, 189, 248, 0.45)';
+      quickHelpHighlightRef.current = target;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const popupHalfWidth = 230;
+    const x = Math.min(
+      Math.max(rect.left + rect.width / 2, popupHalfWidth),
+      window.innerWidth - popupHalfWidth
+    );
+
+    setQuickHelpPopup({
+      title,
+      description,
+      x,
+      y: rect.bottom + 8
+    });
+  }, [isQuickHelpMode, clearQuickHelpHighlight]);
+
+  const hideQuickHelp = useCallback(() => {
+    clearQuickHelpHighlight();
+    setQuickHelpPopup(null);
+  }, [clearQuickHelpHighlight]);
+
+  useEffect(() => {
+    if (!isQuickHelpMode) {
+      clearQuickHelpHighlight();
+      setQuickHelpPopup(null);
+    }
+  }, [isQuickHelpMode, clearQuickHelpHighlight]);
+
   // --- Render ---
   // --- Render ---
   if (!isAuthenticated) return <AuthGate onAuthenticated={handleAuthenticated} defaultAppId={appId} />;
@@ -4227,6 +4357,8 @@ export default function App() {
           <div className="flex p-1 rounded-full transition-all" style={{ border: '1px solid var(--m3-outline)', background: 'var(--m3-surface)' }}>
             <button
               onClick={() => { setViewMode('list'); setActiveSheetId(null); setIsPageSelectionMode(false); setIsLabelSelectionMode(false); }}
+              onMouseEnter={(e) => showQuickHelp(e, '詳細', 'ページ単位で編集する表示に切り替えます。')}
+              onMouseLeave={hideQuickHelp}
               className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
               style={viewMode === 'list' || viewMode === 'single' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
@@ -4234,6 +4366,8 @@ export default function App() {
             </button>
             <button
               onClick={() => { setViewMode('overview'); setActiveSheetId(null); setIsPageSelectionMode(false); setIsLabelSelectionMode(false); }}
+              onMouseEnter={(e) => showQuickHelp(e, '全体', '全ページを一覧で表示します。コマの全体把握に使います。')}
+              onMouseLeave={hideQuickHelp}
               className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
               style={viewMode === 'overview' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
@@ -4244,10 +4378,22 @@ export default function App() {
           {/* Page Selection Mode Toggle */}
           <button
             onClick={togglePageSelectionMode}
+            onMouseEnter={(e) => showQuickHelp(e, '選択モード', '複数ページを選択して、入れ替え・画像解除・削除を行います。')}
+            onMouseLeave={hideQuickHelp}
             className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border ml-3 whitespace-nowrap ${isPageSelectionMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
             title="複数ページを選択して削除"
           >
             <CheckSquare size={14} strokeWidth={2.5} /> <span className="hidden sm:inline">選択モード</span>
+          </button>
+
+          <button
+            onClick={() => setIsQuickHelpMode((prev) => !prev)}
+            className={`ml-1 w-9 h-9 rounded-full border text-[14px] font-extrabold leading-none transition-all ${isQuickHelpMode
+              ? 'bg-sky-600 text-white border-sky-500 ring-4 ring-sky-300/50 shadow-[0_0_20px_rgba(56,189,248,0.55)]'
+              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+            title="クイックヘルプ"
+          >
+            Q
           </button>
 
           {isPageSelectionMode && (
@@ -4292,6 +4438,8 @@ export default function App() {
             <div className={`flex items-center gap-1 ml-2 rounded-xl p-1 border ${isSalesMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
               <button
                 onClick={toggleMergeMode}
+                onMouseEnter={(e) => showQuickHelp(e, 'コマ結合', 'コマの結合/分離モードを切り替えます。複数コマを選択して結合できます。')}
+                onMouseLeave={hideQuickHelp}
                 className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap ${isMergeMode ? 'bg-indigo-100 text-indigo-700 shadow-inner' : (isSalesMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-white hover:shadow-sm')}`}
                 title="コマ結合・分離モードの切り替え"
               >
@@ -4326,6 +4474,8 @@ export default function App() {
           {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
             <button
               onClick={() => setIsSalesMode(!isSalesMode)}
+              onMouseEnter={(e) => showQuickHelp(e, '実績モード', '販売数量データをパネル上に重ねて表示します。再度押すと解除します。')}
+              onMouseLeave={hideQuickHelp}
               className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-bold transition-all duration-300 ml-2 whitespace-nowrap
                  ${isSalesMode
                   ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
@@ -4366,6 +4516,8 @@ export default function App() {
           {!isPageSelectionMode && viewMode === 'overview' && (
             <button
               onClick={() => setHighlightLabels(!highlightLabels)}
+              onMouseEnter={(e) => showQuickHelp(e, 'ラベル強調', 'ラベルが1つ以上あるコマを緑色で強調表示します。もう一度押すと解除します。')}
+              onMouseLeave={hideQuickHelp}
               className={`flex items-center gap-2 px-3 py-2 border rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap ${highlightLabels ? 'bg-emerald-500 text-white border-emerald-600 shadow-md shadow-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
               title="自由ラベルがあるコマを緑色で強調表示"
             >
@@ -4375,6 +4527,8 @@ export default function App() {
 
           <button
             onClick={() => setHighlightEmpty(!highlightEmpty)}
+            onMouseEnter={(e) => showQuickHelp(e, '空き強調', '空きコマを赤色で強調表示します。全体表示時の確認に使います。')}
+            onMouseLeave={hideQuickHelp}
             className={`flex items-center gap-2 px-3 py-2 border rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap ${highlightEmpty ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
             title="空きコマを赤色で強調表示"
           >
@@ -4383,6 +4537,8 @@ export default function App() {
 
           <button
             onClick={handleExportCSV}
+            onMouseEnter={(e) => showQuickHelp(e, '出力', '現在のページ情報をCSVで出力します。外部共有やバックアップに使えます。')}
+            onMouseLeave={hideQuickHelp}
             className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-100 text-sm font-medium transition-all duration-200 shadow-sm hover:shadow whitespace-nowrap"
             title="ページ情報をCSVでダウンロード"
           >
@@ -4421,6 +4577,8 @@ export default function App() {
           onBulkDeleteExcluded={handleBulkDeleteExcluded}
           onMoveToStock={handleMoveToStock}
           imageDataById={imageDataById}
+          onShowQuickHelp={showQuickHelp}
+          onHideQuickHelp={hideQuickHelp}
         />
 
         <div
@@ -4487,6 +4645,8 @@ export default function App() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={handleBulkDeletePageLabels}
+                      onMouseEnter={(e) => showQuickHelp(e, 'ラベル一括削除', 'このページの自由ラベルをまとめて削除します。確認後に実行されます。')}
+                      onMouseLeave={hideQuickHelp}
                       disabled={activeSheetLabelCount === 0}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${activeSheetLabelCount > 0
                         ? 'bg-rose-600 text-white hover:bg-rose-700'
@@ -4499,6 +4659,8 @@ export default function App() {
 
                     <button
                       onClick={() => setIsLabelSelectionMode(!isLabelSelectionMode)}
+                      onMouseEnter={(e) => showQuickHelp(e, 'ラベル追加', '自由ラベル配置モードをON/OFFします。ON中はコマ内クリックでラベルを配置できます。')}
+                      onMouseLeave={hideQuickHelp}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${isLabelSelectionMode
                         ? 'bg-emerald-600 text-white shadow-emerald-200 ring-2 ring-emerald-500/30'
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
@@ -4513,6 +4675,8 @@ export default function App() {
                 {/* Add Page Button */}
                 <button
                   onClick={handleAddSheet}
+                  onMouseEnter={(e) => showQuickHelp(e, '+ページ追加', '新しいページを末尾に追加します。')}
+                  onMouseLeave={hideQuickHelp}
                   className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap"
                 >
                   <Plus size={14} strokeWidth={3} /> +ページ追加
@@ -4611,6 +4775,18 @@ export default function App() {
         onMouseEnter={() => handleHoverSales(hoveredSalesData, null)}
         onMouseLeave={handleLeaveSales}
       />
+
+      {isQuickHelpMode && quickHelpPopup && (
+        <div
+          className="fixed z-[120] pointer-events-none"
+          style={{ left: quickHelpPopup.x, top: quickHelpPopup.y, transform: 'translateX(-50%)' }}
+        >
+          <div className="min-w-[320px] max-w-[460px] rounded-2xl border border-sky-200 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl">
+            <p className="text-[13px] font-bold text-sky-700">{quickHelpPopup.title}</p>
+            <p className="text-[12px] leading-relaxed text-slate-700 mt-1.5">{quickHelpPopup.description}</p>
+          </div>
+        </div>
+      )}
 
       <input
         type="file"
