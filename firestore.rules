@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAllowedGoogleUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email in [
+          'y.goto@g.caremax.co.jp',
+          'y.goto@caremax.co.jp',
+          'k.ogura@g.caremax.co.jp',
+          'k.ogura@caremax.co.jp',
+          'k.matsue@g.caremax.co.jp',
+          'k.matsue@caremax.co.jp',
+          'k.okubo@g.caremax.co.jp',
+          'k.okubo@caremax.co.jp',
+          'k.ishihara@g.caremax.co.jp',
+          'k.ishihara@caremax.co.jp',
+          's.uhara@g.caremax.co.jp',
+          's.uhara@caremax.co.jp',
+          'r.kitagawa@g.caremax.co.jp',
+          'r.kitagawa@caremax.co.jp'
+        ];
+    }
+
+    // Shared workspace data
+    match /artifacts/{appId}/public/data/{document=**} {
+      allow read, write: if isAllowedGoogleUser();
+    }
+
+    // Per-account private workspace data
+    match /artifacts/{appId}/users/{userId}/{document=**} {
+      allow read, write: if isAllowedGoogleUser() && request.auth.uid == userId;
+    }
+  }
+}

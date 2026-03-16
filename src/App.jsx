@@ -2,8 +2,12 @@
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
-  signInAnonymously,
-  signInWithCustomToken,
+  GoogleAuthProvider,
+  browserLocalPersistence,
+  setPersistence,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   onAuthStateChanged,
   signOut
 } from 'firebase/auth';
@@ -47,7 +51,6 @@ import {
   AlertTriangle,
   Info,
   AlertCircle,
-  Globe,
   ClipboardList,
   Copy,
   CheckSquare,
@@ -57,7 +60,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Ban,
-  Lock,
   Settings,
   BarChart2,
   TrendingUp,
@@ -147,7 +149,61 @@ const GENRES = [
   { id: 'disaster', label: '災害・その他', color: '#f87171' }, // red-400
 ];
 
-const PASSCODE = "CMC8610";
+const GOOGLE_ALLOWED_ACCOUNTS = [
+  { name: '後藤 祐策', email: 'y.goto@g.caremax.co.jp' },
+  { name: '小倉 圭太郎', email: 'k.ogura@g.caremax.co.jp' },
+  { name: '松江 浩平', email: 'k.matsue@g.caremax.co.jp' },
+  { name: '大窪 嘉代', email: 'k.okubo@g.caremax.co.jp' },
+  { name: '石原 佳奈', email: 'k.ishihara@g.caremax.co.jp' },
+  { name: '宇原 承子', email: 's.uhara@g.caremax.co.jp' },
+  { name: '北川 凌士', email: 'r.kitagawa@g.caremax.co.jp' }
+];
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const GOOGLE_EMAIL_DOMAINS = ['g.caremax.co.jp', 'caremax.co.jp'];
+const expandAllowedEmailVariants = (email) => {
+  const normalized = normalizeEmail(email);
+  const atIndex = normalized.indexOf('@');
+  if (atIndex <= 0) return [normalized];
+
+  const localPart = normalized.slice(0, atIndex);
+  const domain = normalized.slice(atIndex + 1);
+  const variants = new Set([normalized]);
+
+  if (GOOGLE_EMAIL_DOMAINS.includes(domain)) {
+    GOOGLE_EMAIL_DOMAINS.forEach((d) => variants.add(`${localPart}@${d}`));
+  }
+
+  return Array.from(variants);
+};
+const GOOGLE_ALLOWED_EMAIL_SET = new Set(
+  GOOGLE_ALLOWED_ACCOUNTS.flatMap((account) => expandAllowedEmailVariants(account.email))
+);
+
+const isAllowedGoogleUser = (user) => {
+  const email = normalizeEmail(user?.email);
+  return !!email && GOOGLE_ALLOWED_EMAIL_SET.has(email);
+};
+
+const buildGoogleAuthErrorMessage = (error, fallbackMessage = 'Googleログインに失敗しました。再度お試しください。') => {
+  const code = String(error?.code || '').toLowerCase();
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'ログインがキャンセルされました。';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+    return `このドメイン（${currentHost || 'unknown'}）はFirebase認証の許可ドメインに未登録です。`;
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Firebase AuthenticationでGoogleログインが無効です。管理者設定を確認してください。';
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return 'このメールは別の認証方式に紐づいています。管理者に連絡してください。';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'ネットワークエラーでログインできませんでした。接続を確認して再試行してください。';
+  }
+  return fallbackMessage;
+};
 
 // --- Free Label Colors ---
 const FREE_LABEL_COLORS = [
@@ -242,6 +298,56 @@ const isSameStockImageList = (a = [], b = []) => {
   return true;
 };
 
+const toComparableSeconds = (value) => {
+  if (!value) return 0;
+  if (typeof value.seconds === 'number') return value.seconds;
+  if (typeof value.toDate === 'function') {
+    try {
+      return Math.floor(value.toDate().getTime() / 1000);
+    } catch (e) {
+      return 0;
+    }
+  }
+  if (typeof value === 'number') return Math.floor(value / 1000);
+  return 0;
+};
+
+const isSameTransferItemList = (a = [], b = []) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i] || {};
+    const right = b[i] || {};
+    if ((left.id || '') !== (right.id || '')) return false;
+    if ((left.image || null) !== (right.image || null)) return false;
+    if ((left.imageId || null) !== (right.imageId || null)) return false;
+    if ((left.label || null) !== (right.label || null)) return false;
+    if ((left.code || null) !== (right.code || null)) return false;
+    if ((left.text || '') !== (right.text || '')) return false;
+    if (!!left.isText !== !!right.isText) return false;
+    if ((left.originalName || '') !== (right.originalName || '')) return false;
+    if (toComparableSeconds(left.createdAt) !== toComparableSeconds(right.createdAt)) return false;
+  }
+  return true;
+};
+
+const isSameSheetList = (a = [], b = []) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i] || {};
+    const right = b[i] || {};
+    if ((left.id || '') !== (right.id || '')) return false;
+    if ((left.genre || 'none') !== (right.genre || 'none')) return false;
+    if ((left.order || 0) !== (right.order || 0)) return false;
+    const leftPanels = Array.isArray(left.panels) ? left.panels : [];
+    const rightPanels = Array.isArray(right.panels) ? right.panels : [];
+    if (leftPanels.length !== rightPanels.length) return false;
+    for (let j = 0; j < leftPanels.length; j++) {
+      if (!isPanelDataEqual(leftPanels[j] || {}, rightPanels[j] || {})) return false;
+    }
+  }
+  return true;
+};
+
 const getPanelDataPatch = (currentPanel = {}, nextPanel = {}) => {
   const patch = {};
   const keys = new Set([...Object.keys(currentPanel), ...Object.keys(nextPanel)]);
@@ -256,7 +362,7 @@ const getPanelDataPatch = (currentPanel = {}, nextPanel = {}) => {
       : currentValue !== nextValue;
 
     if (isChanged) {
-      patch[key] = nextPanel[key];
+      patch[key] = nextPanel[key] === undefined ? null : nextPanel[key];
     }
   });
 
@@ -276,6 +382,318 @@ const clearPanelTransferableContent = (panel = {}) => ({
   text: '',
   isText: false
 });
+
+const PANEL_COUNT = 16;
+const DEFAULT_PANEL_DATA = {
+  image: null,
+  imageId: null,
+  text: '',
+  label: null,
+  code: null,
+  rowSpan: 1,
+  colSpan: 1,
+  hidden: false,
+  sizeType: '1/16（1コマ）',
+  isText: false
+};
+
+const sanitizePanelData = (panel = {}) => {
+  const sanitized = {};
+  Object.keys(panel || {}).forEach((key) => {
+    sanitized[key] = panel[key] === undefined ? null : panel[key];
+  });
+  return sanitized;
+};
+
+const buildDefaultPanels = () => Array.from({ length: PANEL_COUNT }, () => ({ ...DEFAULT_PANEL_DATA }));
+
+const getPanelsFromDocData = (data = {}) => {
+  const basePanels = buildDefaultPanels();
+  const fallbackPanels = Array.isArray(data.panels) ? data.panels : [];
+  for (let i = 0; i < PANEL_COUNT; i++) {
+    basePanels[i] = {
+      ...basePanels[i],
+      ...(fallbackPanels[i] || {})
+    };
+  }
+
+  const mapPanels = (data.panelsMap && typeof data.panelsMap === 'object') ? data.panelsMap : null;
+  if (!mapPanels) return basePanels;
+
+  Object.entries(mapPanels).forEach(([rawIndex, panel]) => {
+    const index = Number.parseInt(rawIndex, 10);
+    if (Number.isNaN(index) || index < 0 || index >= PANEL_COUNT) return;
+    if (!panel || typeof panel !== 'object' || Array.isArray(panel)) return;
+    basePanels[index] = {
+      ...basePanels[index],
+      ...panel
+    };
+  });
+
+  return basePanels;
+};
+
+const toPanelsMap = (panels = []) => {
+  const map = {};
+  for (let i = 0; i < PANEL_COUNT; i++) {
+    map[String(i)] = sanitizePanelData({
+      ...DEFAULT_PANEL_DATA,
+      ...(panels[i] || {})
+    });
+  }
+  return map;
+};
+
+const buildPanelMapUpdates = (prevPanels = [], nextPanels = []) => {
+  const updates = {};
+  for (let i = 0; i < PANEL_COUNT; i++) {
+    const prev = { ...DEFAULT_PANEL_DATA, ...(prevPanels[i] || {}) };
+    const next = { ...DEFAULT_PANEL_DATA, ...(nextPanels[i] || {}) };
+    if (!isPanelDataEqual(prev, next)) {
+      updates[`panelsMap.${i}`] = sanitizePanelData(next);
+    }
+  }
+  return updates;
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const getFirestoreErrorCode = (error) => {
+  if (!error) return '';
+  const raw = String(error.code || '').toLowerCase();
+  return raw.startsWith('firestore/') ? raw.replace('firestore/', '') : raw;
+};
+
+const RETRYABLE_FIRESTORE_CODES = new Set([
+  'aborted',
+  'cancelled',
+  'deadline-exceeded',
+  'failed-precondition',
+  'internal',
+  'resource-exhausted',
+  'unavailable',
+  'unknown'
+]);
+
+const isRetryableFirestoreError = (error) => RETRYABLE_FIRESTORE_CODES.has(getFirestoreErrorCode(error));
+
+const retryAsync = async (task, options = {}) => {
+  const {
+    retries = 8,
+    baseDelayMs = 80,
+    maxDelayMs = 1600
+  } = options;
+
+  let attempt = 0;
+  while (true) {
+    try {
+      return await task(attempt);
+    } catch (error) {
+      if (attempt >= retries || !isRetryableFirestoreError(error)) {
+        throw error;
+      }
+      const backoff = Math.min(baseDelayMs * (2 ** attempt), maxDelayMs);
+      const jitter = Math.floor(Math.random() * 60);
+      await sleep(backoff + jitter);
+      attempt += 1;
+    }
+  }
+};
+
+const DAIWARI_DRAG_PAYLOAD_TYPE = 'application/x-daiwari-drag';
+const DAIWARI_DRAG_PAYLOAD_PREFIX = '__daiwari_drag__:';
+const DAIWARI_DROPZONE_ATTR = 'data-daiwari-dropzone-id';
+const DAIWARI_PANEL_DROPZONE_PREFIX = 'panel:';
+const POINTER_DRAG_THRESHOLD_PX = 10;
+const DAIWARI_DROP_HANDLED_FLAG = '__daiwariDropHandled';
+let activeNativeDragPayload = null;
+let activePanelMovePayload = null;
+let isNativeDragSessionActive = false;
+const DAIWARI_DRAG_FIELDS = [
+  'moveSourceType',
+  'sourceSheetId',
+  'sourceIndex',
+  'textData',
+  'type',
+  'src',
+  'imageId',
+  'label',
+  'code',
+  'name',
+  'isText',
+  'hasTextPayload',
+  'textPayload',
+  'text',
+  'fromTempId',
+  'fromExcludedId'
+];
+
+const normalizeDragPayload = (payload = {}) => {
+  const normalized = { __daiwariDragPayload: true };
+  DAIWARI_DRAG_FIELDS.forEach((field) => {
+    const value = payload[field];
+    normalized[field] = value === undefined || value === null ? '' : String(value);
+  });
+  return normalized;
+};
+
+const getActiveNativeDragPayload = () => {
+  if (!isNativeDragSessionActive || !activeNativeDragPayload) return null;
+  return normalizeDragPayload(activeNativeDragPayload);
+};
+
+const clearActiveNativeDragPayload = () => {
+  activeNativeDragPayload = null;
+  activePanelMovePayload = null;
+  isNativeDragSessionActive = false;
+};
+
+const isDropEventHandled = (nativeEvent) => {
+  return !!(nativeEvent && nativeEvent[DAIWARI_DROP_HANDLED_FLAG] === true);
+};
+
+const markDropEventHandled = (nativeEvent) => {
+  if (!nativeEvent) return;
+  nativeEvent[DAIWARI_DROP_HANDLED_FLAG] = true;
+};
+
+const setDragPayload = (dataTransfer, payload = {}) => {
+  if (!dataTransfer) return;
+
+  const normalized = normalizeDragPayload(payload);
+  activeNativeDragPayload = normalized;
+  activePanelMovePayload = normalized.moveSourceType === 'panel' ? normalized : null;
+  isNativeDragSessionActive = true;
+  const serialized = `${DAIWARI_DRAG_PAYLOAD_PREFIX}${JSON.stringify(normalized)}`;
+
+  DAIWARI_DRAG_FIELDS.forEach((field) => {
+    try {
+      dataTransfer.setData(field, normalized[field]);
+    } catch (error) {
+      void error;
+    }
+  });
+
+  [DAIWARI_DRAG_PAYLOAD_TYPE, 'text/plain', 'text'].forEach((type) => {
+    try {
+      dataTransfer.setData(type, serialized);
+    } catch (error) {
+      void error;
+    }
+  });
+};
+
+const getDragData = (dataTransfer, type) => {
+  if (!dataTransfer) return '';
+  try {
+    return dataTransfer.getData(type) || '';
+  } catch (error) {
+    return '';
+  }
+};
+
+const parseDragPayload = (rawValue) => {
+  if (!rawValue || !rawValue.startsWith(DAIWARI_DRAG_PAYLOAD_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(rawValue.slice(DAIWARI_DRAG_PAYLOAD_PREFIX.length));
+    if (!parsed || parsed.__daiwariDragPayload !== true) return null;
+    return normalizeDragPayload(parsed);
+  } catch (error) {
+    void error;
+    return null;
+  }
+};
+
+const getDragPayload = (dataTransfer) => {
+  const parsedPayload = (
+    parseDragPayload(getDragData(dataTransfer, DAIWARI_DRAG_PAYLOAD_TYPE))
+    || parseDragPayload(getDragData(dataTransfer, 'text/plain'))
+    || parseDragPayload(getDragData(dataTransfer, 'text'))
+  );
+  if (parsedPayload) {
+    activeNativeDragPayload = parsedPayload;
+    activePanelMovePayload = parsedPayload.moveSourceType === 'panel' ? parsedPayload : null;
+    return parsedPayload;
+  }
+
+  const legacyPayload = {};
+  DAIWARI_DRAG_FIELDS.forEach((field) => {
+    const value = getDragData(dataTransfer, field);
+    if (value !== '') {
+      legacyPayload[field] = value;
+    }
+  });
+
+  if (Object.keys(legacyPayload).length > 0) {
+    const normalizedLegacyPayload = normalizeDragPayload(legacyPayload);
+    activeNativeDragPayload = normalizedLegacyPayload;
+    activePanelMovePayload = normalizedLegacyPayload.moveSourceType === 'panel' ? normalizedLegacyPayload : null;
+    return normalizedLegacyPayload;
+  }
+
+  return getActiveNativeDragPayload();
+};
+
+const parseNullableDragValue = (value) => {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value);
+  if (!normalized || normalized === 'null' || normalized === 'undefined') return null;
+  return normalized;
+};
+
+const extractPanelMoveDragPayload = (dragPayload = {}) => {
+  if ((dragPayload.moveSourceType || '') !== 'panel') return null;
+  const sourceSheetId = parseNullableDragValue(dragPayload.sourceSheetId);
+  const sourceIndex = Number.parseInt(dragPayload.sourceIndex || '', 10);
+  if (!sourceSheetId || Number.isNaN(sourceIndex)) return null;
+  return {
+    sourceSheetId,
+    sourceIndex,
+    movedText: dragPayload.textData || ''
+  };
+};
+
+const getActivePanelMoveDragPayload = () => {
+  if (!isNativeDragSessionActive || !activePanelMovePayload) return null;
+  return extractPanelMoveDragPayload(activePanelMovePayload);
+};
+
+const extractPanelAssignmentFromDragPayload = (dragPayload = {}, fallbackText = '') => {
+  const src = parseNullableDragValue(dragPayload.src) || '';
+  const imageId = parseNullableDragValue(dragPayload.imageId);
+  const label = parseNullableDragValue(dragPayload.label);
+  let code = parseNullableDragValue(dragPayload.code);
+  const fileName = dragPayload.name || '';
+  const isText = dragPayload.isText === 'true';
+  const hasTextPayload = dragPayload.hasTextPayload === '1';
+  const transferredText = hasTextPayload ? (dragPayload.textPayload || '') : (dragPayload.text || '');
+  const fromTempId = parseNullableDragValue(dragPayload.fromTempId);
+  const fromExcludedId = parseNullableDragValue(dragPayload.fromExcludedId);
+
+  if (!code && fileName && !isText) {
+    const match = fileName.match(/[A-Za-z]\d{4}/);
+    if (match) {
+      code = match[0].toUpperCase();
+    }
+  }
+
+  if (!src && !imageId && !label && !code && !isText && !fromTempId && !fromExcludedId) {
+    return null;
+  }
+
+  return {
+    image: src || null,
+    imageId: imageId || null,
+    label: label || null,
+    code: code || null,
+    isText,
+    text: isText
+      ? ((hasTextPayload || transferredText !== '') ? transferredText : fallbackText)
+      : '',
+    fromTempId: fromTempId || null,
+    fromExcludedId: fromExcludedId || null
+  };
+};
 
 // --- Normalization Utility for Product Codes ---
 const normalizeCode = (str) => {
@@ -666,6 +1084,300 @@ const SalesPopup = React.memo(({ data, position, onMouseEnter, onMouseLeave }) =
   );
 });
 
+const SalesCodeLookupModal = React.memo(({ isOpen, onClose, salesData, visibleCodes = null }) => {
+  const [query, setQuery] = useState('');
+  const [selectedCodes, setSelectedCodes] = useState([]);
+  const [position, setPosition] = useState({ x: 24, y: 96 });
+  const inputRef = useRef(null);
+  const popupRef = useRef(null);
+  const dragStateRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+  const isScopedToPage = Array.isArray(visibleCodes);
+  const visibleCodeSet = useMemo(() => {
+    if (!isScopedToPage) return null;
+    return new Set(
+      visibleCodes
+        .map((code) => normalizeCode(code))
+        .filter(Boolean)
+    );
+  }, [isScopedToPage, visibleCodes]);
+
+  const clampPopupPosition = useCallback((x, y) => {
+    const rect = popupRef.current?.getBoundingClientRect();
+    const width = rect?.width || 360;
+    const height = rect?.height || Math.min(window.innerHeight * 0.78, 760);
+    const maxX = Math.max(8, window.innerWidth - width - 8);
+    const maxY = Math.max(8, window.innerHeight - height - 8);
+    return {
+      x: clamp(x, 8, maxX),
+      y: clamp(y, 8, maxY)
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuery('');
+    setSelectedCodes([]);
+
+    const nextX = Math.max(12, window.innerWidth - 392);
+    const nextY = 92;
+    setPosition(clampPopupPosition(nextX, nextY));
+
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  }, [isOpen, clampPopupPosition]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleResize = () => {
+      setPosition((prev) => clampPopupPosition(prev.x, prev.y));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isOpen, clampPopupPosition]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
+  const startDragging = useCallback((event) => {
+    if (event?.button !== undefined && event.button !== 0) return;
+    const rect = popupRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+
+    dragStateRef.current = {
+      active: true,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top
+    };
+
+    const handleMove = (moveEvent) => {
+      if (!dragStateRef.current.active) return;
+      const nextX = moveEvent.clientX - dragStateRef.current.offsetX;
+      const nextY = moveEvent.clientY - dragStateRef.current.offsetY;
+      setPosition(clampPopupPosition(nextX, nextY));
+    };
+
+    const handleUp = () => {
+      dragStateRef.current.active = false;
+      window.removeEventListener('pointermove', handleMove);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  }, [clampPopupPosition]);
+
+  const allEntries = useMemo(() => {
+    if (!salesData || typeof salesData !== 'object') return [];
+    return Object.entries(salesData).map(([code, items]) => {
+      const normalizedItems = Array.isArray(items) ? items : [];
+      const total = normalizedItems.reduce((sum, item) => sum + (parseInt(item.count) || 0), 0);
+      return {
+        code,
+        items: normalizedItems,
+        total
+      };
+    }).sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total;
+      return a.code.localeCompare(b.code);
+    });
+  }, [salesData]);
+
+  const scopedEntries = useMemo(() => {
+    if (!visibleCodeSet) return allEntries;
+    return allEntries.filter((entry) => visibleCodeSet.has(normalizeCode(entry.code)));
+  }, [allEntries, visibleCodeSet]);
+
+  const normalizedQuery = normalizeCode(query);
+
+  const filteredEntries = useMemo(() => {
+    if (!normalizedQuery) return scopedEntries.slice(0, 250);
+    return allEntries.filter((entry) => entry.code.includes(normalizedQuery)).slice(0, 250);
+  }, [scopedEntries, allEntries, normalizedQuery]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedCodes((prev) => {
+      const availableCodes = new Set(allEntries.map((entry) => entry.code));
+      const kept = prev.filter((code) => availableCodes.has(code));
+      const same = kept.length === prev.length && kept.every((code, idx) => code === prev[idx]);
+      return same ? prev : kept;
+    });
+  }, [isOpen, allEntries]);
+
+  const selectedCodeSet = useMemo(() => new Set(selectedCodes), [selectedCodes]);
+
+  const selectedEntries = useMemo(() => {
+    if (selectedCodes.length === 0) return [];
+    return allEntries.filter((entry) => selectedCodeSet.has(entry.code));
+  }, [allEntries, selectedCodeSet, selectedCodes.length]);
+
+  const toggleSelectedCode = useCallback((code) => {
+    setSelectedCodes((prev) => {
+      if (prev.includes(code)) return prev.filter((item) => item !== code);
+      return [...prev, code];
+    });
+  }, []);
+
+  const selectAllFilteredCodes = useCallback(() => {
+    setSelectedCodes((prev) => {
+      const merged = new Set(prev);
+      filteredEntries.forEach((entry) => merged.add(entry.code));
+      return Array.from(merged);
+    });
+  }, [filteredEntries]);
+
+  const clearSelectedCodes = useCallback(() => {
+    setSelectedCodes([]);
+  }, []);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[130] pointer-events-none">
+      <div
+        ref={popupRef}
+        className="absolute pointer-events-auto w-[360px] max-w-[92vw] h-[78vh] max-h-[86vh] min-h-[520px] rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden flex flex-col"
+        style={{ left: position.x, top: position.y }}
+      >
+        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 bg-slate-50">
+          <div
+            className="flex items-center gap-1.5 cursor-move select-none text-slate-500"
+            onPointerDown={startDragging}
+            title="ドラッグして移動"
+          >
+            <GripVertical size={14} />
+            <div>
+              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase leading-none">Sales Lookup</p>
+              <p className="text-xs font-bold text-slate-700 leading-tight mt-0.5">介援隊コード別 実績確認</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-slate-500 hover:bg-slate-200 transition-colors"
+            title="閉じる"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="px-3 py-2 border-b border-slate-100">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="介援隊コードを入力（例: A1234）"
+              className="w-full pl-8 pr-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-500">
+            該当コード <span className="font-bold text-slate-700">{filteredEntries.length}</span> 件
+            {normalizedQuery ? ` / ${normalizedQuery}` : ''}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              onClick={selectAllFilteredCodes}
+              className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded hover:bg-indigo-100 transition-colors"
+            >
+              該当を全選択
+            </button>
+            <button
+              onClick={clearSelectedCodes}
+              className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors"
+            >
+              選択解除
+            </button>
+            <span className="text-[10px] text-slate-500 ml-auto">
+              選択中 <span className="font-bold text-slate-700">{selectedCodes.length}</span> 件
+            </span>
+          </div>
+        </div>
+
+        {!salesData ? (
+          <div className="p-4 text-xs text-slate-500">販売実績データが未取り込みです。</div>
+        ) : allEntries.length === 0 ? (
+          <div className="p-4 text-xs text-slate-500">該当する販売実績データが見つかりません。</div>
+        ) : !normalizedQuery && scopedEntries.length === 0 && isScopedToPage ? (
+          <div className="p-4 text-xs text-slate-500">このページ内に介援隊コードがありません。</div>
+        ) : filteredEntries.length === 0 ? (
+          <div className="p-4 text-xs text-slate-500">該当する介援隊コードが見つかりませんでした。</div>
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="h-44 overflow-y-auto border-b border-slate-100">
+              {filteredEntries.map((entry) => (
+                <button
+                  key={entry.code}
+                  onClick={() => toggleSelectedCode(entry.code)}
+                  className={`w-full text-left px-2.5 py-2 border-b border-slate-100 transition-colors ${selectedCodeSet.has(entry.code) ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-start gap-2">
+                    {selectedCodeSet.has(entry.code) ? (
+                      <CheckSquare size={14} className="text-indigo-600 mt-0.5 flex-shrink-0" />
+                    ) : (
+                      <Square size={14} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-[16px] font-mono font-bold text-slate-700 leading-tight">{entry.code}</p>
+                      <p className="text-[13px] text-slate-600 mt-0.5 font-medium leading-tight">
+                        商品 {entry.items.length} / 数量 <span className="text-[15px] font-black text-indigo-600">{entry.total.toLocaleString()}</span>
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-2.5">
+              {selectedEntries.length === 0 ? (
+                <div className="text-xs text-slate-500 p-2">表示したい介援隊コードを選択してください。</div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedEntries.map((entry) => (
+                    <section key={`selected-${entry.code}`} className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+                      <div className="flex items-end justify-between gap-3 border-b border-slate-100 px-2 py-1.5 bg-slate-50">
+                        <div>
+                          <p className="text-[9px] text-slate-400 uppercase tracking-wider font-bold">Code</p>
+                          <p className="text-[22px] font-mono font-black text-slate-800 leading-none">{entry.code}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[9px] text-slate-400 uppercase font-bold">Total</p>
+                          <p className="text-[24px] font-black text-indigo-600 font-mono leading-none">{entry.total.toLocaleString()}</p>
+                        </div>
+                      </div>
+                      <ul className="space-y-1.5 p-2">
+                        {entry.items.map((item, idx) => (
+                          <li key={`${entry.code}-${idx}`} className="flex justify-between items-center gap-2 p-2 rounded-md border border-slate-100 hover:bg-slate-50 transition-colors">
+                            <div className="min-w-0">
+                              <p className="text-[14px] font-bold text-slate-700 truncate leading-tight">{item.name || '-'}</p>
+                              <p className="text-[12px] text-slate-500 truncate">{item.spec || '-'}</p>
+                            </div>
+                            <span className="text-[15px] font-mono font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                              {parseInt(item.count) || 0}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 // 処理中モーダル - Material 3 Style
 const ProcessingModal = React.memo(({ isOpen, current, total, message }) => {
   if (!isOpen) return null;
@@ -698,19 +1410,10 @@ const ProcessingModal = React.memo(({ isOpen, current, total, message }) => {
   );
 });
 
-const AuthGate = ({ onAuthenticated, defaultAppId }) => {
-  const [input, setInput] = useState("");
-  const [workspaceId, setWorkspaceId] = useState(defaultAppId);
-  const [error, setError] = useState(false);
-
-  const handleSubmit = (e) => {
+const AuthGate = ({ onGoogleSignIn, isSigningIn, errorMessage }) => {
+  const handleSignIn = (e) => {
     e.preventDefault();
-    if (input === PASSCODE) {
-      onAuthenticated(workspaceId);
-    } else {
-      setError(true);
-      setInput("");
-    }
+    onGoogleSignIn?.();
   };
 
   return (
@@ -723,50 +1426,36 @@ const AuthGate = ({ onAuthenticated, defaultAppId }) => {
       <div className="m3-card-elevated p-10 w-[420px] relative z-10 m3-animate-scale-in" style={{ borderRadius: 'var(--m3-shape-corner-xl)' }}>
         <div className="flex justify-center mb-10">
           <div className="p-1 bg-white shadow-xl" style={{ borderRadius: 'var(--m3-shape-corner-xl)' }}>
-            <img src="/logo.jpg" alt="台割君" className="w-40 h-40 object-contain" style={{ borderRadius: 'calc(var(--m3-shape-corner-xl) - 4px)' }} />
+            <img src="/logo.jpg" alt="台割君" className="w-40 h-40 object-contain" style={{ borderRadius: 'calc(var(--m3-shape-corner-xl) - 4px)' }} draggable={false} />
           </div>
         </div>
-        <p className="text-base mb-10 text-center font-medium" style={{ color: 'var(--m3-on-surface-variant)' }}>アクセスコードを入力してください</p>
+        <p className="text-base mb-6 text-center font-medium" style={{ color: 'var(--m3-on-surface-variant)' }}>許可されたGoogleアカウントでログインしてください</p>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-xs font-medium ml-1" style={{ color: 'var(--m3-on-surface-variant)' }}>Workspace ID</label>
-            <div className="relative group">
-              <Globe className="absolute left-4 top-4 w-5 h-5 transition-colors" style={{ color: 'var(--m3-outline)' }} />
-              <input
-                type="text"
-                value={workspaceId}
-                onChange={(e) => setWorkspaceId(e.target.value)}
-                className="w-full p-4 pl-12 font-medium transition-all m3-input-outlined"
-                style={{ borderRadius: 'var(--m3-shape-corner-md)' }}
-                placeholder="Project Name / ID"
-              />
-            </div>
+        <form onSubmit={handleSignIn} className="space-y-6">
+          <div className="rounded-lg border px-4 py-3" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
+            <p className="text-xs font-bold mb-2" style={{ color: 'var(--m3-on-surface-variant)' }}>許可アカウント</p>
+            <ul className="space-y-1">
+              {GOOGLE_ALLOWED_ACCOUNTS.map((account) => (
+                <li key={account.email} className="text-[11px] flex items-center justify-between gap-2">
+                  <span className="font-medium" style={{ color: 'var(--m3-on-surface)' }}>{account.name}</span>
+                  <span className="font-mono text-[10px]" style={{ color: 'var(--m3-on-surface-variant)' }}>{account.email}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[10px]" style={{ color: 'var(--m3-on-surface-variant)' }}>
+              ※ 同一ユーザーの `@caremax.co.jp` も許可対象です
+            </p>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-medium ml-1" style={{ color: 'var(--m3-on-surface-variant)' }}>Passcode</label>
-            <div className="relative group">
-              <Lock className="absolute left-4 top-4 w-5 h-5 transition-colors" style={{ color: 'var(--m3-outline)' }} />
-              <input
-                type="password"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="w-full p-4 pl-12 font-mono tracking-widest placeholder:tracking-normal transition-all m3-input-outlined"
-                style={{ borderRadius: 'var(--m3-shape-corner-md)' }}
-                placeholder="CMC8610"
-              />
-            </div>
-          </div>
-
-          {error && (
+          {errorMessage && (
             <div className="flex items-center justify-center gap-3 text-sm p-4 m3-animate-fade-in" style={{ background: 'var(--m3-error-container)', color: 'var(--m3-on-error-container)', borderRadius: 'var(--m3-shape-corner-md)' }}>
               <AlertCircle size={18} />
-              <span className="font-medium">パスコードが違います</span>
+              <span className="font-medium">{errorMessage}</span>
             </div>
           )}
           <button
             type="submit"
+            disabled={isSigningIn}
             className="w-full p-4 font-medium text-base transition-all duration-200 hover:shadow-lg active:scale-[0.98]"
             style={{
               background: 'var(--m3-primary)',
@@ -775,8 +1464,11 @@ const AuthGate = ({ onAuthenticated, defaultAppId }) => {
               boxShadow: 'var(--m3-elevation-2)'
             }}
           >
-            ロック解除
+            {isSigningIn ? 'Googleログイン中...' : 'Googleでログイン'}
           </button>
+          <p className="text-[11px] text-center" style={{ color: 'var(--m3-on-surface-variant)' }}>
+            一度ログインすると次回以降は自動ログインされます
+          </p>
         </form>
       </div>
     </div>
@@ -821,7 +1513,7 @@ const ConfirmModal = React.memo(({ isOpen, message, onConfirm, onCancel }) => {
 });
 
 // Panel Component
-const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex, panels, isOverview, isSelected, onSelect, highlightEmpty, highlightLabels, sheetId, onMove, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById, isLabelMode }) => {
+const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex, panels, isOverview, isSelected, onSelect, highlightEmpty, highlightLabels, sheetId, onApplyDragPayloadToPanel, onStartPointerDrag, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById, isLabelMode }) => {
 
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
@@ -883,73 +1575,12 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
   const handleDrop = (e) => {
     e.preventDefault();
     if (isOverview) return;
-
-    // Check if it's a move operation (Panel to Panel)
-    const moveSourceType = e.dataTransfer.getData("moveSourceType");
-    if (moveSourceType === "panel") {
-      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
-      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
-      const movedText = e.dataTransfer.getData("textData"); // 移動元のテキストデータ
-
-      if (sourceSheetId && !isNaN(sourceIndex) && onMove) {
-        onMove(sourceSheetId, sourceIndex, sheetId, index, movedText);
-      }
-      return;
-    }
-
-    // Normal Drop
-    const type = e.dataTransfer.getData("type");
-    let src = e.dataTransfer.getData("src");
-    if (src === "null" || src === "undefined") src = "";
-
-    let droppedImageId = e.dataTransfer.getData("imageId");
-    if (droppedImageId === "null" || droppedImageId === "undefined" || !droppedImageId) droppedImageId = null;
-
-    let label = e.dataTransfer.getData("label");
-    if (label === "null" || label === "undefined" || !label) label = null;
-
-    let droppedCode = e.dataTransfer.getData("code");
-    if (droppedCode === "null" || droppedCode === "undefined" || !droppedCode) droppedCode = null;
-
-    const fileName = e.dataTransfer.getData("name");
-    const isText = e.dataTransfer.getData("isText");
-    const hasTextPayload = e.dataTransfer.getData("hasTextPayload") === "1";
-    const transferredText = hasTextPayload
-      ? e.dataTransfer.getData("textPayload")
-      : e.dataTransfer.getData("text");
-
-    let fromTempId = e.dataTransfer.getData("fromTempId");
-    if (fromTempId === "null" || fromTempId === "undefined" || !fromTempId) fromTempId = null;
-
-    let fromExcludedId = e.dataTransfer.getData("fromExcludedId");
-    if (fromExcludedId === "null" || fromExcludedId === "undefined" || !fromExcludedId) fromExcludedId = null;
-
-    if (src || droppedImageId || label || droppedCode || isText === "true" || fromTempId || fromExcludedId) {
-      let code = droppedCode || null;
-
-      if (!code && fileName && !isText) {
-        const match = fileName.match(/[A-Za-z]\d{4}/);
-        if (match) {
-          code = match[0].toUpperCase();
-        }
-      }
-
-      const initialText = isText === "true"
-        ? ((hasTextPayload || transferredText !== "") ? transferredText : (data.text || "テキストを入力"))
-        : "";
-
-      onUpdate({
-        ...data,
-        image: src || null,
-        imageId: droppedImageId || null,
-        label: label || null,
-        code: code,
-        isText: isText === "true",
-        text: initialText,
-        fromTempId: fromTempId || null,
-        fromExcludedId: fromExcludedId || null
-      });
-      setLocalText(initialText);
+    const nativeDropEvent = e.nativeEvent;
+    if (isDropEventHandled(nativeDropEvent)) return;
+    const handled = onApplyDragPayloadToPanel?.(sheetId, index, getDragPayload(e.dataTransfer) || {});
+    if (handled) {
+      markDropEventHandled(nativeDropEvent);
+      clearActiveNativeDragPayload();
     }
   };
 
@@ -960,17 +1591,39 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
     }
 
     const currentText = textareaRef.current ? textareaRef.current.value : localText;
-    e.dataTransfer.setData("moveSourceType", "panel");
-    e.dataTransfer.setData("sourceSheetId", sheetId);
-    e.dataTransfer.setData("sourceIndex", index);
-    // 編集中のテキストも転送データに含める
-    e.dataTransfer.setData("textData", currentText || "");
+    setDragPayload(e.dataTransfer, {
+      moveSourceType: 'panel',
+      sourceSheetId: sheetId,
+      sourceIndex: index,
+      textData: currentText || ''
+    });
     e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handlePointerDragStart = (event) => {
+    if (!onStartPointerDrag) return;
+    const currentText = textareaRef.current ? textareaRef.current.value : localText;
+    onStartPointerDrag(event, {
+      payload: {
+        moveSourceType: 'panel',
+        sourceSheetId: sheetId,
+        sourceIndex: index,
+        textData: currentText || ''
+      },
+      preview: {
+        image: resolvedImage || null,
+        label: data.label || null,
+        code: data.code || null,
+        text: data.isText ? (currentText || data.text || '') : ''
+      }
+    });
   };
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "move";
+    }
   };
 
   const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
@@ -979,6 +1632,9 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
   const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
+  const mergeSelectionGlow = isSelected
+    ? '0 0 0 2px rgba(37, 99, 235, 0.88), inset 0 0 0 1px rgba(191, 219, 254, 0.95), 0 0 24px rgba(59, 130, 246, 0.55)'
+    : null;
 
   const handleFocusTextarea = () => {
     if (textareaRef.current) {
@@ -1112,6 +1768,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
     <div
       ref={panelRef}
       id={`panel-${sheetId}-${index}`}
+      data-daiwari-dropzone-id={!isOverview ? `${DAIWARI_PANEL_DROPZONE_PREFIX}${sheetId}:${index}` : undefined}
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
         ${(shouldHighlightLabel || shouldHighlightEmpty) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'} 
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
@@ -1120,14 +1777,19 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
       `}
       draggable={!isEmpty && !isOverview && !isLabelMode && !data.isText}
       onDragStart={handleDragStart}
+      onDropCapture={handleDrop}
+      onDragOverCapture={handleDragOver}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onPointerDown={!isEmpty && !isOverview && !isLabelMode && !data.isText ? handlePointerDragStart : undefined}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onClick={handlePanelClick}
       style={{
         ... (shouldHighlightEmpty ? {} : {}),
-        '--tw-ring-color': shouldHighlightLabel
+        '--tw-ring-color': isSelected
+          ? '#3b82f6'
+          : shouldHighlightLabel
           ? '#22c55e'
           : shouldHighlightEmpty
             ? 'var(--m3-error)'
@@ -1137,7 +1799,11 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
           : (isOverview ? 'pointer' : (!isEmpty && !data.isText ? 'cursor-grab' : 'default')),
         gridColumn: `span ${data.colSpan || 1}`,
         gridRow: `span ${data.rowSpan || 1}`,
-        borderColor: shouldHighlightLabel ? '#16a34a' : 'var(--m3-outline-variant)',
+        borderColor: isSelected
+          ? '#3b82f6'
+          : shouldHighlightLabel
+            ? '#16a34a'
+            : 'var(--m3-outline-variant)',
         backgroundColor: shouldHighlightLabel
           ? 'rgba(34, 197, 94, 0.16)'
           : shouldHighlightEmpty
@@ -1145,15 +1811,18 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
           : isSalesMode && matchedSales
             ? 'var(--m3-secondary-container)'
             : 'var(--m3-surface)',
-        boxShadow: shouldHighlightLabel
-          ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
-          : undefined,
+        boxShadow: isSelected
+          ? mergeSelectionGlow
+          : shouldHighlightLabel
+            ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
+            : undefined,
+        touchAction: !isEmpty && !isOverview && !isLabelMode ? 'none' : undefined,
       }}
     >
 
       {/* Image Layer */}
       {resolvedImage && (
-        <img src={resolvedImage} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" />
+        <img src={resolvedImage} alt="content" className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none" loading="lazy" decoding="async" draggable={false} />
       )}
 
       {/* Free Labels Layer (Overlays everything) */}
@@ -1284,12 +1953,13 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
           >
             <button
               className="absolute top-1 left-1 rounded-md p-1.5 cursor-grab active:cursor-grabbing border shadow-sm z-30"
-              style={{ background: 'var(--m3-surface)', borderColor: 'var(--m3-outline-variant)', color: 'var(--m3-on-surface-variant)' }}
+              style={{ background: 'var(--m3-surface)', borderColor: 'var(--m3-outline-variant)', color: 'var(--m3-on-surface-variant)', touchAction: 'none' }}
               title="ドラッグして移動"
               draggable
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               onDragStart={handleDragStart}
+              onPointerDown={handlePointerDragStart}
             >
               <GripVertical size={12} />
             </button>
@@ -1346,7 +2016,7 @@ const Panel = React.memo(({ index, data, globalNumber, onUpdate, onUpdateByIndex
   );
 });
 
-const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, highlightLabels, onMovePanel, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById, isLabelMode }) => {
+const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomScale, selection, onSelectPanel, onDeleteSheet, highlightEmpty, highlightLabels, onApplyDragPayloadToPanel, onStartPointerDrag, isSalesMode, salesData, onHoverSales, onLeaveSales, imageDataById, isLabelMode }) => {
 
   const genre = GENRES.find(g => g.id === sheet.genre) || GENRES[0];
 
@@ -1412,7 +2082,8 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
               highlightEmpty={highlightEmpty}
               highlightLabels={highlightLabels}
               sheetId={sheet.id}
-              onMove={onMovePanel}
+              onApplyDragPayloadToPanel={onApplyDragPayloadToPanel}
+              onStartPointerDrag={onStartPointerDrag}
               isSalesMode={isSalesMode}
               salesData={salesData}
               onHoverSales={onHoverSales}
@@ -1447,12 +2118,38 @@ const Sheet = React.memo(({ sheet, index, panels, updatePanel, isOverview, zoomS
 });
 
 // ... Sidebar Component ...
-const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpload, onDeleteImage, onBulkDeleteImages, onSearch, searchQuery, sheets, tempItems, onMoveToTemp, onDeleteFromTemp, excludedItems, onMoveToExcluded, onDeleteFromExcluded, onExportExcludedCSV, onBulkDeleteExcluded, onMoveToStock, imageDataById, onShowQuickHelp, onHideQuickHelp }) => {
+const Sidebar = React.memo(({
+  isOpen,
+  width,
+  setWidth,
+  toggleOpen,
+  images,
+  onUpload,
+  onDeleteImage,
+  onBulkDeleteImages,
+  onSearch,
+  searchQuery,
+  sheets,
+  tempItems,
+  onDeleteFromTemp,
+  excludedItems,
+  onDeleteFromExcluded,
+  onExportExcludedCSV,
+  onBulkDeleteExcluded,
+  onApplyDragPayloadToTemp,
+  onApplyDragPayloadToExcluded,
+  onApplyDragPayloadToStock,
+  onStartPointerDrag,
+  imageDataById,
+  onShowQuickHelp,
+  onHideQuickHelp
+}) => {
   const [activeTab, setActiveTab] = useState('stock');
   const [resizing, setResizing] = useState(false);
   const [statusGenreFilter, setStatusGenreFilter] = useState('all');
   const [isImageSelectionMode, setIsImageSelectionMode] = useState(false);
   const [selectedImageIds, setSelectedImageIds] = useState(new Set());
+  const [previewImage, setPreviewImage] = useState(null);
 
   const sidebarTabHelp = {
     stock: { title: '画像', description: '画像ライブラリを表示します。画像の検索・アップロード・配置ができます。' },
@@ -1492,6 +2189,14 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     setSelectedImageIds(new Set());
   };
 
+  const handleTogglePreview = useCallback((src, name = '') => {
+    if (!src) return;
+    setPreviewImage((prev) => {
+      if (prev?.src === src) return null;
+      return { src, name };
+    });
+  }, []);
+
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (resizing) {
@@ -1511,43 +2216,50 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     };
   }, [resizing, setWidth]);
 
+  const createDummyDragPayload = useCallback((dummy) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 100;
+    canvas.height = 100;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#eef2ff';
+    ctx.fillRect(0, 0, 100, 100);
+    return {
+      src: canvas.toDataURL(),
+      label: dummy.label,
+      isText: dummy.isText ? 'true' : ''
+    };
+  }, []);
+
   const handleDropToTemp = (e) => {
     e.preventDefault();
-    const moveSourceType = e.dataTransfer.getData("moveSourceType");
-    if (moveSourceType === "panel") {
-      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
-      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
-      const movedText = e.dataTransfer.getData("textData");
-
-      if (sourceSheetId && !isNaN(sourceIndex)) {
-        onMoveToTemp(sourceSheetId, sourceIndex, movedText);
-      }
+    const nativeDropEvent = e.nativeEvent;
+    if (isDropEventHandled(nativeDropEvent)) return;
+    const handled = onApplyDragPayloadToTemp?.(getDragPayload(e.dataTransfer) || {});
+    if (handled) {
+      markDropEventHandled(nativeDropEvent);
+      clearActiveNativeDragPayload();
     }
   };
 
   const handleDropToStock = (e) => {
     e.preventDefault();
-    const moveSourceType = e.dataTransfer.getData("moveSourceType");
-    if (moveSourceType === "panel") {
-      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
-      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
-      if (sourceSheetId && !isNaN(sourceIndex) && onMoveToStock) {
-        onMoveToStock(sourceSheetId, sourceIndex);
-      }
+    const nativeDropEvent = e.nativeEvent;
+    if (isDropEventHandled(nativeDropEvent)) return;
+    const handled = onApplyDragPayloadToStock?.(getDragPayload(e.dataTransfer) || {});
+    if (handled) {
+      markDropEventHandled(nativeDropEvent);
+      clearActiveNativeDragPayload();
     }
   };
 
   const handleDropToExcluded = (e) => {
     e.preventDefault();
-    const moveSourceType = e.dataTransfer.getData("moveSourceType");
-    if (moveSourceType === "panel") {
-      const sourceSheetId = e.dataTransfer.getData("sourceSheetId");
-      const sourceIndex = parseInt(e.dataTransfer.getData("sourceIndex"), 10);
-      const movedText = e.dataTransfer.getData("textData");
-
-      if (sourceSheetId && !isNaN(sourceIndex)) {
-        onMoveToExcluded(sourceSheetId, sourceIndex, movedText);
-      }
+    const nativeDropEvent = e.nativeEvent;
+    if (isDropEventHandled(nativeDropEvent)) return;
+    const handled = onApplyDragPayloadToExcluded?.(getDragPayload(e.dataTransfer) || {});
+    if (handled) {
+      markDropEventHandled(nativeDropEvent);
+      clearActiveNativeDragPayload();
     }
   };
 
@@ -1568,6 +2280,8 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
     const lowerQuery = searchQuery.toLowerCase();
     return result.filter(img => (img.name || '').toLowerCase().includes(lowerQuery));
   }, [images, searchQuery, sheets]);
+
+  const activeTempItems = useMemo(() => tempItems || [], [tempItems]);
 
   if (!isOpen) {
     return (
@@ -1647,7 +2361,10 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
       <div
         className="flex-1 overflow-y-auto p-4 relative"
         style={{ background: 'var(--m3-surface-container-low)' }}
-        onDragOver={(e) => e.preventDefault()}
+        data-daiwari-dropzone-id={activeTab === 'stock' ? 'stock' : undefined}
+        onDragOverCapture={(e) => e.preventDefault()}
+        onDropCapture={activeTab === 'stock' ? handleDropToStock : undefined}
+        onDragOver={activeTab === 'stock' ? (e) => e.preventDefault() : undefined}
         onDrop={activeTab === 'stock' ? handleDropToStock : undefined}
       >
 
@@ -1729,27 +2446,48 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                   style={{
                     background: 'var(--m3-surface)',
                     borderColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary)' : 'var(--m3-outline-variant)',
-                    backgroundColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary-container)' : 'var(--m3-surface)'
+                    backgroundColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary-container)' : 'var(--m3-surface)',
+                    touchAction: isImageSelectionMode ? 'manipulation' : 'pan-y'
                   }}
                   draggable={!isImageSelectionMode}
+                  onPointerDown={!isImageSelectionMode ? (e) => onStartPointerDrag?.(e, {
+                    payload: {
+                      src: img.data,
+                      imageId: img.id || '',
+                      type: 'image',
+                      name: img.name || ''
+                    },
+                    preview: {
+                      image: img.data,
+                      code: img.name || ''
+                    }
+                  }) : undefined}
                   onClick={() => {
                     if (isImageSelectionMode) {
                       toggleImageSelection(selectionKey);
                     }
+                  }}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (isImageSelectionMode) return;
+                    handleTogglePreview(img.data, img.name || '');
                   }}
                   onDragStart={(e) => {
                     if (isImageSelectionMode) {
                       e.preventDefault();
                       return;
                     }
-                    e.dataTransfer.setData("src", img.data);
-                    if (img.id) e.dataTransfer.setData("imageId", img.id);
-                    e.dataTransfer.setData("type", "image");
-                    e.dataTransfer.setData("name", img.name);
+                    setDragPayload(e.dataTransfer, {
+                      src: img.data,
+                      imageId: img.id || '',
+                      type: 'image',
+                      name: img.name || ''
+                    });
                   }}
                 >
                   <div className="aspect-square w-full rounded-lg overflow-hidden mb-2 bg-white flex items-center justify-center">
-                    <img src={img.data} alt="stock" className="max-w-full max-h-full object-contain" loading="lazy" decoding="async" />
+                    <img src={img.data} alt="stock" className="max-w-full max-h-full object-contain" loading="lazy" decoding="async" draggable={false} />
                   </div>
                   <div className="px-1">
                     <div className="text-[10px] truncate font-medium" style={{ color: 'var(--m3-on-surface)' }}>{img.name}</div>
@@ -1800,17 +2538,21 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
               <div
                 key={dummy.label}
                 className="h-24 border-2 border-dashed rounded-xl flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:-translate-y-0.5 transition-all"
-                style={{ background: dummy.color, borderColor: 'var(--m3-outline-variant)', color: dummy.text }}
+                style={{ background: dummy.color, borderColor: 'var(--m3-outline-variant)', color: dummy.text, touchAction: 'pan-y' }}
                 draggable
+                onPointerDown={(e) => {
+                  const payload = createDummyDragPayload(dummy);
+                  onStartPointerDrag?.(e, {
+                    payload,
+                    preview: {
+                      image: payload.src,
+                      label: dummy.label,
+                      text: dummy.isText ? 'テキスト' : ''
+                    }
+                  });
+                }}
                 onDragStart={(e) => {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = 100; canvas.height = 100;
-                  const ctx = canvas.getContext('2d');
-                  ctx.fillStyle = '#eef2ff';
-                  ctx.fillRect(0, 0, 100, 100);
-                  e.dataTransfer.setData("src", canvas.toDataURL());
-                  e.dataTransfer.setData("label", dummy.label);
-                  if (dummy.isText) e.dataTransfer.setData("isText", "true");
+                  setDragPayload(e.dataTransfer, createDummyDragPayload(dummy));
                 }}
               >
                 <span className="font-bold text-sm">【{dummy.label}】</span>
@@ -1906,6 +2648,9 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
         {activeTab === 'excluded' && (
           <div
             className="flex-1 flex flex-col h-full bg-rose-50/30 rounded-xl border border-rose-100 overflow-hidden"
+            data-daiwari-dropzone-id="excluded"
+            onDragOverCapture={(e) => e.preventDefault()}
+            onDropCapture={handleDropToExcluded}
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDropToExcluded}
           >
@@ -1948,25 +2693,57 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                       <div
                         key={item.id}
                         className="group relative border border-rose-100 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex flex-col items-center transition-all"
+                        style={{ touchAction: 'none' }}
                         draggable
+                        onPointerDown={(e) => {
+                          const payloadText = typeof item.text === 'string' ? item.text : '';
+                          onStartPointerDrag?.(e, {
+                            payload: {
+                              src: resolvedImg || '',
+                              type: 'image',
+                              name: item.originalName || 'excluded',
+                              label: item.label || '',
+                              code: item.code || '',
+                              isText: item.isText ? 'true' : 'false',
+                              hasTextPayload: '1',
+                              textPayload: payloadText,
+                              text: payloadText,
+                              fromExcludedId: item.id,
+                              imageId: item.imageId || ''
+                            },
+                            preview: {
+                              image: resolvedImg || null,
+                              label: item.label || null,
+                              code: item.code || null,
+                              text: item.isText ? payloadText : ''
+                            }
+                          });
+                        }}
+                        onDoubleClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleTogglePreview(resolvedImg || '', item.code || item.originalName || '');
+                        }}
                         onDragStart={(e) => {
                           const payloadText = typeof item.text === 'string' ? item.text : '';
-                          e.dataTransfer.setData("src", resolvedImg || "");
-                          e.dataTransfer.setData("type", "image");
-                          e.dataTransfer.setData("name", item.originalName || "excluded");
-                          e.dataTransfer.setData("label", item.label || "");
-                          e.dataTransfer.setData("code", item.code || "");
-                          e.dataTransfer.setData("isText", item.isText ? "true" : "false");
-                          e.dataTransfer.setData("hasTextPayload", "1");
-                          e.dataTransfer.setData("textPayload", payloadText);
-                          e.dataTransfer.setData("text", payloadText);
-                          e.dataTransfer.setData("fromExcludedId", item.id);
-                          if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
+                          setDragPayload(e.dataTransfer, {
+                            src: resolvedImg || '',
+                            type: 'image',
+                            name: item.originalName || 'excluded',
+                            label: item.label || '',
+                            code: item.code || '',
+                            isText: item.isText ? 'true' : 'false',
+                            hasTextPayload: '1',
+                            textPayload: payloadText,
+                            text: payloadText,
+                            fromExcludedId: item.id,
+                            imageId: item.imageId || ''
+                          });
                         }}
                       >
                         <div className="w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
                           {resolvedImg ? (
-                            <img src={resolvedImg} alt="excluded" className="w-full h-full object-contain" />
+                            <img src={resolvedImg} alt="excluded" className="w-full h-full object-contain" draggable={false} />
                           ) : (
                             <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
                               <Ban size={16} />
@@ -2000,55 +2777,95 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
 
       {/* Temp Shelf (Fixed at bottom) */}
       <div
-        className="h-64 border-t border-slate-200 bg-slate-50 flex flex-col flex-shrink-0"
+        className="relative h-64 border-t border-slate-200 bg-slate-50 flex flex-col flex-shrink-0"
+        data-daiwari-dropzone-id="temp"
+        onDragOverCapture={(e) => e.preventDefault()}
+        onDropCapture={handleDropToTemp}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDropToTemp}
       >
         <div
           className="px-4 py-2 border-b border-slate-200 flex items-center justify-between bg-white"
-          onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ドラッグで戻せるので並べ替えや調整に使えます。')}
+          onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ログイン中のGoogleアカウント専用の仮置き場です。')}
           onMouseLeave={() => onHideQuickHelp?.()}
         >
           <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
             <div className="p-1 bg-indigo-100 text-indigo-600 rounded">
               <ClipboardList size={14} />
             </div>
-            <span>仮置き場</span>
+            <span>仮置き場（あなた専用）</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
+              {activeTempItems.length}件
+            </span>
           </div>
-          <span className="text-[10px] text-slate-400 font-medium">ドラッグして一時保存</span>
+          <span className="text-[10px] text-slate-400 font-medium">Googleアカウント別</span>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
-          {tempItems.length === 0 ? (
+          {activeTempItems.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
               <p className="text-xs font-medium">ここにドロップ</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {tempItems.map((item) => {
+              {activeTempItems.map((item) => {
                 const resolvedImg = item.image || (item.imageId ? imageDataById?.[item.imageId] : null);
+                const hoverCodeText = (item.code || '').trim();
                 return (
                   <div
                     key={item.id}
                     className="group relative border border-slate-200 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center min-h-[80px] transition-all"
+                    title={hoverCodeText || undefined}
+                    style={{ touchAction: 'none' }}
                     draggable
+                    onPointerDown={(e) => {
+                      const payloadText = typeof item.text === 'string' ? item.text : '';
+                      onStartPointerDrag?.(e, {
+                        payload: {
+                          src: resolvedImg || '',
+                          type: 'image',
+                          name: item.originalName || 'temp',
+                          label: item.label || '',
+                          code: item.code || '',
+                          isText: item.isText ? 'true' : 'false',
+                          hasTextPayload: '1',
+                          textPayload: payloadText,
+                          text: payloadText,
+                          fromTempId: item.id,
+                          imageId: item.imageId || ''
+                        },
+                        preview: {
+                          image: resolvedImg || null,
+                          label: item.label || null,
+                          code: item.code || null,
+                          text: item.isText ? payloadText : ''
+                        }
+                      });
+                    }}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleTogglePreview(resolvedImg || '', hoverCodeText || item.originalName || '');
+                    }}
                     onDragStart={(e) => {
                       const payloadText = typeof item.text === 'string' ? item.text : '';
-                      e.dataTransfer.setData("src", resolvedImg || "");
-                      e.dataTransfer.setData("type", "image");
-                      e.dataTransfer.setData("name", item.originalName || "temp");
-                      e.dataTransfer.setData("label", item.label || "");
-                      e.dataTransfer.setData("code", item.code || "");
-                      e.dataTransfer.setData("isText", item.isText ? "true" : "false");
-                      e.dataTransfer.setData("hasTextPayload", "1");
-                      e.dataTransfer.setData("textPayload", payloadText);
-                      e.dataTransfer.setData("text", payloadText);
-                      e.dataTransfer.setData("fromTempId", item.id);
-                      if (item.imageId) e.dataTransfer.setData("imageId", item.imageId);
+                      setDragPayload(e.dataTransfer, {
+                        src: resolvedImg || '',
+                        type: 'image',
+                        name: item.originalName || 'temp',
+                        label: item.label || '',
+                        code: item.code || '',
+                        isText: item.isText ? 'true' : 'false',
+                        hasTextPayload: '1',
+                        textPayload: payloadText,
+                        text: payloadText,
+                        fromTempId: item.id,
+                        imageId: item.imageId || ''
+                      });
                     }}
                   >
                     {resolvedImg ? (
-                      <img src={resolvedImg} alt="temp" className="w-full h-16 object-contain rounded" />
+                      <img src={resolvedImg} alt="temp" className="w-full h-16 object-contain rounded" draggable={false} />
                     ) : (
                       <div className="w-full h-16 flex flex-col items-center justify-center bg-slate-50 rounded text-slate-400">
                         <span className="text-[10px] font-mono">{item.code || 'No Image'}</span>
@@ -2058,6 +2875,13 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
                     {item.label && (
                       <div className="absolute top-1 left-1 bg-slate-800/80 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded shadow-sm">
                         {item.label}
+                      </div>
+                    )}
+                    {hoverCodeText && (
+                      <div className="absolute left-1 right-1 bottom-1 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                        <div className="mx-auto max-w-full truncate text-[10px] font-mono font-bold text-white bg-slate-900/85 px-2 py-1 rounded shadow-md text-center">
+                          {hoverCodeText}
+                        </div>
                       </div>
                     )}
                     <button
@@ -2072,7 +2896,29 @@ const Sidebar = React.memo(({ isOpen, width, setWidth, toggleOpen, images, onUpl
             </div>
           )}
         </div>
+
       </div>
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[170] bg-black/70 flex items-center justify-center p-5"
+          onClick={() => setPreviewImage(null)}
+          title="クリックでプレビューを閉じる"
+        >
+          <div className="max-w-[92vw] max-h-[90vh] rounded-2xl border border-white/20 bg-slate-950/90 p-3 shadow-2xl">
+            <img
+              src={previewImage.src}
+              alt={previewImage.name || 'preview'}
+              className="max-w-[86vw] max-h-[80vh] object-contain rounded-lg"
+            />
+            {previewImage.name && (
+              <p className="mt-2 text-[11px] text-slate-200 font-mono truncate text-center">
+                {previewImage.name}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div
         className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-indigo-400 transition-colors z-30"
@@ -2093,22 +2939,26 @@ export default function App() {
     return saved || DEFAULT_APP_ID;
   };
 
-  const [appId, setAppId] = useState(getInitialAppId());
+  const initialAppId = getInitialAppId();
+  const [appId] = useState(initialAppId);
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(USE_LOCAL_STORAGE);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [authErrorMessage, setAuthErrorMessage] = useState('');
 
-  // 認証情報の永続化チェック
   useEffect(() => {
-    const savedAuth = localStorage.getItem('daiwari_is_authenticated');
-    if (savedAuth === 'true') {
-      setIsAuthenticated(true);
-      if (!USE_LOCAL_STORAGE && auth) {
-        signInAnonymously(auth).catch((error) => {
-          console.error("Auto sign-in failed", error);
-        });
+    try {
+      localStorage.setItem('daiwari_active_workspace', appId);
+      const url = new URL(window.location);
+      if (url.searchParams.get('project') !== appId) {
+        url.searchParams.set('project', appId);
+        window.history.replaceState({}, '', url);
       }
+    } catch (e) {
+      void e;
     }
-  }, []);
+  }, [appId]);
 
   // Data State
   const [sheets, setSheets] = useState([]);
@@ -2141,7 +2991,14 @@ export default function App() {
   const logoTapTimeoutRef = useRef(null);
   const quickHelpHighlightRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
+  const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
+  const [pointerDragPreview, setPointerDragPreview] = useState(null);
+  const salesModeLongPressTimerRef = useRef(null);
+  const salesModeLongPressTriggeredRef = useRef(false);
+  const pointerDragOverlayRef = useRef(null);
+  const pointerDragSessionRef = useRef(null);
+  const suppressNextClickRef = useRef(false);
 
   // Sales Popup State
   const [hoveredSalesData, setHoveredSalesData] = useState(null);
@@ -2156,20 +3013,46 @@ export default function App() {
   const [progressMax, setProgressMax] = useState(100);
   const [progressMessage, setProgressMessage] = useState("");
   const [isDataLoaded, setIsDataLoaded] = useState(false); // データ読み込み完了フラグ
+  const [useLegacyTempShelf, setUseLegacyTempShelf] = useState(false);
 
   // コレクション参照を appId に依存させる
   const sheetsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'sheets'), [appId, db]);
   const imagesCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'images'), [appId, db]);
-  const tempShelfCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'tempShelf'), [appId, db]);
+  const tempShelfUserId = useMemo(() => USE_LOCAL_STORAGE ? 'local' : (firebaseUser?.uid || null), [firebaseUser]);
+  const userTempShelfCollection = useMemo(() => {
+    if (USE_LOCAL_STORAGE) return null;
+    if (!tempShelfUserId) return null;
+    return collection(db, 'artifacts', appId, 'users', tempShelfUserId, 'tempShelf');
+  }, [appId, db, tempShelfUserId]);
+  const legacyTempShelfCollection = useMemo(() => {
+    if (USE_LOCAL_STORAGE) return null;
+    return collection(db, 'artifacts', appId, 'public', 'data', 'tempShelf');
+  }, [appId, db]);
+  const tempShelfCollection = useMemo(() => {
+    if (USE_LOCAL_STORAGE) return null;
+    return useLegacyTempShelf ? legacyTempShelfCollection : userTempShelfCollection;
+  }, [useLegacyTempShelf, legacyTempShelfCollection, userTempShelfCollection]);
   const excludedItemsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'excludedItems'), [appId, db]);
   const settingsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'settings'), [appId, db]);
   const salesChunksCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'salesDataChunks'), [appId, db]);
+  const signedInUserName = useMemo(() => {
+    const signedInEmail = normalizeEmail(firebaseUser?.email);
+    if (signedInEmail) {
+      const matchedAccount = GOOGLE_ALLOWED_ACCOUNTS.find((account) =>
+        expandAllowedEmailVariants(account.email).includes(signedInEmail)
+      );
+      if (matchedAccount?.name) return matchedAccount.name;
+    }
+    return firebaseUser?.displayName || firebaseUser?.email || '';
+  }, [firebaseUser]);
 
   // --- Auth & Init ---
   useEffect(() => {
     // ローカルストレージモードの場合はFirebase認証をスキップ
     if (USE_LOCAL_STORAGE) {
       setFirebaseUser({ uid: 'local_user' }); // ダミーユーザー
+      setIsAuthenticated(true);
+      setIsAuthReady(true);
 
       const bootApp = async () => {
         try {
@@ -2241,67 +3124,190 @@ export default function App() {
     }
 
     const initialize = async () => {
+      const host = typeof window !== 'undefined' ? window.location.hostname : '';
+      if (host === '127.0.0.1') {
+        try {
+          const redirected = new URL(window.location.href);
+          redirected.hostname = 'localhost';
+          window.location.replace(redirected.toString());
+          return;
+        } catch (error) {
+          console.error('Failed to normalize host to localhost:', error);
+        }
+      }
+
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          if (!auth.currentUser) {
-            await signInAnonymously(auth);
-          }
+        await setPersistence(auth, browserLocalPersistence);
+        try {
+          await getRedirectResult(auth);
+        } catch (redirectError) {
+          console.error('Google redirect result failed:', redirectError);
+          setAuthErrorMessage(buildGoogleAuthErrorMessage(redirectError, 'Googleログイン結果の復元に失敗しました。再度お試しください。'));
         }
       } catch (error) {
         console.error("Auth initialization failed:", error);
+        setAuthErrorMessage(buildGoogleAuthErrorMessage(error, '認証初期化に失敗しました。再度お試しください。'));
+      } finally {
+        setIsAuthReady(true);
       }
     };
     initialize();
 
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setFirebaseUser(u);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        setIsAuthReady(true);
+        setFirebaseUser(null);
+        setIsAuthenticated(false);
+        return;
+      }
+
+      const allowed = isAllowedGoogleUser(u);
+      if (allowed) {
+        setIsAuthReady(true);
+        setFirebaseUser(u);
+        setIsAuthenticated(true);
+        setAuthErrorMessage('');
+        return;
+      }
+
+      setIsAuthReady(true);
+      setFirebaseUser(null);
+      setIsAuthenticated(false);
+      const signedInEmail = normalizeEmail(u?.email);
+      setAuthErrorMessage(
+        signedInEmail
+          ? `許可対象外のアカウントです: ${signedInEmail}`
+          : '許可されているGoogleアカウントでログインしてください。'
+      );
+      try {
+        await signOut(auth);
+      } catch (error) {
+        console.error('Sign out unauthorized account failed:', error);
+      }
     });
     return () => unsubscribe();
   }, []);
 
-  const handleAuthenticated = (workspaceId) => {
-    if (workspaceId) {
-      setAppId(workspaceId);
-      localStorage.setItem('daiwari_active_workspace', workspaceId);
-      // URLを更新して共有しやすくする
-      const url = new URL(window.location);
-      url.searchParams.set('project', workspaceId);
-      window.history.replaceState({}, '', url);
+  const handleGoogleSignIn = useCallback(async () => {
+    if (USE_LOCAL_STORAGE || !auth) return;
+    setIsSigningIn(true);
+    setAuthErrorMessage('');
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      const code = String(error?.code || '').toLowerCase();
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirectError) {
+          setAuthErrorMessage(buildGoogleAuthErrorMessage(redirectError));
+          console.error('Google redirect sign-in failed:', redirectError);
+        }
+      } else {
+        setAuthErrorMessage(buildGoogleAuthErrorMessage(error));
+      }
+      console.error('Google sign-in failed:', error);
+    } finally {
+      setIsSigningIn(false);
     }
-    setIsAuthenticated(true);
-    localStorage.setItem('daiwari_is_authenticated', 'true');
-  };
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    if (USE_LOCAL_STORAGE || !auth) return;
+    try {
+      await signOut(auth);
+      setIsAuthenticated(false);
+      setFirebaseUser(null);
+      setSheets([]);
+      setImages([]);
+      setTempItems([]);
+      setExcludedItems([]);
+      setSalesData(null);
+      setIsDataLoaded(false);
+      setAuthErrorMessage('');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  }, []);
 
   // --- Data Sync ---
   // 自動保存 (Auto-Save) - IndexedDB with Debounce
   const saveTimeoutRef = useRef(null);
+  const localSavedSnapshotRef = useRef({
+    sheets: null,
+    images: null,
+    tempItems: null,
+    excludedItems: null,
+    salesData: null
+  });
 
   useEffect(() => {
-    if (USE_LOCAL_STORAGE && isDataLoaded) {
-      // 既存のタイマーをクリア
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
-      // 500ms のデバウンス処理で連続操作時のI/O負荷を削減
-      saveTimeoutRef.current = setTimeout(async () => {
-        try {
-          await Promise.all([
-            idbHelper.setItem('sheets', sheets),
-            idbHelper.setItem('images', images),
-            idbHelper.setItem('tempItems', tempItems),
-            idbHelper.setItem('excludedItems', excludedItems),
-            salesData ? idbHelper.setItem('salesData', salesData) : Promise.resolve()
-          ]);
-        } catch (err) {
-          console.error("Auto-save failed:", err);
+    if (!(USE_LOCAL_STORAGE && isDataLoaded)) {
+      return () => {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
         }
-      }, 500);
+      };
     }
 
-    // クリーンアップ関数
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    const shouldSaveSheets = localSavedSnapshotRef.current.sheets !== sheets;
+    const shouldSaveImages = localSavedSnapshotRef.current.images !== images;
+    const shouldSaveTempItems = localSavedSnapshotRef.current.tempItems !== tempItems;
+    const shouldSaveExcludedItems = localSavedSnapshotRef.current.excludedItems !== excludedItems;
+    const shouldSaveSalesData = localSavedSnapshotRef.current.salesData !== salesData;
+
+    if (!shouldSaveSheets && !shouldSaveImages && !shouldSaveTempItems && !shouldSaveExcludedItems && !shouldSaveSalesData) {
+      return () => {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+        }
+      };
+    }
+
+    const snapshot = { sheets, images, tempItems, excludedItems, salesData };
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const tasks = [];
+        if (shouldSaveSheets) {
+          tasks.push(idbHelper.setItem('sheets', snapshot.sheets).then(() => {
+            localSavedSnapshotRef.current.sheets = snapshot.sheets;
+          }));
+        }
+        if (shouldSaveImages) {
+          tasks.push(idbHelper.setItem('images', snapshot.images).then(() => {
+            localSavedSnapshotRef.current.images = snapshot.images;
+          }));
+        }
+        if (shouldSaveTempItems) {
+          tasks.push(idbHelper.setItem('tempItems', snapshot.tempItems).then(() => {
+            localSavedSnapshotRef.current.tempItems = snapshot.tempItems;
+          }));
+        }
+        if (shouldSaveExcludedItems) {
+          tasks.push(idbHelper.setItem('excludedItems', snapshot.excludedItems).then(() => {
+            localSavedSnapshotRef.current.excludedItems = snapshot.excludedItems;
+          }));
+        }
+        if (shouldSaveSalesData && snapshot.salesData) {
+          tasks.push(idbHelper.setItem('salesData', snapshot.salesData).then(() => {
+            localSavedSnapshotRef.current.salesData = snapshot.salesData;
+          }));
+        }
+        await Promise.all(tasks);
+      } catch (err) {
+        console.error("Auto-save failed:", err);
+      }
+    }, 500);
+
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -2348,6 +3354,12 @@ export default function App() {
   }, [viewMode, isLabelSelectionMode]);
 
   useEffect(() => {
+    if (viewMode === 'overview') return;
+    setIsPageSelectionMode((prev) => (prev ? false : prev));
+    setSelectedSheetIds((prev) => (prev.size > 0 ? new Set() : prev));
+  }, [viewMode]);
+
+  useEffect(() => {
     // 単一表示時に対象ページIDが不整合なら先頭ページへ補正
     if (viewMode !== 'single' || sheets.length === 0) return;
     const exists = sheets.some((sheet) => sheet.id === activeSheetId);
@@ -2367,13 +3379,20 @@ export default function App() {
     if (!isAuthenticated || !firebaseUser) return;
 
     const unsubscribeSheets = onSnapshot(sheetsCollection, (snapshot) => {
-      const loadedSheets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const loadedSheets = snapshot.docs.map((snap) => {
+        const data = snap.data() || {};
+        return {
+          ...data,
+          id: snap.id,
+          panels: getPanelsFromDocData(data)
+        };
+      });
       loadedSheets.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-      setSheets(loadedSheets);
+      setSheets((prev) => (isSameSheetList(prev, loadedSheets) ? prev : loadedSheets));
     }, (err) => console.error("Sheet Sync Error", err));
 
     const unsubscribeImages = onSnapshot(imagesCollection, (snapshot) => {
-      const loadedImages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const loadedImages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       const loadedImageDataById = {};
       loadedImages.forEach((img) => {
         if (img?.id && (img?.data || img?.image)) {
@@ -2381,19 +3400,29 @@ export default function App() {
         }
       });
       const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
-      setImages(normalizedLoadedImages);
+      setImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
     }, (err) => console.error("Image Sync Error", err));
 
     const unsubscribeTemp = onSnapshot(tempShelfCollection, (snapshot) => {
-      const loadedTemps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let loadedTemps = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      if (useLegacyTempShelf && tempShelfUserId) {
+        loadedTemps = loadedTemps.filter((item) => item?.ownerUid === tempShelfUserId);
+      }
       loadedTemps.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setTempItems(loadedTemps);
-    }, (err) => console.error("Temp Shelf Sync Error", err));
+      setTempItems((prev) => (isSameTransferItemList(prev, loadedTemps) ? prev : loadedTemps));
+    }, (err) => {
+      console.error("Temp Shelf Sync Error", err);
+      const code = getFirestoreErrorCode(err);
+      if (code === 'permission-denied' && !useLegacyTempShelf) {
+        console.warn("Switching temp shelf to legacy path due permission-denied on user path.");
+        setUseLegacyTempShelf(true);
+      }
+    });
 
     const unsubscribeExcluded = onSnapshot(excludedItemsCollection, (snapshot) => {
-      const loadedExcluded = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const loadedExcluded = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       loadedExcluded.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setExcludedItems(loadedExcluded);
+      setExcludedItems((prev) => (isSameTransferItemList(prev, loadedExcluded) ? prev : loadedExcluded));
     }, (err) => console.error("Excluded Items Sync Error", err));
 
     const unsubscribeSales = onSnapshot(salesChunksCollection, (snapshot) => {
@@ -2426,7 +3455,7 @@ export default function App() {
       unsubscribeSales();
       unsubscribeMeta();
     };
-  }, [isAuthenticated, firebaseUser, sheetsCollection, imagesCollection, tempShelfCollection, excludedItemsCollection, settingsCollection, salesChunksCollection]);
+  }, [isAuthenticated, firebaseUser, sheetsCollection, imagesCollection, tempShelfCollection, excludedItemsCollection, settingsCollection, salesChunksCollection, useLegacyTempShelf, tempShelfUserId]);
 
   const requestConfirm = (message, action) => {
     setConfirmDialog({
@@ -2442,6 +3471,61 @@ export default function App() {
   const showAlert = (message, title = "通知", closeOnBackdrop = false) => {
     setAlertDialog({ isOpen: true, message, title, closeOnBackdrop });
   };
+
+  const cloudWriteQueuesRef = useRef(new Map());
+
+  const runCloudWrite = useCallback((writer, options = {}) => {
+    if (USE_LOCAL_STORAGE) return writer();
+    const key = options.key || 'global';
+    const queues = cloudWriteQueuesRef.current;
+    const prev = queues.get(key) || Promise.resolve();
+
+    const chainedWrite = prev
+      .catch(() => undefined)
+      .then(() => retryAsync(() => writer(), { retries: 8, baseDelayMs: 80 }));
+
+    const queued = chainedWrite.catch(() => undefined);
+    queues.set(key, queued);
+
+    return chainedWrite.finally(() => {
+      if (queues.get(key) === queued) {
+        queues.delete(key);
+      }
+    });
+  }, []);
+
+  const runCloudTransaction = useCallback((transactionWork, options = {}) => {
+    return runCloudWrite(() => runTransaction(db, transactionWork), options);
+  }, [runCloudWrite]);
+
+  const buildTempShelfPayload = useCallback((basePayload = {}) => {
+    const payload = { ...basePayload };
+    if (useLegacyTempShelf && tempShelfUserId) {
+      payload.ownerUid = tempShelfUserId;
+    }
+    return payload;
+  }, [useLegacyTempShelf, tempShelfUserId]);
+
+  const migratedPanelsMapRef = useRef(new Set());
+  useEffect(() => {
+    if (USE_LOCAL_STORAGE || !isAuthenticated || !sheetsCollection) return;
+    if (!Array.isArray(sheets) || sheets.length === 0) return;
+
+    sheets.forEach((sheet) => {
+      if (!sheet?.id) return;
+      const hasPanelsMap = !!(sheet.panelsMap && typeof sheet.panelsMap === 'object');
+      if (hasPanelsMap || migratedPanelsMapRef.current.has(sheet.id)) return;
+
+      migratedPanelsMapRef.current.add(sheet.id);
+      runCloudWrite(
+        () => updateDoc(doc(sheetsCollection, sheet.id), { panelsMap: toPanelsMap(sheet.panels || buildDefaultPanels()) }),
+        { key: `sheet:${sheet.id}` }
+      ).catch((error) => {
+        console.error("Panels map migration failed:", error);
+        migratedPanelsMapRef.current.delete(sheet.id);
+      });
+    });
+  }, [isAuthenticated, sheets, sheetsCollection, runCloudWrite]);
 
   // --- Common CSV Parser ---
   const parseCSVLine = (line) => {
@@ -2590,7 +3674,7 @@ export default function App() {
       if (snapshot.size + chunks.length > 450) {
         const deleteBatch = writeBatch(db);
         snapshot.docs.forEach(d => deleteBatch.delete(d.ref));
-        await deleteBatch.commit();
+        await runCloudWrite(() => deleteBatch.commit(), { key: 'sales-data' });
 
         for (let i = 0; i < chunks.length; i += 400) {
           const writeBatchChunk = writeBatch(db);
@@ -2602,10 +3686,10 @@ export default function App() {
               updatedAt: serverTimestamp()
             });
           });
-          await writeBatchChunk.commit();
+          await runCloudWrite(() => writeBatchChunk.commit(), { key: 'sales-data' });
         }
       } else {
-        await batch.commit();
+        await runCloudWrite(() => batch.commit(), { key: 'sales-data' });
       }
 
       await setDoc(doc(settingsCollection, 'salesDataMeta'), {
@@ -2643,6 +3727,41 @@ export default function App() {
       setSalesPopupPos(null);
     }, 300); // 300ms delay to allow moving to popup
   }, []);
+
+  const clearSalesModeLongPressTimer = useCallback(() => {
+    if (salesModeLongPressTimerRef.current) {
+      clearTimeout(salesModeLongPressTimerRef.current);
+      salesModeLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const startSalesModeLongPress = useCallback((event) => {
+    if (event?.button !== undefined && event.button !== 0) return;
+    clearSalesModeLongPressTimer();
+    salesModeLongPressTriggeredRef.current = false;
+    salesModeLongPressTimerRef.current = setTimeout(() => {
+      salesModeLongPressTriggeredRef.current = true;
+      setIsSalesLookupOpen(true);
+    }, 2000);
+  }, [clearSalesModeLongPressTimer]);
+
+  const endSalesModeLongPress = useCallback(() => {
+    clearSalesModeLongPressTimer();
+  }, [clearSalesModeLongPressTimer]);
+
+  const handleSalesModeButtonClick = useCallback(() => {
+    if (salesModeLongPressTriggeredRef.current) {
+      salesModeLongPressTriggeredRef.current = false;
+      return;
+    }
+    setIsSalesMode((prev) => !prev);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearSalesModeLongPressTimer();
+    };
+  }, [clearSalesModeLongPressTimer]);
 
   // --- Image Logic (Duplicate Check) ---
   const checkImageUsage = (imageSrc) => {
@@ -2717,8 +3836,7 @@ export default function App() {
   const handleMerge = useCallback(async () => {
     if (!canMerge) return;
     const { sheetId, indices } = selection;
-    const sheet = sheets.find(s => s.id === sheetId);
-    if (!sheet) return;
+    if (!sheetId || indices.length === 0) return;
 
     const coords = indices.map(getCoords);
     const minRow = Math.min(...coords.map(c => c.row));
@@ -2730,15 +3848,17 @@ export default function App() {
     const primaryIndex = minRow * 4 + minCol;
     const sizeType = getSizeType(rowSpan, colSpan);
 
-    const newPanels = [...sheet.panels];
-    newPanels[primaryIndex] = { ...newPanels[primaryIndex], rowSpan, colSpan, hidden: false, sizeType };
-    indices.forEach(idx => {
-      if (idx !== primaryIndex) {
-        newPanels[idx] = { ...newPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
-      }
-    });
-
     if (USE_LOCAL_STORAGE) {
+      const sheet = sheets.find(s => s.id === sheetId);
+      if (!sheet) return;
+      const newPanels = [...sheet.panels];
+      newPanels[primaryIndex] = { ...newPanels[primaryIndex], rowSpan, colSpan, hidden: false, sizeType };
+      indices.forEach(idx => {
+        if (idx !== primaryIndex) {
+          newPanels[idx] = { ...newPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
+        }
+      });
+
       const newSheets = sheets.map(s =>
         s.id === sheetId ? { ...s, panels: newPanels } : s
       );
@@ -2750,45 +3870,71 @@ export default function App() {
     }
 
     try {
-      await updateDoc(doc(sheetsCollection, sheetId), { panels: newPanels });
+      const sheetRef = doc(sheetsCollection, sheetId);
+      await runCloudTransaction(async (transaction) => {
+        const snap = await transaction.get(sheetRef);
+        if (!snap.exists()) return;
+
+        const serverPanels = getPanelsFromDocData(snap.data() || {});
+        const validPanels = indices.every(idx => {
+          const panel = serverPanels[idx] || {};
+          return !panel.hidden && (panel.rowSpan || 1) === 1 && (panel.colSpan || 1) === 1;
+        });
+        if (!validPanels) return;
+
+        const nextPanels = [...serverPanels];
+        nextPanels[primaryIndex] = { ...nextPanels[primaryIndex], rowSpan, colSpan, hidden: false, sizeType };
+        indices.forEach(idx => {
+          if (idx !== primaryIndex) {
+            nextPanels[idx] = { ...nextPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
+          }
+        });
+
+        const panelUpdates = buildPanelMapUpdates(serverPanels, nextPanels);
+        if (Object.keys(panelUpdates).length > 0) {
+          transaction.update(sheetRef, panelUpdates);
+        }
+      }, { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Merge error:", error);
-      showAlert("結合に失敗しました");
+      showAlert("結合に失敗しました。しばらく待って再試行してください。");
     } finally {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
     }
-  }, [canMerge, selection, sheets, sheetsCollection]);
+  }, [canMerge, selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
 
   const handleSplit = useCallback(async () => {
     const { sheetId, indices } = selection;
-    const sheet = sheets.find(s => s.id === sheetId);
-    if (!sheet) return;
+    if (!sheetId || indices.length === 0) return;
 
-    const newPanels = [...sheet.panels];
-    indices.forEach(idx => {
-      const p = newPanels[idx];
-      if ((p.rowSpan || 1) > 1 || (p.colSpan || 1) > 1) {
-        const rSpan = p.rowSpan || 1;
-        const cSpan = p.colSpan || 1;
-        const startRow = Math.floor(idx / 4);
-        const startCol = idx % 4;
+    if (USE_LOCAL_STORAGE) {
+      const sheet = sheets.find(s => s.id === sheetId);
+      if (!sheet) return;
 
-        newPanels[idx] = { ...p, rowSpan: 1, colSpan: 1, sizeType: '1/16（1コマ）' };
+      const newPanels = [...sheet.panels];
+      indices.forEach(idx => {
+        const p = newPanels[idx];
+        if ((p.rowSpan || 1) > 1 || (p.colSpan || 1) > 1) {
+          const rSpan = p.rowSpan || 1;
+          const cSpan = p.colSpan || 1;
+          const startRow = Math.floor(idx / 4);
+          const startCol = idx % 4;
 
-        for (let r = 0; r < rSpan; r++) {
-          for (let c = 0; c < cSpan; c++) {
-            if (r === 0 && c === 0) continue;
-            const tIdx = (startRow + r) * 4 + (startCol + c);
-            if (tIdx < 16) {
-              newPanels[tIdx] = { ...newPanels[tIdx], hidden: false, sizeType: '1/16（1コマ）' };
+          newPanels[idx] = { ...p, rowSpan: 1, colSpan: 1, sizeType: '1/16（1コマ）' };
+
+          for (let r = 0; r < rSpan; r++) {
+            for (let c = 0; c < cSpan; c++) {
+              if (r === 0 && c === 0) continue;
+              const tIdx = (startRow + r) * 4 + (startCol + c);
+              if (tIdx < 16) {
+                newPanels[tIdx] = { ...newPanels[tIdx], hidden: false, sizeType: '1/16（1コマ）' };
+              }
             }
           }
         }
-      }
-    });
+      });
 
-    if (USE_LOCAL_STORAGE) {
       const newSheets = sheets.map(s =>
         s.id === sheetId ? { ...s, panels: newPanels } : s
       );
@@ -2800,48 +3946,59 @@ export default function App() {
     }
 
     try {
-      await updateDoc(doc(sheetsCollection, sheetId), { panels: newPanels });
+      const sheetRef = doc(sheetsCollection, sheetId);
+      await runCloudTransaction(async (transaction) => {
+        const snap = await transaction.get(sheetRef);
+        if (!snap.exists()) return;
+
+        const serverPanels = getPanelsFromDocData(snap.data() || {});
+        const nextPanels = [...serverPanels];
+
+        indices.forEach(idx => {
+          const p = nextPanels[idx] || {};
+          if ((p.rowSpan || 1) > 1 || (p.colSpan || 1) > 1) {
+            const rSpan = p.rowSpan || 1;
+            const cSpan = p.colSpan || 1;
+            const startRow = Math.floor(idx / 4);
+            const startCol = idx % 4;
+
+            nextPanels[idx] = { ...p, rowSpan: 1, colSpan: 1, sizeType: '1/16（1コマ）' };
+            for (let r = 0; r < rSpan; r++) {
+              for (let c = 0; c < cSpan; c++) {
+                if (r === 0 && c === 0) continue;
+                const tIdx = (startRow + r) * 4 + (startCol + c);
+                if (tIdx < 16) {
+                  nextPanels[tIdx] = { ...nextPanels[tIdx], hidden: false, sizeType: '1/16（1コマ）' };
+                }
+              }
+            }
+          }
+        });
+
+        const panelUpdates = buildPanelMapUpdates(serverPanels, nextPanels);
+        if (Object.keys(panelUpdates).length > 0) {
+          transaction.update(sheetRef, panelUpdates);
+        }
+      }, { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Split error:", error);
-      showAlert("分離に失敗しました");
+      showAlert("分離に失敗しました。しばらく待って再試行してください。");
     } finally {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
     }
-  }, [selection, sheets, sheetsCollection]);
+  }, [selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
 
   // --- Core Actions ---
 
   const handleAddSheet = useCallback(async () => {
     // 認証チェック: LocalStorageモードならUI認証のみ、FirebaseモードならFirebase認証も確認
     if (!isAuthenticated) return;
-
-    if (!USE_LOCAL_STORAGE && !auth.currentUser) {
-      try {
-        console.log("Attempting JIT sign-in...");
-        await signInAnonymously(auth);
-      } catch (e) {
-        console.error("JIT Auth failed", e);
-        showAlert("サーバーへの接続に失敗しました。再読み込みしてください。");
-        return;
-      }
-    }
+    if (!USE_LOCAL_STORAGE && !auth.currentUser) return;
 
     const newOrder = sheets.length > 0 ? Math.max(...sheets.map(s => s.order || 0)) + 1 : 0;
 
-    // Fix: Create independent objects for each panel to prevent reference sharing
-    const defaultPanels = Array(16).fill(null).map(() => ({
-      image: null,
-      imageId: null,
-      text: '',
-      label: null,
-      code: null,
-      rowSpan: 1,
-      colSpan: 1,
-      hidden: false,
-      sizeType: '1/16（1コマ）',
-      isText: false
-    }));
+    const defaultPanels = buildDefaultPanels();
 
     if (USE_LOCAL_STORAGE) {
       const newSheet = {
@@ -2862,6 +4019,7 @@ export default function App() {
         genre: 'none',
         order: newOrder,
         panels: defaultPanels,
+        panelsMap: toPanelsMap(defaultPanels),
         createdAt: serverTimestamp()
       });
     } catch (e) {
@@ -2888,27 +4046,21 @@ export default function App() {
       return;
     }
 
-    if (!sheetsCollection || !tempShelfCollection) return;
+    if (!sheetsCollection) return;
 
     try {
       const sheetRef = doc(sheetsCollection, sheetId);
-      await runTransaction(db, async (transaction) => {
-        const sheetSnap = await transaction.get(sheetRef);
-        if (!sheetSnap.exists()) return;
-
-        const serverPanels = [...(sheetSnap.data().panels || [])];
-        const serverPanel = serverPanels[panelIndex] || {};
-        const mergedPanel = { ...serverPanel, ...panelPatch };
-
-        if (isPanelDataEqual(serverPanel, mergedPanel)) return;
-        serverPanels[panelIndex] = mergedPanel;
-        transaction.update(sheetRef, { panels: serverPanels });
+      const fieldUpdates = {};
+      Object.entries(panelPatch).forEach(([key, value]) => {
+        fieldUpdates[`panelsMap.${panelIndex}.${key}`] = value === undefined ? null : value;
       });
+      if (Object.keys(fieldUpdates).length === 0) return;
+      await runCloudWrite(() => updateDoc(sheetRef, fieldUpdates), { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Panel update transaction failed:", error);
-      showAlert("同時編集との競合が発生しました。再度お試しください。");
+      showAlert("同時編集の再試行に失敗しました。少し待ってから再実行してください。");
     }
-  }, [sheets, sheetsCollection, showAlert]);
+  }, [sheets, sheetsCollection, showAlert, runCloudWrite]);
 
   // --- Temp & Excluded Logic (Restored) ---
 
@@ -2944,17 +4096,17 @@ export default function App() {
       return;
     }
 
-    if (!sheetsCollection || !excludedItemsCollection) return;
+    if (!sheetsCollection || !tempShelfCollection) return;
 
-    try {
+    const moveWithTransaction = async (targetTempCollection, forceLegacyOwner = false) => {
       const sheetRef = doc(sheetsCollection, sheetId);
-      const tempRef = doc(tempShelfCollection);
+      const tempRef = doc(targetTempCollection);
 
-      await runTransaction(db, async (transaction) => {
+      await runCloudTransaction(async (transaction) => {
         const sheetSnap = await transaction.get(sheetRef);
         if (!sheetSnap.exists()) return;
 
-        const serverPanels = [...(sheetSnap.data().panels || [])];
+        const serverPanels = getPanelsFromDocData(sheetSnap.data() || {});
         const sourcePanel = serverPanels[panelIndex] || {};
         if (!hasPanelTransferableContent(sourcePanel)) return;
 
@@ -2966,17 +4118,147 @@ export default function App() {
           text: movedText !== undefined ? movedText : (sourcePanel.text || ''),
           isText: sourcePanel.isText || false,
           originalName: "退避アイテム",
+          ...(forceLegacyOwner && tempShelfUserId ? { ownerUid: tempShelfUserId } : {}),
           createdAt: serverTimestamp()
         });
 
-        serverPanels[panelIndex] = clearPanelTransferableContent(sourcePanel);
-        transaction.update(sheetRef, { panels: serverPanels });
-      });
+        const nextPanels = [...serverPanels];
+        nextPanels[panelIndex] = clearPanelTransferableContent(sourcePanel);
+        const panelUpdates = buildPanelMapUpdates(serverPanels, nextPanels);
+        if (Object.keys(panelUpdates).length > 0) {
+          transaction.update(sheetRef, panelUpdates);
+        }
+      }, { key: `sheet:${sheetId}` });
+    };
+
+    try {
+      await moveWithTransaction(tempShelfCollection, useLegacyTempShelf);
     } catch (error) {
-      console.error("Move to temp transaction failed:", error);
-      showAlert("仮置き場への移動に失敗しました。再度お試しください。");
+      let finalError = error;
+      const code = getFirestoreErrorCode(error);
+      const shouldFallbackToLegacy = (
+        code === 'permission-denied'
+        && !useLegacyTempShelf
+        && !!legacyTempShelfCollection
+        && !!tempShelfUserId
+      );
+
+      if (shouldFallbackToLegacy) {
+        try {
+          setUseLegacyTempShelf(true);
+          await moveWithTransaction(legacyTempShelfCollection, true);
+          return;
+        } catch (fallbackError) {
+          console.error("Move to temp fallback transaction failed:", fallbackError);
+          finalError = fallbackError;
+        }
+      } else {
+        console.error("Move to temp transaction failed:", error);
+      }
+
+      if (getFirestoreErrorCode(finalError) === 'permission-denied') {
+        showAlert("仮置き場への移動権限がありません。管理者にFirestoreルールの反映をご依頼ください。");
+      } else {
+        showAlert("仮置き場への移動に失敗しました。少し待ってから再実行してください。");
+      }
     }
   };
+
+  const handleAddDragItemToTempShelf = useCallback(async (dragPayload = {}, resolvedAssignment = null) => {
+    const assignment = resolvedAssignment || extractPanelAssignmentFromDragPayload(dragPayload, '');
+    if (!assignment) return false;
+
+    if (assignment.fromTempId) {
+      // 既に仮置き場にあるアイテムを仮置き場へドロップした場合は何もしない
+      return true;
+    }
+
+    const hasTransferableData = !!(
+      assignment.image
+      || assignment.imageId
+      || assignment.label
+      || assignment.code
+      || assignment.isText
+    );
+    if (!hasTransferableData) return false;
+
+    const originalName = parseNullableDragValue(dragPayload.name) || '仮置きアイテム';
+    const itemPayload = {
+      image: assignment.image || null,
+      imageId: assignment.imageId || null,
+      label: assignment.label || null,
+      code: assignment.code || null,
+      text: typeof assignment.text === 'string' ? assignment.text : '',
+      isText: !!assignment.isText,
+      originalName
+    };
+
+    if (USE_LOCAL_STORAGE) {
+      const newTempItem = {
+        id: idbHelper.generateId(),
+        ...itemPayload,
+        createdAt: { seconds: Date.now() / 1000 }
+      };
+      setTempItems((prev) => [newTempItem, ...(prev || [])]);
+
+      if (assignment.fromExcludedId) {
+        setExcludedItems((prev) => (prev || []).filter((item) => item.id !== assignment.fromExcludedId));
+      }
+      return true;
+    }
+
+    if (!tempShelfCollection) return false;
+
+    const addToCollection = async (targetTempCollection, forceLegacyOwner = false) => {
+      const batch = writeBatch(db);
+      const tempRef = doc(targetTempCollection);
+      batch.set(tempRef, {
+        ...itemPayload,
+        ...(forceLegacyOwner && tempShelfUserId ? { ownerUid: tempShelfUserId } : buildTempShelfPayload({})),
+        createdAt: serverTimestamp()
+      });
+
+      if (assignment.fromExcludedId && excludedItemsCollection) {
+        batch.delete(doc(excludedItemsCollection, assignment.fromExcludedId));
+      }
+
+      await runCloudWrite(() => batch.commit(), { key: 'temp-shelf' });
+    };
+
+    try {
+      await addToCollection(tempShelfCollection, useLegacyTempShelf);
+      return true;
+    } catch (error) {
+      let finalError = error;
+      const code = getFirestoreErrorCode(error);
+      const shouldFallbackToLegacy = (
+        code === 'permission-denied'
+        && !useLegacyTempShelf
+        && !!legacyTempShelfCollection
+        && !!tempShelfUserId
+      );
+
+      if (shouldFallbackToLegacy) {
+        try {
+          setUseLegacyTempShelf(true);
+          await addToCollection(legacyTempShelfCollection, true);
+          return true;
+        } catch (fallbackError) {
+          console.error("Add drag item fallback failed:", fallbackError);
+          finalError = fallbackError;
+        }
+      } else {
+        console.error("Add drag item to temp shelf failed:", error);
+      }
+
+      if (getFirestoreErrorCode(finalError) === 'permission-denied') {
+        showAlert("仮置き場への追加権限がありません。管理者にFirestoreルールの反映をご依頼ください。");
+      } else {
+        showAlert("仮置き場への追加に失敗しました。少し待ってから再実行してください。");
+      }
+      return false;
+    }
+  }, [tempShelfCollection, excludedItemsCollection, runCloudWrite, showAlert, useLegacyTempShelf, legacyTempShelfCollection, tempShelfUserId, buildTempShelfPayload]);
 
   const handleDeleteFromTemp = async (id) => {
     if (USE_LOCAL_STORAGE) {
@@ -2985,7 +4267,28 @@ export default function App() {
       // localStorageHelper.setItem('tempItems', newTempItems); // Auto-save handles this
       return;
     }
-    await deleteDoc(doc(tempShelfCollection, id));
+    try {
+      await runCloudWrite(() => deleteDoc(doc(tempShelfCollection, id)), { key: 'temp-shelf' });
+    } catch (error) {
+      const code = getFirestoreErrorCode(error);
+      const shouldFallbackToLegacy = (
+        code === 'permission-denied'
+        && !useLegacyTempShelf
+        && !!legacyTempShelfCollection
+      );
+      if (shouldFallbackToLegacy) {
+        try {
+          setUseLegacyTempShelf(true);
+          await runCloudWrite(() => deleteDoc(doc(legacyTempShelfCollection, id)), { key: 'temp-shelf' });
+          return;
+        } catch (fallbackError) {
+          console.error("Delete temp item fallback failed:", fallbackError);
+        }
+      } else {
+        console.error("Delete temp item failed:", error);
+      }
+      showAlert("仮置き場アイテムの削除に失敗しました。");
+    }
   };
 
   const handleMoveToExcluded = async (sheetId, panelIndex, movedText) => {
@@ -3020,17 +4323,17 @@ export default function App() {
       return;
     }
 
-    if (!sheetsCollection) return;
+    if (!sheetsCollection || !excludedItemsCollection) return;
 
     try {
       const sheetRef = doc(sheetsCollection, sheetId);
       const excludedRef = doc(excludedItemsCollection);
 
-      await runTransaction(db, async (transaction) => {
+      await runCloudTransaction(async (transaction) => {
         const sheetSnap = await transaction.get(sheetRef);
         if (!sheetSnap.exists()) return;
 
-        const serverPanels = [...(sheetSnap.data().panels || [])];
+        const serverPanels = getPanelsFromDocData(sheetSnap.data() || {});
         const sourcePanel = serverPanels[panelIndex] || {};
         if (!hasPanelTransferableContent(sourcePanel)) return;
 
@@ -3045,12 +4348,16 @@ export default function App() {
           createdAt: serverTimestamp()
         });
 
-        serverPanels[panelIndex] = clearPanelTransferableContent(sourcePanel);
-        transaction.update(sheetRef, { panels: serverPanels });
-      });
+        const nextPanels = [...serverPanels];
+        nextPanels[panelIndex] = clearPanelTransferableContent(sourcePanel);
+        const panelUpdates = buildPanelMapUpdates(serverPanels, nextPanels);
+        if (Object.keys(panelUpdates).length > 0) {
+          transaction.update(sheetRef, panelUpdates);
+        }
+      }, { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Move to excluded transaction failed:", error);
-      showAlert("除外リストへの移動に失敗しました。再度お試しください。");
+      showAlert("除外リストへの移動に失敗しました。少し待ってから再実行してください。");
     }
   };
 
@@ -3064,7 +4371,12 @@ export default function App() {
           // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
           return;
         }
-        await deleteDoc(doc(excludedItemsCollection, id));
+        try {
+          await runCloudWrite(() => deleteDoc(doc(excludedItemsCollection, id)), { key: 'excluded-items' });
+        } catch (error) {
+          console.error("Delete excluded item failed:", error);
+          showAlert("除外アイテムの削除に失敗しました。");
+        }
       }
     );
   };
@@ -3087,7 +4399,7 @@ export default function App() {
           batch.delete(doc(excludedItemsCollection, item.id));
         });
         try {
-          await batch.commit();
+          await runCloudWrite(() => batch.commit(), { key: 'excluded-items' });
           showAlert("除外リストを空にしました。");
         } catch (err) {
           console.error("Bulk delete excluded failed", err);
@@ -3123,8 +4435,45 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const removeMatchingTempItemsForImage = useCallback((assignedImage, assignedImageId) => {
+    if (!assignedImage && !assignedImageId) return;
+
+    const matchedItems = tempItems.filter((item) => {
+      if (!item?.id) return false;
+      const byId = !!assignedImageId && !!item.imageId && item.imageId === assignedImageId;
+      const byData = !!assignedImage && !!item.image && item.image === assignedImage;
+      return byId || byData;
+    });
+
+    if (matchedItems.length === 0) return;
+
+    if (USE_LOCAL_STORAGE) {
+      const matchedIds = new Set(matchedItems.map((item) => item.id));
+      setTempItems((prev) => prev.filter((item) => !matchedIds.has(item.id)));
+      return;
+    }
+
+    if (!tempShelfCollection) return;
+
+    const deleteBatch = writeBatch(db);
+    matchedItems.forEach((item) => {
+      deleteBatch.delete(doc(tempShelfCollection, item.id));
+    });
+
+    runCloudWrite(() => deleteBatch.commit(), { key: 'temp-shelf' }).catch((error) => {
+      const code = getFirestoreErrorCode(error);
+      if (code === 'permission-denied' && !useLegacyTempShelf) {
+        setUseLegacyTempShelf(true);
+        return;
+      }
+      console.error("Delete matched temp items failed:", error);
+    });
+  }, [tempItems, tempShelfCollection, runCloudWrite, useLegacyTempShelf]);
+
   const handlePanelUpdateWithCheck = (sheetId, panelIndex, newData) => {
     const sanitizedData = { ...newData };
+    const cameFromTemp = !!sanitizedData.fromTempId;
+    const cameFromExcluded = !!sanitizedData.fromExcludedId;
 
     if (sanitizedData.fromTempId) {
       handleDeleteFromTemp(sanitizedData.fromTempId);
@@ -3136,10 +4485,22 @@ export default function App() {
         setExcludedItems(newExcludedItems);
         // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-saveに任せる
       } else {
-        deleteDoc(doc(excludedItemsCollection, sanitizedData.fromExcludedId));
+        runCloudWrite(() => deleteDoc(doc(excludedItemsCollection, sanitizedData.fromExcludedId)), { key: 'excluded-items' }).catch((error) => {
+          console.error("Delete excluded item during drop failed:", error);
+        });
       }
       delete sanitizedData.fromExcludedId;
     }
+
+    const isLibraryImageDrop = !cameFromTemp
+      && !cameFromExcluded
+      && !!sanitizedData.image
+      && !sanitizedData.label
+      && !sanitizedData.isText;
+    if (isLibraryImageDrop) {
+      removeMatchingTempItemsForImage(sanitizedData.image, sanitizedData.imageId);
+    }
+
     const currentSheet = sheets.find(s => s.id === sheetId);
     const currentPanel = currentSheet?.panels[panelIndex];
 
@@ -3152,16 +4513,27 @@ export default function App() {
     handleUpdatePanel(sheetId, panelIndex, sanitizedData);
   };
 
-  const handleMoveToStock = useCallback(async (sheetId, panelIndex) => {
+  const handleMoveToStock = async (sheetId, panelIndex, movedText) => {
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
     if (!panel) return;
+
+    const panelImage = panel.image || null;
+    const isLibraryBackedImage = !!panel.imageId || (!!panelImage && images.some((img) => img?.data === panelImage));
+    const shouldPreserveInTemp = !!panel.label || !!panel.isText || (!!panelImage && !isLibraryBackedImage);
+
+    // ダミー/テキスト/ライブラリ未登録画像は消去ではなく仮置き場へ退避し、消失を防ぐ
+    if (shouldPreserveInTemp) {
+      await handleMoveToTemp(sheetId, panelIndex, movedText);
+      return;
+    }
+
     handlePanelUpdateWithCheck(sheetId, panelIndex, {
       ...panel,
       image: null, imageId: null, label: null, code: null, text: '', isText: false
     });
-  }, [sheets]);
+  };
 
   const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
@@ -3225,18 +4597,19 @@ export default function App() {
       const fromSheetRef = doc(sheetsCollection, fromSheetId);
       const toSheetRef = doc(sheetsCollection, toSheetId);
 
-      await runTransaction(db, async (transaction) => {
+      await runCloudTransaction(async (transaction) => {
         const fromSnap = await transaction.get(fromSheetRef);
         if (!fromSnap.exists()) return;
 
-        const fromPanels = [...(fromSnap.data().panels || [])];
+        const fromPanels = getPanelsFromDocData(fromSnap.data() || {});
         const dataToMove = { ...(fromPanels[fromIndex] || {}) };
         if (!hasPanelTransferableContent(dataToMove)) return;
 
         if (fromSheetId === toSheetId) {
-          fromPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
-          const targetPanel = fromPanels[toIndex] || {};
-          fromPanels[toIndex] = {
+          const nextPanels = [...fromPanels];
+          nextPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
+          const targetPanel = nextPanels[toIndex] || {};
+          nextPanels[toIndex] = {
             ...targetPanel,
             image: dataToMove.image || null,
             imageId: dataToMove.imageId || null,
@@ -3245,17 +4618,22 @@ export default function App() {
             text: movedText !== undefined ? movedText : (dataToMove.text || ''),
             isText: !!dataToMove.isText
           };
-          transaction.update(fromSheetRef, { panels: fromPanels });
+          const panelUpdates = buildPanelMapUpdates(fromPanels, nextPanels);
+          if (Object.keys(panelUpdates).length > 0) {
+            transaction.update(fromSheetRef, panelUpdates);
+          }
           return;
         }
 
         const toSnap = await transaction.get(toSheetRef);
         if (!toSnap.exists()) return;
 
-        const toPanels = [...(toSnap.data().panels || [])];
-        fromPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
-        const targetPanel = toPanels[toIndex] || {};
-        toPanels[toIndex] = {
+        const toPanels = getPanelsFromDocData(toSnap.data() || {});
+        const nextFromPanels = [...fromPanels];
+        const nextToPanels = [...toPanels];
+        nextFromPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
+        const targetPanel = nextToPanels[toIndex] || {};
+        nextToPanels[toIndex] = {
           ...targetPanel,
           image: dataToMove.image || null,
           imageId: dataToMove.imageId || null,
@@ -3265,14 +4643,277 @@ export default function App() {
           isText: !!dataToMove.isText
         };
 
-        transaction.update(fromSheetRef, { panels: fromPanels });
-        transaction.update(toSheetRef, { panels: toPanels });
-      });
+        const fromUpdates = buildPanelMapUpdates(fromPanels, nextFromPanels);
+        const toUpdates = buildPanelMapUpdates(toPanels, nextToPanels);
+        if (Object.keys(fromUpdates).length > 0) {
+          transaction.update(fromSheetRef, fromUpdates);
+        }
+        if (Object.keys(toUpdates).length > 0) {
+          transaction.update(toSheetRef, toUpdates);
+        }
+      }, { key: `sheet-pair:${[fromSheetId, toSheetId].sort().join('|')}` });
     } catch (error) {
       console.error("Move panel transaction failed:", error);
-      showAlert("同時編集との競合が発生しました。再度お試しください。");
+      showAlert("同時編集の再試行に失敗しました。少し待ってから再実行してください。");
     }
   };
+
+  const applyDragPayloadToPanel = useCallback((targetSheetId, targetIndex, dragPayload = {}) => {
+    if (!targetSheetId || Number.isNaN(targetIndex)) return false;
+
+    const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
+    if (movePayload) {
+      void handleMovePanel(
+        movePayload.sourceSheetId,
+        movePayload.sourceIndex,
+        targetSheetId,
+        targetIndex,
+        movePayload.movedText
+      );
+      return true;
+    }
+
+    const targetSheet = sheets.find((sheet) => sheet.id === targetSheetId);
+    const targetPanel = targetSheet?.panels?.[targetIndex];
+    if (!targetPanel) return false;
+
+    const assignment = extractPanelAssignmentFromDragPayload(
+      dragPayload,
+      targetPanel.text || 'テキストを入力'
+    );
+    if (!assignment) return false;
+
+    handlePanelUpdateWithCheck(targetSheetId, targetIndex, {
+      ...targetPanel,
+      ...assignment
+    });
+    return true;
+  }, [handleMovePanel, handlePanelUpdateWithCheck, sheets]);
+
+  const applyDragPayloadToTempShelf = useCallback((dragPayload = {}) => {
+    const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
+    if (movePayload) {
+      void handleMoveToTemp(
+        movePayload.sourceSheetId,
+        movePayload.sourceIndex,
+        movePayload.movedText
+      );
+      return true;
+    }
+
+    const assignment = extractPanelAssignmentFromDragPayload(dragPayload, '');
+    if (!assignment) return false;
+    if (assignment.fromTempId) return true;
+
+    void handleAddDragItemToTempShelf(dragPayload, assignment);
+    return true;
+  }, [handleMoveToTemp, handleAddDragItemToTempShelf]);
+
+  const applyDragPayloadToStockList = useCallback((dragPayload = {}) => {
+    const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
+    if (!movePayload) return false;
+    void handleMoveToStock(
+      movePayload.sourceSheetId,
+      movePayload.sourceIndex,
+      movePayload.movedText
+    );
+    return true;
+  }, [handleMoveToStock]);
+
+  const applyDragPayloadToExcludedList = useCallback((dragPayload = {}) => {
+    const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
+    if (!movePayload) return false;
+    void handleMoveToExcluded(
+      movePayload.sourceSheetId,
+      movePayload.sourceIndex,
+      movePayload.movedText
+    );
+    return true;
+  }, [handleMoveToExcluded]);
+
+  const dispatchPointerDropToZone = useCallback((zoneId, dragPayload = {}) => {
+    if (!zoneId) return false;
+    if (zoneId === 'temp') return applyDragPayloadToTempShelf(dragPayload);
+    if (zoneId === 'stock') return applyDragPayloadToStockList(dragPayload);
+    if (zoneId === 'excluded') return applyDragPayloadToExcludedList(dragPayload);
+    if (!zoneId.startsWith(DAIWARI_PANEL_DROPZONE_PREFIX)) return false;
+
+    const panelTarget = zoneId.slice(DAIWARI_PANEL_DROPZONE_PREFIX.length);
+    const separatorIndex = panelTarget.lastIndexOf(':');
+    if (separatorIndex === -1) return false;
+
+    const sheetId = panelTarget.slice(0, separatorIndex);
+    const panelIndex = Number.parseInt(panelTarget.slice(separatorIndex + 1), 10);
+    if (!sheetId || Number.isNaN(panelIndex)) return false;
+
+    return applyDragPayloadToPanel(sheetId, panelIndex, dragPayload);
+  }, [applyDragPayloadToTempShelf, applyDragPayloadToStockList, applyDragPayloadToExcludedList, applyDragPayloadToPanel]);
+
+  const handlePointerDropAtPoint = useCallback((clientX, clientY, dragPayload = {}) => {
+    if (typeof document === 'undefined') return false;
+    const target = document.elementFromPoint(clientX, clientY);
+    const dropZoneEl = target?.closest?.(`[${DAIWARI_DROPZONE_ATTR}]`);
+    const zoneId = dropZoneEl?.getAttribute?.(DAIWARI_DROPZONE_ATTR) || '';
+    return dispatchPointerDropToZone(zoneId, dragPayload);
+  }, [dispatchPointerDropToZone]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+
+    const handleDocumentDragOver = (event) => {
+      if (!getActiveNativeDragPayload()) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+    };
+
+    const handleDocumentDrop = (event) => {
+      if (isDropEventHandled(event)) return;
+      const dragPayload = getDragPayload(event.dataTransfer);
+      if (!dragPayload) {
+        clearActiveNativeDragPayload();
+        return;
+      }
+
+      const targetElement = event.target instanceof Element
+        ? event.target
+        : event.target?.parentElement;
+      const dropZoneEl = targetElement?.closest?.(`[${DAIWARI_DROPZONE_ATTR}]`);
+      const zoneId = dropZoneEl?.getAttribute?.(DAIWARI_DROPZONE_ATTR) || '';
+      if (!zoneId) {
+        clearActiveNativeDragPayload();
+        return;
+      }
+
+      const handled = dispatchPointerDropToZone(zoneId, dragPayload);
+      if (handled) {
+        markDropEventHandled(event);
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      clearActiveNativeDragPayload();
+    };
+
+    document.addEventListener('dragover', handleDocumentDragOver);
+    document.addEventListener('drop', handleDocumentDrop);
+
+    return () => {
+      document.removeEventListener('dragover', handleDocumentDragOver);
+      document.removeEventListener('drop', handleDocumentDrop);
+    };
+  }, [dispatchPointerDropToZone]);
+
+  const positionPointerDragOverlay = useCallback((clientX, clientY) => {
+    const overlay = pointerDragOverlayRef.current;
+    if (!overlay) return;
+    overlay.style.transform = `translate3d(${clientX + 18}px, ${clientY + 18}px, 0)`;
+  }, []);
+
+  const clearPointerDragSession = useCallback(() => {
+    const session = pointerDragSessionRef.current;
+    if (!session || typeof document === 'undefined') {
+      pointerDragSessionRef.current = null;
+      setPointerDragPreview(null);
+      return;
+    }
+
+    document.removeEventListener('pointermove', session.handleMove);
+    document.removeEventListener('pointerup', session.handleUp);
+    document.removeEventListener('pointercancel', session.handleCancel);
+
+    pointerDragSessionRef.current = null;
+    setPointerDragPreview(null);
+  }, []);
+
+  const startPointerDrag = useCallback((event, config = {}) => {
+    if (!event || event.pointerType === 'mouse' || event.isPrimary === false || !config.payload) return;
+    if (event.button !== undefined && event.button !== 0) return;
+
+    clearPointerDragSession();
+
+    const session = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      active: false,
+      payload: normalizeDragPayload(config.payload),
+      preview: config.preview || {}
+    };
+
+    const finishPointerDrag = (pointerEvent, shouldDrop) => {
+      if (!pointerEvent || pointerEvent.pointerId !== session.pointerId) return;
+      clearPointerDragSession();
+      if (!session.active) return;
+      suppressNextClickRef.current = true;
+      if (shouldDrop) {
+        handlePointerDropAtPoint(pointerEvent.clientX, pointerEvent.clientY, session.payload);
+      }
+    };
+
+    session.handleMove = (moveEvent) => {
+      if (!moveEvent || moveEvent.pointerId !== session.pointerId) return;
+
+      session.currentX = moveEvent.clientX;
+      session.currentY = moveEvent.clientY;
+
+      if (!session.active) {
+        const distance = Math.hypot(
+          session.currentX - session.startX,
+          session.currentY - session.startY
+        );
+        if (distance < POINTER_DRAG_THRESHOLD_PX) return;
+        session.active = true;
+        setPointerDragPreview(session.preview);
+        requestAnimationFrame(() => positionPointerDragOverlay(session.currentX, session.currentY));
+      }
+
+      moveEvent.preventDefault();
+      positionPointerDragOverlay(session.currentX, session.currentY);
+    };
+
+    session.handleUp = (upEvent) => {
+      finishPointerDrag(upEvent, true);
+    };
+
+    session.handleCancel = (cancelEvent) => {
+      finishPointerDrag(cancelEvent, false);
+    };
+
+    pointerDragSessionRef.current = session;
+
+    try {
+      event.currentTarget?.setPointerCapture?.(event.pointerId);
+    } catch (error) {
+      void error;
+    }
+
+    document.addEventListener('pointermove', session.handleMove, { passive: false });
+    document.addEventListener('pointerup', session.handleUp, { passive: false });
+    document.addEventListener('pointercancel', session.handleCancel, { passive: false });
+  }, [clearPointerDragSession, handlePointerDropAtPoint, positionPointerDragOverlay]);
+
+  useEffect(() => {
+    const handleCaptureClick = (event) => {
+      if (!suppressNextClickRef.current) return;
+      suppressNextClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener('click', handleCaptureClick, true);
+    return () => {
+      document.removeEventListener('click', handleCaptureClick, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearPointerDragSession();
+    };
+  }, [clearPointerDragSession]);
 
   // --- Image & Bulk Actions ---
 
@@ -3344,11 +4985,36 @@ export default function App() {
           // localStorageHelper.setItem('images', newImages); // Auto-save handles this
           return;
         }
-        if (!imgId) {
-          showAlert("削除対象の画像IDが見つかりませんでした。");
-          return;
+        try {
+          const deleteIdSet = new Set();
+          if (imgId) deleteIdSet.add(imgId);
+
+          if (fallbackData) {
+            const snapshot = await getDocs(imagesCollection);
+            snapshot.docs.forEach((imageDoc) => {
+              const data = imageDoc.data() || {};
+              const resolved = data.data || data.image || null;
+              if (resolved && resolved === fallbackData) {
+                deleteIdSet.add(imageDoc.id);
+              }
+            });
+          }
+
+          const deleteIds = Array.from(deleteIdSet).filter(Boolean);
+          if (deleteIds.length === 0) {
+            showAlert("削除対象の画像IDが見つかりませんでした。");
+            return;
+          }
+
+          const batch = writeBatch(db);
+          deleteIds.forEach((id) => {
+            batch.delete(doc(imagesCollection, id));
+          });
+          await runCloudWrite(() => batch.commit(), { key: 'images' });
+        } catch (error) {
+          console.error("Delete image failed:", error);
+          showAlert("画像削除に失敗しました。");
         }
-        await deleteDoc(doc(imagesCollection, imgId));
       }
     );
   };
@@ -3383,6 +5049,17 @@ export default function App() {
           return;
         }
 
+        if (dataSet.size > 0) {
+          const snapshot = await getDocs(imagesCollection);
+          snapshot.docs.forEach((imageDoc) => {
+            const data = imageDoc.data() || {};
+            const resolved = data.data || data.image || null;
+            if (resolved && dataSet.has(resolved)) {
+              idSet.add(imageDoc.id);
+            }
+          });
+        }
+
         const imageIds = Array.from(idSet).filter(Boolean);
         if (imageIds.length === 0) {
           showAlert("削除可能な画像IDが見つかりませんでした。");
@@ -3398,7 +5075,7 @@ export default function App() {
               const ref = doc(imagesCollection, id);
               batch.delete(ref);
             });
-            await batch.commit();
+            await runCloudWrite(() => batch.commit(), { key: 'images' });
           }
         } catch (err) {
           console.error("Bulk image delete failed", err);
@@ -3433,7 +5110,12 @@ export default function App() {
       return;
     }
     const sheetRef = doc(sheetsCollection, sheetId);
-    await updateDoc(sheetRef, { genre: newGenre });
+    try {
+      await runCloudWrite(() => updateDoc(sheetRef, { genre: newGenre }), { key: `sheet:${sheetId}` });
+    } catch (error) {
+      console.error("Genre update failed:", error);
+      showAlert("ジャンル変更に失敗しました。");
+    }
   };
 
   const handleDeleteSheet = (sheetId) => {
@@ -3446,7 +5128,12 @@ export default function App() {
           if (activeSheetId === sheetId) setActiveSheetId(null);
           return;
         }
-        await deleteDoc(doc(sheetsCollection, sheetId));
+        try {
+          await runCloudWrite(() => deleteDoc(doc(sheetsCollection, sheetId)), { key: `sheet:${sheetId}` });
+        } catch (error) {
+          console.error("Delete sheet failed:", error);
+          showAlert("ページ削除に失敗しました。");
+        }
       }
     );
   };
@@ -3507,21 +5194,30 @@ export default function App() {
           return;
         }
 
-        const batch = writeBatch(db);
-        const ref1 = doc(sheetsCollection, id1);
-        const ref2 = doc(sheetsCollection, id2);
-
-        batch.update(ref1, {
-          genre: sheet2.genre,
-          panels: sheet2.panels
-        });
-        batch.update(ref2, {
-          genre: sheet1.genre,
-          panels: sheet1.panels
-        });
-
         try {
-          await batch.commit();
+          const ref1 = doc(sheetsCollection, id1);
+          const ref2 = doc(sheetsCollection, id2);
+
+          await runCloudTransaction(async (transaction) => {
+            const snap1 = await transaction.get(ref1);
+            const snap2 = await transaction.get(ref2);
+            if (!snap1.exists() || !snap2.exists()) return;
+
+            const data1 = snap1.data() || {};
+            const data2 = snap2.data() || {};
+            const data1Panels = getPanelsFromDocData(data1);
+            const data2Panels = getPanelsFromDocData(data2);
+
+            transaction.update(ref1, {
+              genre: data2.genre || 'none',
+              panelsMap: toPanelsMap(data2Panels)
+            });
+            transaction.update(ref2, {
+              genre: data1.genre || 'none',
+              panelsMap: toPanelsMap(data1Panels)
+            });
+          }, { key: `sheet-pair:${[id1, id2].sort().join('|')}` });
+
           setSelectedSheetIds(new Set());
           setIsPageSelectionMode(false);
         } catch (err) {
@@ -3534,12 +5230,17 @@ export default function App() {
 
   const handleBulkClearImages = async () => {
     if (selectedSheetIds.size === 0) return;
+    const selectedPageCount = selectedSheetIds.size;
+    const shouldMoveToTempShelf = selectedPageCount <= 2;
 
     requestConfirm(
-      `${selectedSheetIds.size}ページ分の画像を外しますか？\n（画像は未配置リストに戻ります）`,
+      shouldMoveToTempShelf
+        ? `${selectedPageCount}ページ分の画像を外しますか？\n（画像は仮置き場に移動します）`
+        : `${selectedPageCount}ページ分の画像を外しますか？\n（画像は未配置リストに戻ります）`,
       async () => {
         // 回収する画像を収集
         const recoveredImages = [];
+        const recoveredTempItems = [];
         selectedSheetIds.forEach(id => {
           const sheet = sheets.find(s => s.id === id);
           if (sheet) {
@@ -3547,12 +5248,26 @@ export default function App() {
               const resolvedImage = p.image || (p.imageId ? imageDataById?.[p.imageId] : null);
               if (resolvedImage) {
                 const recoveredId = idbHelper.generateId();
-                recoveredImages.push({
-                  id: recoveredId,
-                  name: p.code ? `${p.code}.png` : `recovered-${recoveredId}.png`,
-                  data: resolvedImage,
-                  createdAt: { seconds: Date.now() / 1000 }
-                });
+                if (shouldMoveToTempShelf) {
+                  recoveredTempItems.push({
+                    id: recoveredId,
+                    image: resolvedImage,
+                    imageId: p.imageId || null,
+                    label: p.label || null,
+                    code: p.code || null,
+                    text: p.text || '',
+                    isText: !!p.isText,
+                    originalName: p.code ? `${p.code}.png` : `recovered-${recoveredId}.png`,
+                    createdAt: { seconds: Date.now() / 1000 }
+                  });
+                } else {
+                  recoveredImages.push({
+                    id: recoveredId,
+                    name: p.code ? `${p.code}.png` : `recovered-${recoveredId}.png`,
+                    data: resolvedImage,
+                    createdAt: { seconds: Date.now() / 1000 }
+                  });
+                }
               }
             });
           }
@@ -3577,7 +5292,11 @@ export default function App() {
             return s;
           });
 
-          setImages(prev => normalizeStockImages([...prev, ...recoveredImages]));
+          if (shouldMoveToTempShelf) {
+            setTempItems(prev => [...recoveredTempItems, ...prev]);
+          } else {
+            setImages(prev => normalizeStockImages([...prev, ...recoveredImages]));
+          }
           setSheets(newSheets);
           // localStorageHelper.setItem('sheets', newSheets); // Auto-save handles this
           setSelectedSheetIds(new Set());
@@ -3585,17 +5304,39 @@ export default function App() {
           return;
         }
 
+        if (shouldMoveToTempShelf && !tempShelfCollection) {
+          showAlert("仮置き場への移動に失敗しました。");
+          return;
+        }
+
         const batch = writeBatch(db);
 
-        // Recovered images to Firestore
-        recoveredImages.forEach(img => {
-          const ref = doc(imagesCollection);
-          batch.set(ref, {
-            name: img.name,
-            data: img.data,
-            createdAt: serverTimestamp()
+        if (shouldMoveToTempShelf) {
+          recoveredTempItems.forEach((item) => {
+            const ref = doc(tempShelfCollection);
+            batch.set(ref, {
+              image: item.image || null,
+              imageId: item.imageId || null,
+              label: item.label || null,
+              code: item.code || null,
+              text: item.text || '',
+              isText: !!item.isText,
+              originalName: item.originalName || "退避アイテム",
+              ...(useLegacyTempShelf && tempShelfUserId ? { ownerUid: tempShelfUserId } : {}),
+              createdAt: serverTimestamp()
+            });
           });
-        });
+        } else {
+          // Recovered images to Firestore
+          recoveredImages.forEach(img => {
+            const ref = doc(imagesCollection);
+            batch.set(ref, {
+              name: img.name,
+              data: img.data,
+              createdAt: serverTimestamp()
+            });
+          });
+        }
 
         selectedSheetIds.forEach(id => {
           const sheet = sheets.find(s => s.id === id);
@@ -3612,14 +5353,18 @@ export default function App() {
           }));
 
           const ref = doc(sheetsCollection, id);
-          batch.update(ref, { panels: newPanels });
+          batch.update(ref, { panelsMap: toPanelsMap(newPanels) });
         });
 
         try {
-          await batch.commit();
+          await runCloudWrite(() => batch.commit(), { key: 'sheets-bulk-clear' });
           setSelectedSheetIds(new Set());
           setIsPageSelectionMode(false);
-          showAlert("画像を解除し、未配置リストに戻しました");
+          if (shouldMoveToTempShelf) {
+            showAlert("画像を解除し、仮置き場に移動しました");
+          } else {
+            showAlert("画像を解除し、未配置リストに戻しました");
+          }
         } catch (err) {
           console.error("Bulk clear images failed", err);
           showAlert("一括解除に失敗しました");
@@ -3641,7 +5386,7 @@ export default function App() {
         });
 
         try {
-          await batch.commit();
+          await runCloudWrite(() => batch.commit(), { key: 'sheets-bulk-delete' });
           setSelectedSheetIds(new Set());
           setIsPageSelectionMode(false);
         } catch (err) {
@@ -3938,10 +5683,7 @@ export default function App() {
           id: idbHelper.generateId(),
           createdAt: { seconds: Date.now() / 1000 },
           genre: 'none',
-          panels: Array(16).fill(null).map(() => ({
-            image: null, imageId: null, text: '', label: null, code: null,
-            rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
-          }))
+          panels: buildDefaultPanels()
         });
       }
 
@@ -3969,10 +5711,7 @@ export default function App() {
         const currentSheet = { ...localSheets[i] };
         if (update.genre) currentSheet.genre = update.genre;
 
-        const newPanels = Array(16).fill(null).map(() => ({
-          image: null, imageId: null, text: '', label: null, code: null,
-          rowSpan: 1, colSpan: 1, hidden: false, sizeType: '1/16（1コマ）'
-        }));
+        const newPanels = buildDefaultPanels();
 
         const occupied = new Set();
 
@@ -4055,6 +5794,7 @@ export default function App() {
             genre: sheet.genre || 'none',
             order: sheet.order ?? i,
             panels: sheet.panels || [],
+            panelsMap: toPanelsMap(sheet.panels || buildDefaultPanels()),
             createdAt: serverTimestamp()
           });
           localSheets[i] = { ...sheet, id: newRef.id };
@@ -4083,7 +5823,7 @@ export default function App() {
             if (!targetSheet?.id) continue;
 
             if (opCount >= 400) {
-              await batch.commit();
+              await runCloudWrite(() => batch.commit(), { key: 'csv-import' });
               batch = writeBatch(db);
               opCount = 0;
             }
@@ -4091,12 +5831,13 @@ export default function App() {
             batch.update(doc(sheetsCollection, targetSheet.id), {
               genre: targetSheet.genre || 'none',
               order: targetSheet.order ?? i,
-              panels: targetSheet.panels
+              panels: targetSheet.panels,
+              panelsMap: toPanelsMap(targetSheet.panels || buildDefaultPanels())
             });
             opCount++;
           }
           if (opCount > 0) {
-            await batch.commit();
+            await runCloudWrite(() => batch.commit(), { key: 'csv-import' });
           }
         } catch (err) {
           console.error("Cloud save failed:", err);
@@ -4173,6 +5914,23 @@ export default function App() {
     return currentList.findIndex(s => s.id === activeSheetId);
   }, [currentList, activeSheetId]);
 
+  const salesLookupVisibleCodes = useMemo(() => {
+    if (viewMode !== 'single' || !activeSheetId) return null;
+    const activeSheet = sheets.find((sheet) => sheet.id === activeSheetId);
+    if (!activeSheet?.panels) return [];
+
+    const codes = new Set();
+    activeSheet.panels.forEach((panel) => {
+      if (!panel || panel.hidden) return;
+      const normalized = normalizeCode(panel.code || '');
+      if (normalized) {
+        codes.add(normalized);
+      }
+    });
+
+    return Array.from(codes);
+  }, [viewMode, activeSheetId, sheets]);
+
   const activeSheetLabelCount = useMemo(() => {
     if (viewMode !== 'single' || !activeSheetId) return 0;
     const targetSheet = sheets.find((s) => s.id === activeSheetId);
@@ -4215,14 +5973,30 @@ export default function App() {
         }
 
         try {
-          await updateDoc(doc(sheetsCollection, activeSheetId), { panels: updatedPanels });
+          const sheetRef = doc(sheetsCollection, activeSheetId);
+          await runCloudTransaction(async (transaction) => {
+            const snap = await transaction.get(sheetRef);
+            if (!snap.exists()) return;
+
+            const serverPanels = getPanelsFromDocData(snap.data() || {});
+            const nextPanels = serverPanels.map((panel) => ({
+              ...panel,
+              freeLabels: [],
+              freeText: null
+            }));
+
+            const panelUpdates = buildPanelMapUpdates(serverPanels, nextPanels);
+            if (Object.keys(panelUpdates).length > 0) {
+              transaction.update(sheetRef, panelUpdates);
+            }
+          }, { key: `sheet:${activeSheetId}` });
         } catch (err) {
           console.error("Bulk label delete failed", err);
           showAlert("ラベル一括削除に失敗しました。");
         }
       }
     );
-  }, [viewMode, activeSheetId, sheets, activeSheetLabelCount, sheetsCollection, requestConfirm, showAlert]);
+  }, [viewMode, activeSheetId, sheets, activeSheetLabelCount, sheetsCollection, requestConfirm, showAlert, runCloudTransaction]);
 
   const handleLogoSecretTap = useCallback(() => {
     logoTapCountRef.current += 1;
@@ -4307,7 +6081,26 @@ export default function App() {
 
   // --- Render ---
   // --- Render ---
-  if (!isAuthenticated) return <AuthGate onAuthenticated={handleAuthenticated} defaultAppId={appId} />;
+  if (!isAuthReady) {
+    return (
+      <div className="flex h-screen items-center justify-center" style={{ background: 'var(--m3-surface)' }}>
+        <div className="flex items-center gap-3 text-sm font-medium" style={{ color: 'var(--m3-on-surface-variant)' }}>
+          <Loader2 className="h-5 w-5 animate-spin" />
+          認証状態を確認中...
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <AuthGate
+        onGoogleSignIn={handleGoogleSignIn}
+        isSigningIn={isSigningIn}
+        errorMessage={authErrorMessage}
+      />
+    );
+  }
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden transition-all duration-700 ease-in-out`} style={{ background: 'var(--app-bg)', color: 'var(--m3-on-surface)' }}>
@@ -4333,23 +6126,15 @@ export default function App() {
 
           <div className="h-8 w-px mx-2 opacity-50" style={{ background: 'var(--m3-outline-variant)' }}></div>
 
-          {/* Workspace ID Badge & Sync Status */}
-          {!USE_LOCAL_STORAGE && (
-            <div className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full shadow-sm group relative" style={{ background: 'var(--m3-primary-container)', color: 'var(--m3-on-primary-container)' }}>
-              <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: '#34d399' }} title="Cloud Synced"></div>
-              <span className="text-xs font-bold uppercase tracking-wider">{appId}</span>
-
+          {!USE_LOCAL_STORAGE && signedInUserName && (
+            <div className="flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm">
+              <span className="text-[12px] font-semibold text-slate-700">{signedInUserName}</span>
               <button
-                onClick={() => {
-                  const url = new URL(window.location);
-                  url.searchParams.set('project', appId);
-                  navigator.clipboard.writeText(url.toString());
-                  showAlert("プロジェクト共有リンクをクリップボードにコピーしました");
-                }}
-                className="ml-1 p-1 rounded-full hover:bg-black/10 transition-colors"
-                title="共有リンクをコピー"
+                onClick={handleLogout}
+                className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                title="ログアウト"
               >
-                <LinkIcon size={14} />
+                ログアウト
               </button>
             </div>
           )}
@@ -4376,15 +6161,17 @@ export default function App() {
           </div>
 
           {/* Page Selection Mode Toggle */}
-          <button
-            onClick={togglePageSelectionMode}
-            onMouseEnter={(e) => showQuickHelp(e, '選択モード', '複数ページを選択して、入れ替え・画像解除・削除を行います。')}
-            onMouseLeave={hideQuickHelp}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border ml-3 whitespace-nowrap ${isPageSelectionMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-            title="複数ページを選択して削除"
-          >
-            <CheckSquare size={14} strokeWidth={2.5} /> <span className="hidden sm:inline">選択モード</span>
-          </button>
+          {viewMode === 'overview' && (
+            <button
+              onClick={togglePageSelectionMode}
+              onMouseEnter={(e) => showQuickHelp(e, '選択モード', '複数ページを選択して、入れ替え・画像解除・削除を行います。')}
+              onMouseLeave={hideQuickHelp}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border ml-3 whitespace-nowrap ${isPageSelectionMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              title="複数ページを選択して削除"
+            >
+              <CheckSquare size={14} strokeWidth={2.5} /> <span className="hidden sm:inline">選択モード</span>
+            </button>
+          )}
 
           <button
             onClick={() => setIsQuickHelpMode((prev) => !prev)}
@@ -4473,14 +6260,21 @@ export default function App() {
           {/* 実績モード Toggle - 詳細表示時のみ */}
           {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
             <button
-              onClick={() => setIsSalesMode(!isSalesMode)}
-              onMouseEnter={(e) => showQuickHelp(e, '実績モード', '販売数量データをパネル上に重ねて表示します。再度押すと解除します。')}
-              onMouseLeave={hideQuickHelp}
+              onClick={handleSalesModeButtonClick}
+              onMouseDown={startSalesModeLongPress}
+              onMouseUp={endSalesModeLongPress}
+              onMouseLeave={() => { endSalesModeLongPress(); hideQuickHelp(); }}
+              onTouchStart={startSalesModeLongPress}
+              onTouchEnd={endSalesModeLongPress}
+              onTouchCancel={endSalesModeLongPress}
+              onMouseEnter={(e) => showQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
               className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-bold transition-all duration-300 ml-2 whitespace-nowrap
-                 ${isSalesMode
+                 ${isSalesLookupOpen
+                  ? 'bg-violet-500/15 border-violet-500 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)] animate-pulse'
+                  : isSalesMode
                   ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
                   : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-              title="実績モード切替（詳細表示時のみ）"
+              title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
             >
               <BarChart2 size={20} />
               <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
@@ -4545,12 +6339,6 @@ export default function App() {
             <FileSpreadsheet size={16} /> <span>出力</span>
           </button>
 
-          <div className="h-8 w-px bg-black/5 mx-2"></div>
-
-          <div className="flex items-center gap-2 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/10 whitespace-nowrap">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-            Online
-          </div>
         </div>
       </div>
 
@@ -4569,13 +6357,14 @@ export default function App() {
           searchQuery={searchQuery}
           tempItems={tempItems}
           excludedItems={excludedItems}
-          onMoveToTemp={handleMoveToTemp}
           onDeleteFromTemp={handleDeleteFromTemp}
-          onMoveToExcluded={handleMoveToExcluded}
           onDeleteFromExcluded={handleDeleteFromExcluded}
           onExportExcludedCSV={handleExportExcludedCSV}
           onBulkDeleteExcluded={handleBulkDeleteExcluded}
-          onMoveToStock={handleMoveToStock}
+          onApplyDragPayloadToTemp={applyDragPayloadToTempShelf}
+          onApplyDragPayloadToExcluded={applyDragPayloadToExcludedList}
+          onApplyDragPayloadToStock={applyDragPayloadToStockList}
+          onStartPointerDrag={startPointerDrag}
           imageDataById={imageDataById}
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
@@ -4749,7 +6538,8 @@ export default function App() {
                           onDeleteSheet={handleDeleteSheet}
                           highlightEmpty={highlightEmpty}
                           highlightLabels={highlightLabels}
-                          onMovePanel={handleMovePanel}
+                          onApplyDragPayloadToPanel={applyDragPayloadToPanel}
+                          onStartPointerDrag={startPointerDrag}
                           isSalesMode={isSalesMode}
                           salesData={salesData}
                           onHoverSales={handleHoverSales}
@@ -4776,6 +6566,13 @@ export default function App() {
         onMouseLeave={handleLeaveSales}
       />
 
+      <SalesCodeLookupModal
+        isOpen={isSalesLookupOpen}
+        onClose={() => setIsSalesLookupOpen(false)}
+        salesData={salesData}
+        visibleCodes={salesLookupVisibleCodes}
+      />
+
       {isQuickHelpMode && quickHelpPopup && (
         <div
           className="fixed z-[120] pointer-events-none"
@@ -4784,6 +6581,33 @@ export default function App() {
           <div className="min-w-[320px] max-w-[460px] rounded-2xl border border-sky-200 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl">
             <p className="text-[13px] font-bold text-sky-700">{quickHelpPopup.title}</p>
             <p className="text-[12px] leading-relaxed text-slate-700 mt-1.5">{quickHelpPopup.description}</p>
+          </div>
+        </div>
+      )}
+
+      {pointerDragPreview && (
+        <div
+          ref={pointerDragOverlayRef}
+          className="fixed left-0 top-0 z-[160] pointer-events-none will-change-transform"
+        >
+          <div className="min-w-[96px] max-w-[144px] rounded-2xl border border-sky-200 bg-white/95 p-2 shadow-2xl backdrop-blur-md">
+            {pointerDragPreview.image ? (
+              <div className="aspect-square w-24 overflow-hidden rounded-xl bg-slate-100 flex items-center justify-center">
+                <img
+                  src={pointerDragPreview.image}
+                  alt="drag preview"
+                  className="max-w-full max-h-full object-contain"
+                  draggable={false}
+                />
+              </div>
+            ) : (
+              <div className="flex h-20 w-24 items-center justify-center rounded-xl bg-slate-100 px-2 text-center text-xs font-bold text-slate-600">
+                {pointerDragPreview.label || pointerDragPreview.code || (pointerDragPreview.text ? 'テキスト' : '移動')}
+              </div>
+            )}
+            <p className="mt-1.5 truncate text-center text-[10px] font-bold text-slate-700">
+              {pointerDragPreview.code || pointerDragPreview.label || pointerDragPreview.text || '移動中'}
+            </p>
           </div>
         </div>
       )}
