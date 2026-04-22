@@ -18,6 +18,8 @@ service cloud.firestore {
           'k.ishihara@caremax.co.jp',
           's.uhara@g.caremax.co.jp',
           's.uhara@caremax.co.jp',
+          's.ozaki@g.caremax.co.jp',
+          's.ozaki@caremax.co.jp',
           'r.kitagawa@g.caremax.co.jp',
           'r.kitagawa@caremax.co.jp'
         ];

@@ -14,6 +14,8 @@ import {
 import {
   getFirestore,
   collection,
+  query,
+  where,
   doc,
   setDoc,
   addDoc,
@@ -156,6 +158,7 @@ const GOOGLE_ALLOWED_ACCOUNTS = [
   { name: '大窪 嘉代', email: 'k.okubo@g.caremax.co.jp' },
   { name: '石原 佳奈', email: 'k.ishihara@g.caremax.co.jp' },
   { name: '宇原 承子', email: 's.uhara@g.caremax.co.jp' },
+  { name: '尾崎 聡', email: 's.ozaki@caremax.co.jp' },
   { name: '北川 凌士', email: 'r.kitagawa@g.caremax.co.jp' }
 ];
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
@@ -1433,18 +1436,14 @@ const AuthGate = ({ onGoogleSignIn, isSigningIn, errorMessage }) => {
 
         <form onSubmit={handleSignIn} className="space-y-6">
           <div className="rounded-lg border px-4 py-3" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
-            <p className="text-xs font-bold mb-2" style={{ color: 'var(--m3-on-surface-variant)' }}>許可アカウント</p>
+            <p className="text-xs font-bold mb-2" style={{ color: 'var(--m3-on-surface-variant)' }}>許可ユーザー</p>
             <ul className="space-y-1">
               {GOOGLE_ALLOWED_ACCOUNTS.map((account) => (
-                <li key={account.email} className="text-[11px] flex items-center justify-between gap-2">
+                <li key={account.email} className="text-[11px] font-medium" style={{ color: 'var(--m3-on-surface)' }}>
                   <span className="font-medium" style={{ color: 'var(--m3-on-surface)' }}>{account.name}</span>
-                  <span className="font-mono text-[10px]" style={{ color: 'var(--m3-on-surface-variant)' }}>{account.email}</span>
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-[10px]" style={{ color: 'var(--m3-on-surface-variant)' }}>
-              ※ 同一ユーザーの `@caremax.co.jp` も許可対象です
-            </p>
           </div>
 
           {errorMessage && (
@@ -3032,6 +3031,13 @@ export default function App() {
     if (USE_LOCAL_STORAGE) return null;
     return useLegacyTempShelf ? legacyTempShelfCollection : userTempShelfCollection;
   }, [useLegacyTempShelf, legacyTempShelfCollection, userTempShelfCollection]);
+  const tempShelfSyncSource = useMemo(() => {
+    if (USE_LOCAL_STORAGE || !tempShelfCollection) return null;
+    if (useLegacyTempShelf && tempShelfUserId) {
+      return query(tempShelfCollection, where('ownerUid', '==', tempShelfUserId));
+    }
+    return tempShelfCollection;
+  }, [tempShelfCollection, useLegacyTempShelf, tempShelfUserId]);
   const excludedItemsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'excludedItems'), [appId, db]);
   const settingsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'settings'), [appId, db]);
   const salesChunksCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'salesDataChunks'), [appId, db]);
@@ -3376,7 +3382,8 @@ export default function App() {
       return; // データは Auth init で既に読み込み済み
     }
 
-    if (!isAuthenticated || !firebaseUser) return;
+    if (!isAuthenticated) return;
+    if (!sheetsCollection || !imagesCollection || !excludedItemsCollection || !salesChunksCollection || !settingsCollection) return;
 
     const unsubscribeSheets = onSnapshot(sheetsCollection, (snapshot) => {
       const loadedSheets = snapshot.docs.map((snap) => {
@@ -3402,22 +3409,6 @@ export default function App() {
       const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
       setImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
     }, (err) => console.error("Image Sync Error", err));
-
-    const unsubscribeTemp = onSnapshot(tempShelfCollection, (snapshot) => {
-      let loadedTemps = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      if (useLegacyTempShelf && tempShelfUserId) {
-        loadedTemps = loadedTemps.filter((item) => item?.ownerUid === tempShelfUserId);
-      }
-      loadedTemps.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setTempItems((prev) => (isSameTransferItemList(prev, loadedTemps) ? prev : loadedTemps));
-    }, (err) => {
-      console.error("Temp Shelf Sync Error", err);
-      const code = getFirestoreErrorCode(err);
-      if (code === 'permission-denied' && !useLegacyTempShelf) {
-        console.warn("Switching temp shelf to legacy path due permission-denied on user path.");
-        setUseLegacyTempShelf(true);
-      }
-    });
 
     const unsubscribeExcluded = onSnapshot(excludedItemsCollection, (snapshot) => {
       const loadedExcluded = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
@@ -3450,12 +3441,36 @@ export default function App() {
     return () => {
       unsubscribeSheets();
       unsubscribeImages();
-      unsubscribeTemp();
       unsubscribeExcluded();
       unsubscribeSales();
       unsubscribeMeta();
     };
-  }, [isAuthenticated, firebaseUser, sheetsCollection, imagesCollection, tempShelfCollection, excludedItemsCollection, settingsCollection, salesChunksCollection, useLegacyTempShelf, tempShelfUserId]);
+  }, [isAuthenticated, sheetsCollection, imagesCollection, excludedItemsCollection, settingsCollection, salesChunksCollection]);
+
+  useEffect(() => {
+    if (USE_LOCAL_STORAGE) return;
+    if (!isAuthenticated || !tempShelfCollection || !tempShelfSyncSource) return;
+
+    const unsubscribeTemp = onSnapshot(tempShelfSyncSource, (snapshot) => {
+      let loadedTemps = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      if (useLegacyTempShelf && tempShelfUserId) {
+        loadedTemps = loadedTemps.filter((item) => item?.ownerUid === tempShelfUserId);
+      }
+      loadedTemps.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setTempItems((prev) => (isSameTransferItemList(prev, loadedTemps) ? prev : loadedTemps));
+    }, (err) => {
+      console.error("Temp Shelf Sync Error", err);
+      const code = getFirestoreErrorCode(err);
+      if (code === 'permission-denied' && !useLegacyTempShelf) {
+        console.warn("Switching temp shelf to legacy path due permission-denied on user path.");
+        setUseLegacyTempShelf(true);
+      }
+    });
+
+    return () => {
+      unsubscribeTemp();
+    };
+  }, [isAuthenticated, tempShelfCollection, tempShelfSyncSource, useLegacyTempShelf, tempShelfUserId]);
 
   const requestConfirm = (message, action) => {
     setConfirmDialog({
