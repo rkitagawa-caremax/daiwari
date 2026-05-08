@@ -26,7 +26,8 @@ import {
   writeBatch,
   getDoc,
   getDocs,
-  runTransaction
+  runTransaction,
+  deleteField
 } from 'firebase/firestore';
 import {
   Plus,
@@ -289,6 +290,10 @@ const normalizeStockImages = (items = [], imageDataById = {}) => {
   return normalized;
 };
 
+const CLOUD_IMAGES_CACHE_KEY = 'cloudImagesCache';
+const CLOUD_SALES_CACHE_KEY = 'cloudSalesDataCache';
+const CLOUD_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
 const isSameStockImageList = (a = [], b = []) => {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -405,6 +410,9 @@ const sanitizePanelData = (panel = {}) => {
   Object.keys(panel || {}).forEach((key) => {
     sanitized[key] = panel[key] === undefined ? null : panel[key];
   });
+  if (sanitized.imageId) {
+    sanitized.image = null;
+  }
   return sanitized;
 };
 
@@ -465,6 +473,23 @@ const getFirestoreErrorCode = (error) => {
   if (!error) return '';
   const raw = String(error.code || '').toLowerCase();
   return raw.startsWith('firestore/') ? raw.replace('firestore/', '') : raw;
+};
+
+const buildFirestoreActionErrorMessage = (fallbackMessage, error) => {
+  const code = getFirestoreErrorCode(error);
+  if (code === 'resource-exhausted') {
+    return `${fallbackMessage}\n\nFirestoreの無料枠またはクォータに達している可能性があります。Firebaseコンソールの使用状況を確認してください。`;
+  }
+  if (code === 'permission-denied') {
+    return `${fallbackMessage}\n\nFirestoreの権限が不足している可能性があります。ログインアカウントとFirestoreルールを確認してください。`;
+  }
+  if (code === 'failed-precondition' || code === 'aborted') {
+    return `${fallbackMessage}\n\nFirestoreの同時編集競合が発生しました。少し待ってから再実行してください。`;
+  }
+  if (code === 'invalid-argument') {
+    return `${fallbackMessage}\n\nFirestoreに保存できないデータ形式またはサイズの可能性があります。`;
+  }
+  return fallbackMessage;
 };
 
 const RETRYABLE_FIRESTORE_CODES = new Set([
@@ -3383,7 +3408,86 @@ export default function App() {
     }
 
     if (!isAuthenticated) return;
-    if (!sheetsCollection || !imagesCollection || !excludedItemsCollection || !salesChunksCollection || !settingsCollection) return;
+    if (!sheetsCollection || !imagesCollection || !excludedItemsCollection || !settingsCollection) return;
+    let isCancelled = false;
+
+    const loadImagesWithCache = async () => {
+      let cachedBundle = null;
+      try {
+        cachedBundle = await idbHelper.getItem(CLOUD_IMAGES_CACHE_KEY);
+        if (isCancelled) return;
+        if (Array.isArray(cachedBundle?.items)) {
+          const cachedImages = normalizeStockImages(cachedBundle.items);
+          setImages((prev) => (isSameStockImageList(prev, cachedImages) ? prev : cachedImages));
+        }
+      } catch (error) {
+        console.error("Cloud image cache load failed:", error);
+      }
+
+      const fetchedAt = Number(cachedBundle?.fetchedAt || 0);
+      if (fetchedAt > 0 && Date.now() - fetchedAt < CLOUD_CACHE_TTL_MS) return;
+
+      try {
+        const snapshot = await getDocs(imagesCollection);
+        if (isCancelled) return;
+        const loadedImages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+        const loadedImageDataById = {};
+        loadedImages.forEach((img) => {
+          if (img?.id && (img?.data || img?.image)) {
+            loadedImageDataById[img.id] = img.data || img.image;
+          }
+        });
+        const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
+        setImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
+        await idbHelper.setItem(CLOUD_IMAGES_CACHE_KEY, {
+          items: normalizedLoadedImages,
+          fetchedAt: Date.now()
+        });
+      } catch (err) {
+        console.error("Image Load Error", err);
+      }
+    };
+
+    const loadSalesWithCache = async (metaData = null) => {
+      const metaSeconds = toComparableSeconds(metaData?.updatedAt);
+      let cachedBundle = null;
+      try {
+        cachedBundle = await idbHelper.getItem(CLOUD_SALES_CACHE_KEY);
+        if (isCancelled) return;
+        if (cachedBundle?.data) {
+          setSalesData(cachedBundle.data);
+          if (!metaSeconds || cachedBundle.metaSeconds === metaSeconds) return;
+        }
+      } catch (error) {
+        console.error("Cloud sales cache load failed:", error);
+      }
+
+      if (!salesChunksCollection) return;
+      try {
+        const snapshot = await getDocs(salesChunksCollection);
+        if (isCancelled) return;
+        const fullSalesMap = {};
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.items) {
+            try {
+              const chunkMap = JSON.parse(data.items);
+              Object.assign(fullSalesMap, chunkMap);
+            } catch (e) {
+              console.error("Failed to parse sales chunk", e);
+            }
+          }
+        });
+        setSalesData(fullSalesMap);
+        await idbHelper.setItem(CLOUD_SALES_CACHE_KEY, {
+          data: fullSalesMap,
+          metaSeconds,
+          fetchedAt: Date.now()
+        });
+      } catch (err) {
+        console.error("Sales Data Load Error", err);
+      }
+    };
 
     const unsubscribeSheets = onSnapshot(sheetsCollection, (snapshot) => {
       const loadedSheets = snapshot.docs.map((snap) => {
@@ -3391,6 +3495,7 @@ export default function App() {
         return {
           ...data,
           id: snap.id,
+          _hasLegacyPanels: Array.isArray(data.panels),
           panels: getPanelsFromDocData(data)
         };
       });
@@ -3398,17 +3503,7 @@ export default function App() {
       setSheets((prev) => (isSameSheetList(prev, loadedSheets) ? prev : loadedSheets));
     }, (err) => console.error("Sheet Sync Error", err));
 
-    const unsubscribeImages = onSnapshot(imagesCollection, (snapshot) => {
-      const loadedImages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      const loadedImageDataById = {};
-      loadedImages.forEach((img) => {
-        if (img?.id && (img?.data || img?.image)) {
-          loadedImageDataById[img.id] = img.data || img.image;
-        }
-      });
-      const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
-      setImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
-    }, (err) => console.error("Image Sync Error", err));
+    void loadImagesWithCache();
 
     const unsubscribeExcluded = onSnapshot(excludedItemsCollection, (snapshot) => {
       const loadedExcluded = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
@@ -3416,33 +3511,20 @@ export default function App() {
       setExcludedItems((prev) => (isSameTransferItemList(prev, loadedExcluded) ? prev : loadedExcluded));
     }, (err) => console.error("Excluded Items Sync Error", err));
 
-    const unsubscribeSales = onSnapshot(salesChunksCollection, (snapshot) => {
-      const fullSalesMap = {};
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        if (data.items) {
-          try {
-            const chunkMap = JSON.parse(data.items);
-            Object.assign(fullSalesMap, chunkMap);
-          } catch (e) {
-            console.error("Failed to parse sales chunk", e);
-          }
-        }
-      });
-      setSalesData(fullSalesMap);
-    });
+    void loadSalesWithCache();
 
     const unsubscribeMeta = onSnapshot(doc(settingsCollection, 'salesDataMeta'), (docSnap) => {
       if (docSnap.exists()) {
-        setSalesDataLastUpdated(docSnap.data().updatedAt?.toDate() || null);
+        const metaData = docSnap.data() || {};
+        setSalesDataLastUpdated(metaData.updatedAt?.toDate() || null);
+        void loadSalesWithCache(metaData);
       }
-    });
+    }, (err) => console.error("Sales Meta Sync Error", err));
 
     return () => {
+      isCancelled = true;
       unsubscribeSheets();
-      unsubscribeImages();
       unsubscribeExcluded();
-      unsubscribeSales();
       unsubscribeMeta();
     };
   }, [isAuthenticated, sheetsCollection, imagesCollection, excludedItemsCollection, settingsCollection, salesChunksCollection]);
@@ -3529,11 +3611,15 @@ export default function App() {
     sheets.forEach((sheet) => {
       if (!sheet?.id) return;
       const hasPanelsMap = !!(sheet.panelsMap && typeof sheet.panelsMap === 'object');
-      if (hasPanelsMap || migratedPanelsMapRef.current.has(sheet.id)) return;
+      const hasLegacyPanels = sheet._hasLegacyPanels === true;
+      if ((hasPanelsMap && !hasLegacyPanels) || migratedPanelsMapRef.current.has(sheet.id)) return;
 
       migratedPanelsMapRef.current.add(sheet.id);
       runCloudWrite(
-        () => updateDoc(doc(sheetsCollection, sheet.id), { panelsMap: toPanelsMap(sheet.panels || buildDefaultPanels()) }),
+        () => updateDoc(doc(sheetsCollection, sheet.id), {
+          panelsMap: toPanelsMap(sheet.panels || buildDefaultPanels()),
+          panels: deleteField()
+        }),
         { key: `sheet:${sheet.id}` }
       ).catch((error) => {
         console.error("Panels map migration failed:", error);
@@ -3711,6 +3797,15 @@ export default function App() {
         updatedAt: serverTimestamp(),
         totalItems: entries.length
       });
+
+      const cachedMetaSeconds = Math.floor(Date.now() / 1000);
+      await idbHelper.setItem(CLOUD_SALES_CACHE_KEY, {
+        data: salesMap,
+        metaSeconds: cachedMetaSeconds,
+        fetchedAt: Date.now()
+      });
+      setSalesData(salesMap);
+      setSalesDataLastUpdated(new Date(cachedMetaSeconds * 1000));
 
       showAlert("売上データを取り込みました！");
       setIsSettingsOpen(false);
@@ -3912,7 +4007,7 @@ export default function App() {
       }, { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Merge error:", error);
-      showAlert("結合に失敗しました。しばらく待って再試行してください。");
+      showAlert(buildFirestoreActionErrorMessage("結合に失敗しました。しばらく待って再試行してください。", error));
     } finally {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
@@ -3997,7 +4092,7 @@ export default function App() {
       }, { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Split error:", error);
-      showAlert("分離に失敗しました。しばらく待って再試行してください。");
+      showAlert(buildFirestoreActionErrorMessage("分離に失敗しました。しばらく待って再試行してください。", error));
     } finally {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
@@ -4033,7 +4128,6 @@ export default function App() {
       await addDoc(sheetsCollection, {
         genre: 'none',
         order: newOrder,
-        panels: defaultPanels,
         panelsMap: toPanelsMap(defaultPanels),
         createdAt: serverTimestamp()
       });
@@ -4066,14 +4160,22 @@ export default function App() {
     try {
       const sheetRef = doc(sheetsCollection, sheetId);
       const fieldUpdates = {};
-      Object.entries(panelPatch).forEach(([key, value]) => {
-        fieldUpdates[`panelsMap.${panelIndex}.${key}`] = value === undefined ? null : value;
+      const cloudPatch = sanitizePanelData({
+        ...currentPanel,
+        ...panelPatch
       });
+      Object.entries(panelPatch).forEach(([key, value]) => {
+        const cloudValue = key === 'image' ? cloudPatch.image : value;
+        fieldUpdates[`panelsMap.${panelIndex}.${key}`] = cloudValue === undefined ? null : cloudValue;
+      });
+      if (cloudPatch.imageId && currentPanel.image) {
+        fieldUpdates[`panelsMap.${panelIndex}.image`] = null;
+      }
       if (Object.keys(fieldUpdates).length === 0) return;
       await runCloudWrite(() => updateDoc(sheetRef, fieldUpdates), { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Panel update transaction failed:", error);
-      showAlert("同時編集の再試行に失敗しました。少し待ってから再実行してください。");
+      showAlert(buildFirestoreActionErrorMessage("コマの更新に失敗しました。少し待ってから再実行してください。", error));
     }
   }, [sheets, sheetsCollection, showAlert, runCloudWrite]);
 
@@ -4174,7 +4276,7 @@ export default function App() {
       if (getFirestoreErrorCode(finalError) === 'permission-denied') {
         showAlert("仮置き場への移動権限がありません。管理者にFirestoreルールの反映をご依頼ください。");
       } else {
-        showAlert("仮置き場への移動に失敗しました。少し待ってから再実行してください。");
+        showAlert(buildFirestoreActionErrorMessage("仮置き場への移動に失敗しました。少し待ってから再実行してください。", finalError));
       }
     }
   };
@@ -4269,7 +4371,7 @@ export default function App() {
       if (getFirestoreErrorCode(finalError) === 'permission-denied') {
         showAlert("仮置き場への追加権限がありません。管理者にFirestoreルールの反映をご依頼ください。");
       } else {
-        showAlert("仮置き場への追加に失敗しました。少し待ってから再実行してください。");
+        showAlert(buildFirestoreActionErrorMessage("仮置き場への追加に失敗しました。少し待ってから再実行してください。", finalError));
       }
       return false;
     }
@@ -4372,7 +4474,7 @@ export default function App() {
       }, { key: `sheet:${sheetId}` });
     } catch (error) {
       console.error("Move to excluded transaction failed:", error);
-      showAlert("除外リストへの移動に失敗しました。少し待ってから再実行してください。");
+      showAlert(buildFirestoreActionErrorMessage("除外リストへの移動に失敗しました。少し待ってから再実行してください。", error));
     }
   };
 
@@ -4669,7 +4771,7 @@ export default function App() {
       }, { key: `sheet-pair:${[fromSheetId, toSheetId].sort().join('|')}` });
     } catch (error) {
       console.error("Move panel transaction failed:", error);
-      showAlert("同時編集の再試行に失敗しました。少し待ってから再実行してください。");
+      showAlert(buildFirestoreActionErrorMessage("コマの移動に失敗しました。少し待ってから再実行してください。", error));
     }
   };
 
@@ -4932,6 +5034,16 @@ export default function App() {
 
   // --- Image & Bulk Actions ---
 
+  const persistCloudImagesCache = useCallback((nextImages) => {
+    if (USE_LOCAL_STORAGE) return;
+    idbHelper.setItem(CLOUD_IMAGES_CACHE_KEY, {
+      items: normalizeStockImages(nextImages || []),
+      fetchedAt: Date.now()
+    }).catch((error) => {
+      console.error("Cloud image cache save failed:", error);
+    });
+  }, []);
+
   const handleUploadImage = async (e) => {
     // 認証チェックを緩和（userオブジェクトではなくフラグで判定）
     if (!e.target.files || e.target.files.length === 0 || !isAuthenticated) return;
@@ -4954,11 +5066,12 @@ export default function App() {
         if (USE_LOCAL_STORAGE) {
           newImages.push(newImage);
         } else {
-          await addDoc(imagesCollection, {
+          const imageDocRef = await addDoc(imagesCollection, {
             name: file.name,
             data: compressedDataUrl,
             createdAt: serverTimestamp()
           });
+          newImages.push({ ...newImage, id: imageDocRef.id });
         }
         successCount++;
       } catch (err) {
@@ -4970,9 +5083,10 @@ export default function App() {
     try {
       await Promise.all(uploadPromises);
 
-      if (USE_LOCAL_STORAGE && newImages.length > 0) {
-        const updatedImages = [...images, ...newImages];
+      if (newImages.length > 0) {
+        const updatedImages = normalizeStockImages([...images, ...newImages]);
         setImages(updatedImages);
+        persistCloudImagesCache(updatedImages);
         // localStorageHelper.setItem('images', updatedImages); // Auto-save handles this
       }
 
@@ -5026,6 +5140,14 @@ export default function App() {
             batch.delete(doc(imagesCollection, id));
           });
           await runCloudWrite(() => batch.commit(), { key: 'images' });
+          const deleteIdLookup = new Set(deleteIds);
+          const newImages = images.filter((img) => {
+            if (img.id && deleteIdLookup.has(img.id)) return false;
+            if (fallbackData && img.data === fallbackData) return false;
+            return true;
+          });
+          setImages(newImages);
+          persistCloudImagesCache(newImages);
         } catch (error) {
           console.error("Delete image failed:", error);
           showAlert("画像削除に失敗しました。");
@@ -5092,6 +5214,14 @@ export default function App() {
             });
             await runCloudWrite(() => batch.commit(), { key: 'images' });
           }
+          const deleteIdLookup = new Set(imageIds);
+          const newImages = images.filter((img) => {
+            if (img.id && deleteIdLookup.has(img.id)) return false;
+            if (img.data && dataSet.has(img.data)) return false;
+            return true;
+          });
+          setImages(newImages);
+          persistCloudImagesCache(newImages);
         } catch (err) {
           console.error("Bulk image delete failed", err);
           showAlert("一括削除に失敗しました");
@@ -5325,6 +5455,7 @@ export default function App() {
         }
 
         const batch = writeBatch(db);
+        const savedRecoveredImages = [];
 
         if (shouldMoveToTempShelf) {
           recoveredTempItems.forEach((item) => {
@@ -5345,6 +5476,7 @@ export default function App() {
           // Recovered images to Firestore
           recoveredImages.forEach(img => {
             const ref = doc(imagesCollection);
+            savedRecoveredImages.push({ ...img, id: ref.id });
             batch.set(ref, {
               name: img.name,
               data: img.data,
@@ -5373,6 +5505,11 @@ export default function App() {
 
         try {
           await runCloudWrite(() => batch.commit(), { key: 'sheets-bulk-clear' });
+          if (!shouldMoveToTempShelf && savedRecoveredImages.length > 0) {
+            const nextImages = normalizeStockImages([...images, ...savedRecoveredImages]);
+            setImages(nextImages);
+            persistCloudImagesCache(nextImages);
+          }
           setSelectedSheetIds(new Set());
           setIsPageSelectionMode(false);
           if (shouldMoveToTempShelf) {
@@ -5415,7 +5552,9 @@ export default function App() {
   // --- CSV Export Logic (for Pages) ---
   const handleExportCSV = () => {
     try {
-      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報', '座標', 'コマID'];
+      // K列「X_POS」と L列「Y_POS」を追加: I列「座標」(X{n}Y{m}) を分解した数値。
+      // 例: 座標 X3Y2 → X_POS=3, Y_POS=2 (1始まり、4×4 グリッド内)
+      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報', '座標', 'コマID', 'X_POS', 'Y_POS'];
       const rows = [];
 
       sheets.forEach((sheet, sheetIndex) => {
@@ -5451,6 +5590,11 @@ export default function App() {
           // J列: コマID（パネルデータに保持している値を出力）
           const panelIdVal = panel.panelId || '';
 
+          // K列: X_POS (座標の X の直後の数字)
+          // L列: Y_POS (座標の Y の直後の数字)
+          const xPos = gridCol;
+          const yPos = gridRow;
+
           rows.push([
             genreLabel,
             pageNum,
@@ -5461,7 +5605,9 @@ export default function App() {
             '',
             textVal,
             coordVal,
-            panelIdVal
+            panelIdVal,
+            xPos,
+            yPos
           ].join(','));
         });
       });
@@ -5808,7 +5954,6 @@ export default function App() {
           const newRef = await addDoc(sheetsCollection, {
             genre: sheet.genre || 'none',
             order: sheet.order ?? i,
-            panels: sheet.panels || [],
             panelsMap: toPanelsMap(sheet.panels || buildDefaultPanels()),
             createdAt: serverTimestamp()
           });
@@ -5846,7 +5991,7 @@ export default function App() {
             batch.update(doc(sheetsCollection, targetSheet.id), {
               genre: targetSheet.genre || 'none',
               order: targetSheet.order ?? i,
-              panels: targetSheet.panels,
+              panels: deleteField(),
               panelsMap: toPanelsMap(targetSheet.panels || buildDefaultPanels())
             });
             opCount++;
