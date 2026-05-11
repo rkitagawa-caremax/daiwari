@@ -2322,6 +2322,20 @@ const Sidebar = React.memo(({
 
   const activeTempItems = useMemo(() => tempItems || [], [tempItems]);
 
+  // 空き状況タブのジャンル絞り込み後の合計空きコマ数。
+  // statusGenreFilter === 'all' なら全シート、ジャンル指定なら該当ジャンルのみ。
+  // 計算ロジックは下のシート一覧 (pureEmptyCount + dummyCount) と完全に一致する。
+  const statusFilteredEmptyCount = useMemo(() => {
+    return (sheets || [])
+      .filter((sheet) => statusGenreFilter === 'all' || sheet.genre === statusGenreFilter)
+      .reduce((total, sheet) => {
+        const panels = Array.isArray(sheet.panels) ? sheet.panels : [];
+        const pureEmpty = panels.filter((p) => !p.hidden && !p.image && !p.imageId && !p.label).length;
+        const dummy = panels.filter((p) => !p.hidden && p.label && p.label !== 'タイトル' && p.label !== '埋草' && p.label !== 'テキスト').length;
+        return total + pureEmpty + dummy;
+      }, 0);
+  }, [sheets, statusGenreFilter]);
+
   if (!isOpen) {
     return (
       <div className="fixed left-0 top-16 bottom-0 w-16 m3-surface border-r flex flex-col items-center py-6 z-20 transition-all duration-300" style={{ borderColor: 'var(--m3-outline-variant)' }}>
@@ -2608,16 +2622,24 @@ const Sidebar = React.memo(({
               <h3 className="font-bold text-slate-600 flex items-center gap-2 text-xs">
                 <Info size={16} /> 空き状況
               </h3>
-              <select
-                value={statusGenreFilter}
-                onChange={(e) => setStatusGenreFilter(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-600"
-              >
-                <option value="all">全ジャンル</option>
-                {GENRES.map(g => (
-                  <option key={g.id} value={g.id}>{g.label}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-xs font-bold text-rose-500 tabular-nums"
+                  title={statusGenreFilter === 'all' ? '全ジャンルの空きコマ合計' : 'このジャンルの空きコマ合計'}
+                >
+                  空き {statusFilteredEmptyCount}
+                </span>
+                <select
+                  value={statusGenreFilter}
+                  onChange={(e) => setStatusGenreFilter(e.target.value)}
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-600"
+                >
+                  <option value="all">全ジャンル</option>
+                  {GENRES.map(g => (
+                    <option key={g.id} value={g.id}>{g.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="space-y-2">
