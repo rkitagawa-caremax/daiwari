@@ -69,6 +69,8 @@ import {
   FileText,
   Database,
   Bell,
+  Lock,
+  Unlock,
   CheckCircle2,
   Tag,
   ChevronDown,
@@ -2205,6 +2207,7 @@ const Sidebar = React.memo(({
   };
 
   const handleBulkDelete = () => {
+    if (isLockedRef.current) return;
     const selectedTargets = filteredImages
       .filter((img) => selectedImageIds.has(getImageSelectionKey(img)))
       .map((img) => ({ id: img.id || null, data: img.data || null }));
@@ -3069,6 +3072,38 @@ export default function App() {
   const [isPageSelectionMode, setIsPageSelectionMode] = useState(false);
   const [selectedSheetIds, setSelectedSheetIds] = useState(new Set());
 
+  // === 画面ロック (鍵ボタン 2秒長押しでトグル) ===
+  // ロック中: 編集系 (panel 更新 / DnD 配置 / シート追加削除 / 画像管理 / CSV 取り込み / 結合・分離 / 仮置き場 / 除外 等) を一律 no-op
+  // ロック中も可能: viewMode 切替 / 実績モード / ページ移動 / 検索 / Sidebar 閲覧 / プレビュー
+  const [isLocked, setIsLocked] = useState(false);
+  const isLockedRef = useRef(false);
+  useEffect(() => { isLockedRef.current = isLocked; }, [isLocked]);
+
+  const lockHoldTimerRef = useRef(null);
+  const lockHoldFiredRef = useRef(false);
+  const LOCK_HOLD_MS = 2000;
+
+  const startLockHold = useCallback(() => {
+    if (lockHoldTimerRef.current) clearTimeout(lockHoldTimerRef.current);
+    lockHoldFiredRef.current = false;
+    lockHoldTimerRef.current = setTimeout(() => {
+      lockHoldFiredRef.current = true;
+      setIsLocked((prev) => !prev);
+      lockHoldTimerRef.current = null;
+    }, LOCK_HOLD_MS);
+  }, []);
+
+  const cancelLockHold = useCallback(() => {
+    if (lockHoldTimerRef.current) {
+      clearTimeout(lockHoldTimerRef.current);
+      lockHoldTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (lockHoldTimerRef.current) clearTimeout(lockHoldTimerRef.current);
+  }, []);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressValue, setProgressValue] = useState(0);
   const [progressMax, setProgressMax] = useState(100);
@@ -3734,6 +3769,7 @@ export default function App() {
 
   // --- Sales CSV Import Logic ---
   const handleImportSalesCSV = async (file) => {
+    if (isLockedRef.current) return;
     setIsProcessing(true);
     setProgressMessage("売上データを解析中...");
     try {
@@ -3929,6 +3965,7 @@ export default function App() {
   };
 
   const handleSelectPanel = useCallback((sheetId, index) => {
+    if (isLockedRef.current) return;
     setSelection(prev => {
       if (prev.sheetId !== sheetId) return { sheetId, indices: [index] };
       const alreadySelected = prev.indices.includes(index);
@@ -3981,6 +4018,7 @@ export default function App() {
   }, [selection, sheets]);
 
   const handleMerge = useCallback(async () => {
+    if (isLockedRef.current) return;
     if (!canMerge) return;
     const { sheetId, indices } = selection;
     if (!sheetId || indices.length === 0) return;
@@ -4052,6 +4090,7 @@ export default function App() {
   }, [canMerge, selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
 
   const handleSplit = useCallback(async () => {
+    if (isLockedRef.current) return;
     const { sheetId, indices } = selection;
     if (!sheetId || indices.length === 0) return;
 
@@ -4139,6 +4178,7 @@ export default function App() {
   // --- Core Actions ---
 
   const handleAddSheet = useCallback(async () => {
+    if (isLockedRef.current) return;
     // 認証チェック: LocalStorageモードならUI認証のみ、FirebaseモードならFirebase認証も確認
     if (!isAuthenticated) return;
     if (!USE_LOCAL_STORAGE && !auth.currentUser) return;
@@ -4175,6 +4215,7 @@ export default function App() {
   }, [isAuthenticated, sheets, sheetsCollection]);
 
   const handleUpdatePanel = useCallback(async (sheetId, panelIndex, newData) => {
+    if (isLockedRef.current) return;
     const sheetToUpdate = sheets.find(s => s.id === sheetId);
     if (!sheetToUpdate) return;
     const currentPanel = sheetToUpdate.panels[panelIndex] || {};
@@ -4219,6 +4260,7 @@ export default function App() {
   // --- Temp & Excluded Logic (Restored) ---
 
   const handleMoveToTemp = async (sheetId, panelIndex, movedText) => {
+    if (isLockedRef.current) return;
     if (USE_LOCAL_STORAGE) {
       const sheet = sheets.find(s => s.id === sheetId);
       if (!sheet) return;
@@ -4319,6 +4361,7 @@ export default function App() {
   };
 
   const handleAddDragItemToTempShelf = useCallback(async (dragPayload = {}, resolvedAssignment = null) => {
+    if (isLockedRef.current) return;
     const assignment = resolvedAssignment || extractPanelAssignmentFromDragPayload(dragPayload, '');
     if (!assignment) return false;
 
@@ -4415,6 +4458,7 @@ export default function App() {
   }, [tempShelfCollection, excludedItemsCollection, runCloudWrite, showAlert, useLegacyTempShelf, legacyTempShelfCollection, tempShelfUserId, buildTempShelfPayload]);
 
   const handleDeleteFromTemp = async (id) => {
+    if (isLockedRef.current) return;
     if (USE_LOCAL_STORAGE) {
       const newTempItems = tempItems.filter(item => item.id !== id);
       setTempItems(newTempItems);
@@ -4446,6 +4490,7 @@ export default function App() {
   };
 
   const handleMoveToExcluded = async (sheetId, panelIndex, movedText) => {
+    if (isLockedRef.current) return;
     if (USE_LOCAL_STORAGE) {
       const sheet = sheets.find(s => s.id === sheetId);
       if (!sheet) return;
@@ -4516,6 +4561,7 @@ export default function App() {
   };
 
   const handleDeleteFromExcluded = async (id) => {
+    if (isLockedRef.current) return;
     requestConfirm(
       "掲載除外リストから完全に削除しますか？\n（復元できません）",
       async () => {
@@ -4537,6 +4583,7 @@ export default function App() {
 
   // 除外リスト一括削除機能
   const handleBulkDeleteExcluded = async () => {
+    if (isLockedRef.current) return;
     if (excludedItems.length === 0) return;
     requestConfirm(
       `除外リスト内の ${excludedItems.length} 件のアイテムを全て削除しますか？\n（復元できません）`,
@@ -4625,6 +4672,7 @@ export default function App() {
   }, [tempItems, tempShelfCollection, runCloudWrite, useLegacyTempShelf]);
 
   const handlePanelUpdateWithCheck = (sheetId, panelIndex, newData) => {
+    if (isLockedRef.current) return;
     const sanitizedData = { ...newData };
     const cameFromTemp = !!sanitizedData.fromTempId;
     const cameFromExcluded = !!sanitizedData.fromExcludedId;
@@ -4668,6 +4716,7 @@ export default function App() {
   };
 
   const handleMoveToStock = async (sheetId, panelIndex, movedText) => {
+    if (isLockedRef.current) return;
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
     const panel = sheet.panels[panelIndex];
@@ -4690,6 +4739,7 @@ export default function App() {
   };
 
   const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
+    if (isLockedRef.current) return;
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
 
     if (USE_LOCAL_STORAGE) {
@@ -5082,6 +5132,7 @@ export default function App() {
   }, []);
 
   const handleUploadImage = async (e) => {
+    if (isLockedRef.current) return;
     // 認証チェックを緩和（userオブジェクトではなくフラグで判定）
     if (!e.target.files || e.target.files.length === 0 || !isAuthenticated) return;
     const files = Array.from(e.target.files);
@@ -5138,6 +5189,7 @@ export default function App() {
   };
 
   const handleDeleteImage = (imgId, fallbackData = null) => {
+    if (isLockedRef.current) return;
     requestConfirm(
       "画像をストックから削除しますか？",
       async () => {
@@ -5194,6 +5246,7 @@ export default function App() {
   };
 
   const handleBulkDeleteImages = async (imageTargets) => {
+    if (isLockedRef.current) return;
     if (!imageTargets || imageTargets.length === 0) return;
 
     requestConfirm(
@@ -5286,6 +5339,7 @@ export default function App() {
   };
 
   const handleChangeGenre = async (sheetId, newGenre) => {
+    if (isLockedRef.current) return;
     if (USE_LOCAL_STORAGE) {
       const newSheets = sheets.map(s => s.id === sheetId ? { ...s, genre: newGenre } : s);
       setSheets(newSheets);
@@ -5301,6 +5355,7 @@ export default function App() {
   };
 
   const handleDeleteSheet = (sheetId) => {
+    if (isLockedRef.current) return;
     requestConfirm(
       "このページを削除しますか？\n（この操作は取り消せません）",
       async () => {
@@ -5353,6 +5408,7 @@ export default function App() {
   };
 
   const handleSwapPages = async () => {
+    if (isLockedRef.current) return;
     if (selectedSheetIds.size !== 2) return;
     const [id1, id2] = Array.from(selectedSheetIds);
     const sheet1 = sheets.find(s => s.id === id1);
@@ -5411,6 +5467,7 @@ export default function App() {
   };
 
   const handleBulkClearImages = async () => {
+    if (isLockedRef.current) return;
     if (selectedSheetIds.size === 0) return;
     const selectedPageCount = selectedSheetIds.size;
     const shouldMoveToTempShelf = selectedPageCount <= 2;
@@ -5563,6 +5620,7 @@ export default function App() {
   };
 
   const handleBulkDelete = async () => {
+    if (isLockedRef.current) return;
     if (selectedSheetIds.size === 0) return;
 
     requestConfirm(
@@ -5666,6 +5724,7 @@ export default function App() {
 
   // --- CSV Import Logic (for Pages) ---
   const handleImportCSV = async (e) => {
+    if (isLockedRef.current) return;
     const file = e.target.files[0];
     if (!file) return;
 
@@ -6141,6 +6200,7 @@ export default function App() {
   }, [viewMode, activeSheetId, sheets]);
 
   const handleBulkDeletePageLabels = useCallback(() => {
+    if (isLockedRef.current) return;
     if (viewMode !== 'single' || !activeSheetId) return;
 
     const targetSheet = sheets.find((s) => s.id === activeSheetId);
@@ -6335,6 +6395,33 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {/* 画面ロックボタン: 2秒長押しでトグル。ロック中は編集系を一律 no-op、閲覧・画面切替・ページ移動は可能。 */}
+          <button
+            type="button"
+            onPointerDown={startLockHold}
+            onPointerUp={cancelLockHold}
+            onPointerLeave={cancelLockHold}
+            onPointerCancel={cancelLockHold}
+            onClick={(e) => {
+              // 長押し未満の単発クリックでは何もしない (誤発動防止)。
+              if (!lockHoldFiredRef.current) {
+                e.preventDefault();
+              }
+              lockHoldFiredRef.current = false;
+            }}
+            onMouseEnter={(e) => showQuickHelp(e, isLocked ? '画面ロック中' : '画面ロック', isLocked ? '2秒長押しで解除します。閲覧・画面切替・ページ移動は引き続き使えます。' : '鍵を2秒長押しで編集を一時停止します。閲覧・画面切替・ページ移動は引き続き可能です。')}
+            onMouseLeave={hideQuickHelp}
+            title={isLocked ? '画面ロック中 (2秒長押しで解除)' : '画面をロック (2秒長押し)'}
+            className={`flex items-center justify-center w-10 h-10 rounded-full mr-1 transition-colors ${
+              isLocked
+                ? 'bg-rose-100 text-rose-600 border-2 border-rose-300 shadow-inner'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+            style={{ touchAction: 'none' }}
+          >
+            {isLocked ? <Lock size={18} /> : <Unlock size={18} />}
+          </button>
 
           <div className="flex p-1 rounded-full transition-all" style={{ border: '1px solid var(--m3-outline)', background: 'var(--m3-surface)' }}>
             <button
