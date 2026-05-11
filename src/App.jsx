@@ -2287,7 +2287,9 @@ const Sidebar = React.memo(({
     }
   };
 
-  // 画像検索フィルタリング (配置済み画像を除外)
+  // 画像検索フィルタリング
+  // - 配置済み画像 (どこかのシートのコマに使われているもの) は除外
+  // - 掲載除外リスト (excludedItems) に入っている画像も除外 (除外タブには引き続き表示)
   const filteredImages = useMemo(() => {
     // 全シートで使用されている画像のSetを作成
     const usedImageSet = new Set();
@@ -2298,12 +2300,25 @@ const Sidebar = React.memo(({
       });
     });
 
-    let result = images.filter(img => !usedImageSet.has(img.data) && !usedImageSet.has(img.id));
+    // 掲載除外リスト (excludedItems) に入っている画像のキーセット
+    const excludedImageSet = new Set();
+    (excludedItems || []).forEach((item) => {
+      if (!item) return;
+      if (item.image) excludedImageSet.add(item.image);
+      if (item.imageId) excludedImageSet.add(item.imageId);
+    });
+
+    let result = images.filter(img =>
+      !usedImageSet.has(img.data)
+      && !usedImageSet.has(img.id)
+      && !excludedImageSet.has(img.data)
+      && !excludedImageSet.has(img.id)
+    );
 
     if (!searchQuery) return result;
     const lowerQuery = searchQuery.toLowerCase();
     return result.filter(img => (img.name || '').toLowerCase().includes(lowerQuery));
-  }, [images, searchQuery, sheets]);
+  }, [images, searchQuery, sheets, excludedItems]);
 
   const activeTempItems = useMemo(() => tempItems || [], [tempItems]);
 
