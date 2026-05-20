@@ -2176,6 +2176,7 @@ const Sidebar = React.memo(({
   const [isImageSelectionMode, setIsImageSelectionMode] = useState(false);
   const [selectedImageIds, setSelectedImageIds] = useState(new Set());
   const [previewImage, setPreviewImage] = useState(null);
+  const [excludedSearchQuery, setExcludedSearchQuery] = useState('');
 
   const sidebarTabHelp = {
     stock: { title: '画像', description: '画像ライブラリを表示します。画像の検索・アップロード・配置ができます。' },
@@ -2324,6 +2325,21 @@ const Sidebar = React.memo(({
   }, [images, searchQuery, sheets, excludedItems]);
 
   const activeTempItems = useMemo(() => tempItems || [], [tempItems]);
+
+  // 除外リスト検索: code / label / originalName / text を case-insensitive で部分一致
+  // 注: 一括削除 / CSV 出力ボタンは全件 (excludedItems) を対象にする (検索は表示フィルタのみ)
+  const filteredExcludedItems = useMemo(() => {
+    const q = excludedSearchQuery.trim().toLowerCase();
+    if (!q) return excludedItems;
+    return (excludedItems || []).filter((item) => {
+      if (!item) return false;
+      const code = (item.code || '').toLowerCase();
+      const label = (item.label || '').toLowerCase();
+      const name = (item.originalName || '').toLowerCase();
+      const text = (typeof item.text === 'string' ? item.text : '').toLowerCase();
+      return code.includes(q) || label.includes(q) || name.includes(q) || text.includes(q);
+    });
+  }, [excludedItems, excludedSearchQuery]);
 
   // 空き状況タブのジャンル絞り込み後の合計空きコマ数。
   // statusGenreFilter === 'all' なら全シート、ジャンル指定なら該当ジャンルのみ。
@@ -2718,10 +2734,39 @@ const Sidebar = React.memo(({
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDropToExcluded}
           >
+            <div className="p-2 border-b border-rose-100 bg-white/60">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-300" />
+                <input
+                  type="text"
+                  placeholder="除外リストを検索 (コード・ラベル・名前)"
+                  value={excludedSearchQuery}
+                  onChange={(e) => setExcludedSearchQuery(e.target.value)}
+                  onMouseEnter={(e) => onShowQuickHelp?.(e, '除外リスト検索', 'コード・ラベル・画像名で除外リストを絞り込みます。')}
+                  onMouseLeave={() => onHideQuickHelp?.()}
+                  className="w-full pl-9 pr-8 py-1.5 text-xs rounded-full bg-white border border-rose-200 text-rose-700 placeholder-rose-300 focus:outline-none focus:border-rose-400 focus:ring-1 focus:ring-rose-200 transition-colors"
+                />
+                {excludedSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setExcludedSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                    title="検索クリア"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="p-3 border-b border-rose-100 flex items-center justify-between bg-white/50">
               <div className="flex items-center gap-2 text-sm font-bold text-rose-600">
                 <Ban size={16} />
                 <span>掲載除外リスト</span>
+                {excludedSearchQuery && excludedItems.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-500 border border-rose-100 font-medium">
+                    {filteredExcludedItems.length}/{excludedItems.length}件
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -2749,9 +2794,15 @@ const Sidebar = React.memo(({
                   <p className="text-[10px]">アイテムがありません</p>
                   <p className="text-[9px] opacity-70">ここへドロップして除外</p>
                 </div>
+              ) : filteredExcludedItems.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-rose-300 py-8 border-2 border-dashed border-rose-200/50 rounded-lg m-1">
+                  <Search size={24} className="mb-2 opacity-50" />
+                  <p className="text-[10px]">検索結果なし</p>
+                  <p className="text-[9px] opacity-70">キーワードを変えて再検索</p>
+                </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  {excludedItems.map((item) => {
+                  {filteredExcludedItems.map((item) => {
                     const resolvedImg = item.image || (item.imageId ? imageDataById?.[item.imageId] : null);
                     return (
                       <div
