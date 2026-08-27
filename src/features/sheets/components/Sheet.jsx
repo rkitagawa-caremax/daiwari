@@ -23,7 +23,8 @@ const Sheet = React.memo(({
   onLeaveSales,
   imageDataById,
   isLabelMode,
-  onChangeGenre
+  onChangeGenre,
+  onPreviewImage
 }) => {
   const genre = GENRES.find((candidate) => candidate.id === sheet.genre) || GENRES[0];
 
@@ -59,7 +60,7 @@ const Sheet = React.memo(({
       }}
     >
       <div
-        className={`${isOverview ? 'h-8 px-2' : 'h-3'} w-full flex-shrink-0 flex items-center justify-between`}
+        className={`${isOverview ? 'h-6 px-2' : 'h-3'} w-full flex-shrink-0 flex items-center justify-between`}
         style={{ backgroundColor: genre.color }}
         title={genre.label}
       >
@@ -117,6 +118,7 @@ const Sheet = React.memo(({
               onLeaveSales={onLeaveSales}
               imageDataById={imageDataById}
               isLabelMode={isLabelMode}
+              onPreviewImage={onPreviewImage}
             />
           );
         })}

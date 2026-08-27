@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { FREE_LABEL_COLORS, GENRES } from '../../constants/layout';
+import ImagePreviewModal from '../../components/dialogs/ImagePreviewModal';
 import { buildSidebarImageResults } from '../../domain/sidebarImageSearch';
 import { getPanelFreeLabels } from '../../domain/panels';
 import {
@@ -60,6 +61,7 @@ const FreeLabelPreview = ({ item }) => {
 const Sidebar = React.memo(({
   isLocked,
   isOpen,
+  isTopBarsVisible,
   width,
   setWidth,
   toggleOpen,
@@ -245,7 +247,7 @@ const Sidebar = React.memo(({
 
   if (!isOpen) {
     return (
-      <div className="fixed left-0 top-16 bottom-0 w-16 m3-surface border-r flex flex-col items-center py-6 z-20 transition-all duration-300" style={{ borderColor: 'var(--m3-outline-variant)' }}>
+      <div className={`fixed left-0 ${isTopBarsVisible ? 'top-20' : 'top-0'} bottom-0 w-16 m3-surface border-r flex flex-col items-center py-6 z-20 transition-all duration-300`} style={{ borderColor: 'var(--m3-outline-variant)' }}>
         <button
           onClick={toggleOpen}
           className="m3-icon-btn-tonal p-3"
@@ -259,7 +261,7 @@ const Sidebar = React.memo(({
 
   return (
     <div
-      className="fixed left-0 top-16 bottom-0 m3-surface border-r flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out"
+      className={`fixed left-0 ${isTopBarsVisible ? 'top-20' : 'top-0'} bottom-0 m3-surface border-r flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out`}
       style={{ width, borderColor: 'var(--m3-outline-variant)' }}
     >
       <div className="flex items-start gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
@@ -967,26 +969,7 @@ const Sidebar = React.memo(({
 
       </div>
 
-      {previewImage && (
-        <div
-          className="fixed inset-0 z-[170] bg-black/70 flex items-center justify-center p-5"
-          onClick={() => setPreviewImage(null)}
-          title="クリックでプレビューを閉じる"
-        >
-          <div className="max-w-[92vw] max-h-[90vh] rounded-2xl border border-white/20 bg-slate-950/90 p-3 shadow-2xl">
-            <img
-              src={previewImage.src}
-              alt={previewImage.name || 'preview'}
-              className="max-w-[86vw] max-h-[80vh] object-contain rounded-lg"
-            />
-            {previewImage.name && (
-              <p className="mt-2 text-[11px] text-slate-200 font-mono truncate text-center">
-                {previewImage.name}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+      <ImagePreviewModal preview={previewImage} onClose={() => setPreviewImage(null)} />
 
       <div
         className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-indigo-400 transition-colors z-30"

@@ -139,6 +139,7 @@ import { compressImage } from './lib/imageProcessing';
 import AlertModal from './components/dialogs/AlertModal';
 import ConfirmModal from './components/dialogs/ConfirmModal';
 import HiddenImportModal from './components/dialogs/HiddenImportModal';
+import ImagePreviewModal from './components/dialogs/ImagePreviewModal';
 import ProcessingModal from './components/dialogs/ProcessingModal';
 import SettingsModal from './components/dialogs/SettingsModal';
 import AuthGate from './features/auth/AuthGate';
@@ -285,6 +286,7 @@ export default function App() {
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
   const [pointerDragPreview, setPointerDragPreview] = useState(null);
+  const [assignedImagePreview, setAssignedImagePreview] = useState(null);
   const salesModeLongPressTimerRef = useRef(null);
   const salesModeLongPressTriggeredRef = useRef(false);
   const pointerDragOverlayRef = useRef(null);
@@ -3394,6 +3396,15 @@ export default function App() {
     return map;
   }, [images]);
 
+  const handlePreviewAssignedImage = useCallback((preview) => {
+    if (!preview?.src) return;
+    const sourceImage = preview.imageId
+      ? images.find((image) => image.id === preview.imageId)
+      : null;
+    const previewName = preview.name || sourceImage?.name || (preview.code ? `${preview.code}.png` : '');
+    setAssignedImagePreview({ src: preview.src, name: previewName });
+  }, [images]);
+
   const handleOpenAssignedImage = useCallback((sheetId) => {
     if (!sheetId || !sheets.some((sheet) => sheet.id === sheetId)) return;
     setGenreFilter('all');
@@ -3933,6 +3944,7 @@ export default function App() {
         <Sidebar
           isLocked={isLocked}
           isOpen={sidebarOpen}
+          isTopBarsVisible={isTopBarsVisible}
           width={sidebarWidth}
           setWidth={setSidebarWidth}
           toggleOpen={() => setSidebarOpen(!sidebarOpen)}
@@ -4179,6 +4191,7 @@ export default function App() {
                           imageDataById={imageDataById}
                           isLabelMode={isLabelSelectionMode}
                           onChangeGenre={(genreId) => handleChangeGenre(sheet.id, genreId)}
+                          onPreviewImage={handlePreviewAssignedImage}
                         />
 
                       </div>
@@ -4272,6 +4285,8 @@ export default function App() {
       />
 
       <PdfExportSurface page={pdfExportPage} imageDataById={imageDataById} />
+
+      <ImagePreviewModal preview={assignedImagePreview} onClose={() => setAssignedImagePreview(null)} />
 
       {/* Settings Modal */}
       <SettingsModal

@@ -39,7 +39,8 @@ const Panel = React.memo(({
   onHoverSales,
   onLeaveSales,
   imageDataById,
-  isLabelMode
+  isLabelMode,
+  onPreviewImage
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
@@ -311,6 +312,19 @@ const Panel = React.memo(({
     if (onSelect) onSelect();
   };
 
+  const handleImageDoubleClick = (event) => {
+    if (!resolvedImage || isExportMode || isLabelMode) return;
+    if (event.target.closest?.('textarea, input, button, select, [contenteditable="true"]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onPreviewImage?.({
+      src: resolvedImage,
+      imageId: data.imageId || null,
+      name: data.originalName || '',
+      code: data.code || ''
+    });
+  };
+
   const labelStyle = data.label ? getLabelStyle(data.label) : {};
   const salesTotal = matchedSales
     ? matchedSales.reduce((total, item) => total + (parseInt(item.count) || 0), 0)
@@ -338,6 +352,7 @@ const Panel = React.memo(({
       onMouseEnter={isExportMode ? undefined : handleMouseEnter}
       onMouseLeave={isExportMode ? undefined : handleMouseLeave}
       onClick={isExportMode ? undefined : handlePanelClick}
+      onDoubleClick={!isExportMode && !isLabelMode && resolvedImage ? handleImageDoubleClick : undefined}
       style={{
         ...(shouldHighlightEmpty ? {} : {}),
         '--tw-ring-color': isSelected
