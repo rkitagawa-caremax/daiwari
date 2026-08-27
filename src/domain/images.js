@@ -1,3 +1,5 @@
+import { getPanelFreeLabels } from './panels.js';
+
 const hashString = (value = '') => {
   let hash = 0;
   for (let index = 0; index < value.length; index++) {
@@ -16,6 +18,9 @@ export const normalizeStockImageEntry = (item, imageDataById = {}) => {
     id: stableId,
     name: item.name || item.originalName || item.code || `stock-${stableId}.png`,
     data: resolvedData,
+    code: item.code || null,
+    freeLabels: getPanelFreeLabels(item),
+    freeText: null,
     createdAt: item.createdAt || { seconds: Date.now() / 1000 }
   };
 };
@@ -45,6 +50,8 @@ export const isSameStockImageList = (leftItems = [], rightItems = []) => {
     if ((left?.id || null) !== (right?.id || null)) return false;
     if ((left?.data || null) !== (right?.data || null)) return false;
     if ((left?.name || null) !== (right?.name || null)) return false;
+    if ((left?.code || null) !== (right?.code || null)) return false;
+    if (JSON.stringify(getPanelFreeLabels(left)) !== JSON.stringify(getPanelFreeLabels(right))) return false;
   }
   return true;
 };

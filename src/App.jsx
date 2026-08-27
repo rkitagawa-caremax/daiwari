@@ -1615,15 +1615,14 @@ export default function App() {
 
   const handleMoveToExcluded = async (sheetId, panelIndex, movedText) => {
     if (isLockedRef.current) return;
-    if (USE_LOCAL_STORAGE) {
-      const sheet = sheets.find(s => s.id === sheetId);
-      if (!sheet) return;
-      const panel = sheet.panels[panelIndex];
-      if (!hasPanelTransferableContent(panel)) return;
+    const currentSheet = sheets.find(s => s.id === sheetId);
+    const currentPanel = currentSheet?.panels?.[panelIndex];
+    if (!currentPanel || !hasPanelTransferableContent(currentPanel)) return;
 
+    if (USE_LOCAL_STORAGE) {
       const newExcludedItem = {
         id: idbHelper.generateId(),
-        ...getPanelTransferableContent(panel, movedText),
+        ...getPanelTransferableContent(currentPanel, movedText),
         originalName: "掲載除外",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -1632,10 +1631,10 @@ export default function App() {
       setExcludedItems(newExcludedItems);
       // localStorageHelper.setItem('excludedItems', newExcludedItems); // Auto-save handles this
 
-      const updatedPanels = [...sheet.panels];
+      const updatedPanels = [...currentSheet.panels];
       updatedPanels[panelIndex] = clearPanelTransferableContent(updatedPanels[panelIndex]);
 
-      const newSheets = sheets.map(s => s.id === sheetId ? { ...s, panels: updatedPanels } : s);
+      const newSheets = sheets.map(s => s.id === sheetId ? { ...currentSheet, panels: updatedPanels } : s);
       setSheets(newSheets);
       // localStorageHelper.setItem('sheets', newSheets); // Auto-save handles this
       return;
@@ -1656,7 +1655,7 @@ export default function App() {
         if (!hasPanelTransferableContent(sourcePanel)) return;
 
         transaction.set(excludedRef, {
-          ...getPanelTransferableContent(sourcePanel, movedText),
+          ...getPanelTransferableContent(currentPanel, movedText),
           originalName: "掲載除外",
           createdAt: serverTimestamp()
         });
@@ -1837,20 +1836,69 @@ export default function App() {
     const panel = sheet.panels[panelIndex];
     if (!panel) return;
 
-    const panelImage = panel.image || null;
-    const isLibraryBackedImage = !!panel.imageId || (!!panelImage && images.some((img) => img?.data === panelImage));
-    const shouldPreserveInTemp = !!panel.label
-      || !!panel.isText
-      || getPanelFreeLabels(panel).length > 0
-      || (!!panelImage && !isLibraryBackedImage);
+    const stockImage = images.find((image) => (
+      (!!panel.imageId && image?.id === panel.imageId)
+      || (!!panel.image && image?.data === panel.image)
+    ));
+    const panelImage = panel.image || stockImage?.data || null;
 
-    // ダミー/テキスト/ライブラリ未登録画像は消去ではなく仮置き場へ退避し、消失を防ぐ
-    if (shouldPreserveInTemp) {
+    // ダミー/テキスト/画像を持たないラベルは、画像ライブラリでは表現できないため仮置き場へ退避する。
+    if (panel.label || panel.isText || !panelImage) {
       await handleMoveToTemp(sheetId, panelIndex, movedText);
       return;
     }
 
-    handlePanelUpdateWithCheck(sheetId, panelIndex, clearPanelTransferableContent(panel));
+    const libraryMetadata = {
+      code: panel.code || stockImage?.code || null,
+      freeLabels: getPanelFreeLabels(panel),
+      freeText: null
+    };
+
+    try {
+      let returnedImage;
+      if (stockImage) {
+        returnedImage = { ...stockImage, ...libraryMetadata };
+        if (!USE_LOCAL_STORAGE) {
+          if (!imagesCollection) return;
+          await runCloudWrite(
+            () => updateDoc(doc(imagesCollection, stockImage.id), libraryMetadata),
+            { key: 'images' }
+          );
+        }
+      } else {
+        const fallbackName = panel.code ? `${panel.code}.png` : `returned-${Date.now()}.png`;
+        returnedImage = {
+          id: idbHelper.generateId(),
+          name: fallbackName,
+          data: panelImage,
+          ...libraryMetadata,
+          createdAt: { seconds: Date.now() / 1000 }
+        };
+
+        if (!USE_LOCAL_STORAGE) {
+          if (!imagesCollection) return;
+          const imageRef = await addDoc(imagesCollection, {
+            name: fallbackName,
+            data: panelImage,
+            ...libraryMetadata,
+            createdAt: serverTimestamp()
+          });
+          returnedImage = { ...returnedImage, id: imageRef.id };
+        }
+      }
+
+      const nextImages = normalizeStockImages(
+        stockImage
+          ? images.map((image) => image.id === stockImage.id ? returnedImage : image)
+          : [...images, returnedImage]
+      );
+      setImages(nextImages);
+      persistCloudImagesCache(nextImages);
+      handlePanelUpdateWithCheck(sheetId, panelIndex, clearPanelTransferableContent(panel));
+    } catch (error) {
+      console.error("Move to stock failed", error);
+      showAlert(buildFirestoreActionErrorMessage("画像ライブラリへの移動に失敗しました。元のコマは保持されています。", error));
+    }
   };
 
   const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {

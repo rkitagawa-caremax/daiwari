@@ -164,6 +164,14 @@ const Panel = React.memo(({
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
   const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
+  const textLength = Array.from(localText || '').length;
+  const textSizeClass = textLength > 180
+    ? 'text-[9px]'
+    : textLength > 100
+      ? 'text-[10px]'
+      : textLength > 50
+        ? 'text-xs'
+        : 'text-sm';
   const mergeSelectionGlow = isSelected
     ? '0 0 0 2px rgba(37, 99, 235, 0.88), inset 0 0 0 1px rgba(191, 219, 254, 0.95), 0 0 24px rgba(59, 130, 246, 0.55)'
     : null;
@@ -488,7 +496,7 @@ const Panel = React.memo(({
               className="absolute inset-x-0 top-0 h-[20%] flex items-center justify-center border-b px-1"
               style={{ background: 'rgba(255,255,255,0.42)', borderColor: 'rgba(100,116,139,0.28)' }}
             >
-              <span className="max-w-full truncate text-[6px] font-mono font-bold" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>
+              <span className="max-w-full truncate text-[9px] font-mono font-bold" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>
                 {data.code || '介援隊コード'}
               </span>
             </div>
@@ -521,7 +529,7 @@ const Panel = React.memo(({
                 }}
                 placeholder="介援隊コード"
                 aria-label="介援隊コード"
-                className="h-[80%] min-w-0 w-full rounded border border-slate-400/40 bg-white/80 px-1.5 text-center text-[10px] font-mono font-bold text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300"
+                className="h-[82%] min-w-0 w-full rounded border border-slate-400/40 bg-white/80 px-1.5 text-center text-base font-mono font-black tracking-wide text-slate-800 outline-none placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300"
                 draggable={false}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
@@ -548,14 +556,14 @@ const Panel = React.memo(({
             >
               <textarea
                 ref={textareaRef}
-                className={`w-full bg-transparent resize-none focus:outline-none text-sm font-bold text-center overflow-hidden font-sans placeholder:text-slate-400/70 ${labelStyle.text || 'text-slate-800'}`}
+                className={`h-full w-full bg-transparent resize-none focus:outline-none font-bold text-center overflow-y-auto leading-relaxed font-sans placeholder:text-slate-400/70 ${textSizeClass} ${labelStyle.text || 'text-slate-800'}`}
                 value={localText}
                 onChange={handleTextChange}
                 onFocus={() => { isFocusedRef.current = true; }}
                 onBlur={handleTextBlur}
                 placeholder="テキストを入力"
-                rows={Math.max(2, (localText || '').split('\n').length)}
-                style={{ maxHeight: '100%' }}
+                rows={1}
+                style={{ maxHeight: '100%', scrollbarWidth: 'thin' }}
                 draggable={false}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}

@@ -440,11 +440,14 @@ const Sidebar = React.memo(({
                       src: img.data,
                       imageId: img.id || '',
                       type: 'image',
-                      name: img.name || ''
+                      name: img.name || '',
+                      code: img.code || '',
+                      freeLabels: img.freeLabels || [],
+                      freeText: img.freeText || ''
                     },
                     preview: {
                       image: img.data,
-                      code: img.name || ''
+                      code: img.code || img.name || ''
                     }
                   }) : undefined}
                   onClick={() => {
@@ -467,12 +470,16 @@ const Sidebar = React.memo(({
                       src: img.data,
                       imageId: img.id || '',
                       type: 'image',
-                      name: img.name || ''
+                      name: img.name || '',
+                      code: img.code || '',
+                      freeLabels: img.freeLabels || [],
+                      freeText: img.freeText || ''
                     });
                   }}
                 >
-                  <div className="aspect-square w-full rounded-lg overflow-hidden mb-2 bg-white flex items-center justify-center">
+                  <div className="relative aspect-square w-full rounded-lg overflow-hidden mb-2 bg-white flex items-center justify-center">
                     <img src={img.data} alt="stock" className="max-w-full max-h-full object-contain" loading="lazy" decoding="async" draggable={false} />
+                    <FreeLabelPreview item={img} />
                   </div>
                   <div className="px-1">
                     <div className="text-[10px] truncate font-medium" style={{ color: 'var(--m3-on-surface)' }}>{img.name}</div>
