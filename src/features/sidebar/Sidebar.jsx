@@ -262,9 +262,9 @@ const Sidebar = React.memo(({
       className="fixed left-0 top-16 bottom-0 m3-surface border-r flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out"
       style={{ width, borderColor: 'var(--m3-outline-variant)' }}
     >
-      <div className="flex items-start gap-2 px-3 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
+      <div className="flex items-start gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
         <div
-          className="grid min-w-0 flex-1 grid-cols-2 gap-px overflow-hidden rounded-xl border"
+          className="grid min-w-0 flex-1 grid-cols-2 gap-px overflow-hidden rounded-lg border"
           style={{ background: 'var(--m3-outline-variant)', borderColor: 'var(--m3-outline-variant)' }}
           role="tablist"
           aria-label="サイドパネル表示"
@@ -286,13 +286,13 @@ const Sidebar = React.memo(({
               onMouseLeave={() => onHideQuickHelp?.()}
               role="tab"
               aria-selected={activeTab === tab.id}
-              className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 px-2 py-2 transition-all duration-200 ${activeTab === tab.id ? 'relative z-10 shadow-sm' : 'hover:brightness-95'}`}
+              className={`flex min-h-10 min-w-0 flex-col items-center justify-center gap-0 px-2 py-1.5 transition-all duration-200 ${activeTab === tab.id ? 'relative z-10 shadow-sm' : 'hover:brightness-95'}`}
               style={activeTab === tab.id
                 ? { color: 'var(--m3-on-primary-container)', background: 'var(--m3-primary-container)' }
                 : { color: 'var(--m3-on-surface-variant)', background: 'var(--m3-surface)' }}
             >
-              <tab.icon size={18} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
-              <span className="truncate text-[11px] font-bold">{tab.label}</span>
+              <tab.icon size={16} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
+              <span className="truncate text-[10px] font-bold leading-tight">{tab.label}</span>
             </button>
           ))}
         </div>

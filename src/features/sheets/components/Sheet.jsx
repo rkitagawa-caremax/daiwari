@@ -5,6 +5,7 @@ import Panel from './Panel';
 
 const Sheet = React.memo(({
   sheet,
+  pageNumber,
   panels,
   updatePanel,
   isOverview,
@@ -21,7 +22,8 @@ const Sheet = React.memo(({
   onHoverSales,
   onLeaveSales,
   imageDataById,
-  isLabelMode
+  isLabelMode,
+  onChangeGenre
 }) => {
   const genre = GENRES.find((candidate) => candidate.id === sheet.genre) || GENRES[0];
 
@@ -57,10 +59,29 @@ const Sheet = React.memo(({
       }}
     >
       <div
-        className="h-3 w-full flex-shrink-0"
+        className={`${isOverview ? 'h-8 px-2' : 'h-3'} w-full flex-shrink-0 flex items-center justify-between`}
         style={{ backgroundColor: genre.color }}
         title={genre.label}
-      />
+      >
+        {isOverview && (
+          <>
+            <span className="text-[11px] font-extrabold leading-none text-slate-700/90">
+              P.{pageNumber}
+            </span>
+            <select
+              value={sheet.genre}
+              onChange={(event) => onChangeGenre?.(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              className="min-w-0 max-w-[70%] cursor-pointer border-0 bg-transparent p-0 text-right text-[11px] font-bold leading-none text-slate-700 shadow-none outline-none focus:ring-0"
+              aria-label={`P.${pageNumber}のジャンル`}
+            >
+              {GENRES.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
+              ))}
+            </select>
+          </>
+        )}
+      </div>
 
       <div className="flex-1 grid grid-cols-4 grid-rows-4 w-full h-full border-b border-r" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface)' }}>
         {Array.from({ length: 16 }).map((_, panelIndex) => {

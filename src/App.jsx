@@ -4097,24 +4097,26 @@ export default function App() {
                       </div>
                     )}
 
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between px-2">
-                        <span className="font-bold text-slate-500 text-sm flex items-center gap-2">
-                          <span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs shadow-sm">P.{sheets.findIndex(s => s.id === sheet.id) + 1}</span>
-                        </span>
+                    <div className={`flex flex-col ${viewMode === 'overview' ? 'gap-0' : 'gap-3'}`}>
+                      {viewMode !== 'overview' && (
+                        <div className="flex items-center justify-between px-2">
+                          <span className="font-bold text-slate-500 text-sm flex items-center gap-2">
+                            <span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs shadow-sm">P.{sheets.findIndex(s => s.id === sheet.id) + 1}</span>
+                          </span>
 
-                        <div className="flex items-center gap-2 z-10">
-                          <select
-                            value={sheet.genre}
-                            onChange={(e) => handleChangeGenre(sheet.id, e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            disabled={isPageSelectionMode}
-                            className="text-xs border-none bg-white rounded-lg px-2 py-1 shadow-sm text-slate-600 font-medium focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 hover:bg-slate-50 transition-colors cursor-pointer"
-                          >
-                            {GENRES.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}
-                          </select>
+                          <div className="flex items-center gap-2 z-10">
+                            <select
+                              value={sheet.genre}
+                              onChange={(e) => handleChangeGenre(sheet.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              disabled={isPageSelectionMode}
+                              className="text-xs border-none bg-white rounded-lg px-2 py-1 shadow-sm text-slate-600 font-medium focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 hover:bg-slate-50 transition-colors cursor-pointer"
+                            >
+                              {GENRES.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}
+                            </select>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div className={`relative ${isPageSelectionMode ? 'pointer-events-none' : ''}`}>
                         {viewMode === 'single' && (
@@ -4158,6 +4160,7 @@ export default function App() {
                         <Sheet
                           sheet={sheet}
                           index={sheets.findIndex(s => s.id === sheet.id)}
+                          pageNumber={sheets.findIndex(s => s.id === sheet.id) + 1}
                           panels={sheet.panels}
                           updatePanel={handlePanelUpdateWithCheck}
                           isOverview={viewMode === 'overview'}
@@ -4175,6 +4178,7 @@ export default function App() {
                           onLeaveSales={handleLeaveSales}
                           imageDataById={imageDataById}
                           isLabelMode={isLabelSelectionMode}
+                          onChangeGenre={(genreId) => handleChangeGenre(sheet.id, genreId)}
                         />
 
                       </div>
