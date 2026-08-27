@@ -26,6 +26,7 @@ const Panel = React.memo(({
   onUpdateByIndex,
   panels,
   isOverview,
+  isExportMode = false,
   isSelected,
   onSelect,
   highlightEmpty,
@@ -318,24 +319,25 @@ const Panel = React.memo(({
   return (
     <div
       ref={panelRef}
-      id={`panel-${sheetId}-${index}`}
-      data-daiwari-dropzone-id={!isOverview ? `${DAIWARI_PANEL_DROPZONE_PREFIX}${sheetId}:${index}` : undefined}
+      id={isExportMode ? undefined : `panel-${sheetId}-${index}`}
+      data-work-action={isExportMode ? undefined : 'panel_edit'}
+      data-daiwari-dropzone-id={!isOverview && !isExportMode ? `${DAIWARI_PANEL_DROPZONE_PREFIX}${sheetId}:${index}` : undefined}
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
         ${(shouldHighlightLabel || shouldHighlightEmpty) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'}
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
         ${!isEmpty && !isOverview && !data.isText ? 'cursor-grab active:cursor-grabbing' : ''}
         ${isSalesMode ? 'hover:ring-4 hover:z-40' : ''}
       `}
-      draggable={!isEmpty && !isOverview && !isLabelMode && !data.isText}
-      onDragStart={handleDragStart}
-      onDropCapture={handleDrop}
-      onDragOverCapture={handleDragOver}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onPointerDown={!isEmpty && !isOverview && !isLabelMode && !data.isText ? handlePointerDragStart : undefined}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onClick={handlePanelClick}
+      draggable={!isExportMode && !isEmpty && !isOverview && !isLabelMode && !data.isText}
+      onDragStart={isExportMode ? undefined : handleDragStart}
+      onDropCapture={isExportMode ? undefined : handleDrop}
+      onDragOverCapture={isExportMode ? undefined : handleDragOver}
+      onDrop={isExportMode ? undefined : handleDrop}
+      onDragOver={isExportMode ? undefined : handleDragOver}
+      onPointerDown={!isExportMode && !isEmpty && !isOverview && !isLabelMode && !data.isText ? handlePointerDragStart : undefined}
+      onMouseEnter={isExportMode ? undefined : handleMouseEnter}
+      onMouseLeave={isExportMode ? undefined : handleMouseLeave}
+      onClick={isExportMode ? undefined : handlePanelClick}
       style={{
         ...(shouldHighlightEmpty ? {} : {}),
         '--tw-ring-color': isSelected
@@ -367,7 +369,7 @@ const Panel = React.memo(({
           : shouldHighlightLabel
             ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
             : undefined,
-        touchAction: !isEmpty && !isOverview && !isLabelMode ? 'none' : undefined,
+        touchAction: !isExportMode && !isEmpty && !isOverview && !isLabelMode ? 'none' : undefined,
       }}
     >
       {resolvedImage && (
@@ -375,7 +377,7 @@ const Panel = React.memo(({
           src={resolvedImage}
           alt="content"
           className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none"
-          loading="lazy"
+          loading={isExportMode ? 'eager' : 'lazy'}
           decoding="async"
           draggable={false}
         />
@@ -399,7 +401,15 @@ const Panel = React.memo(({
               onMouseDown={(event) => event.stopPropagation()}
             >
               <div className="relative group flex items-center justify-center">
-                <textarea
+                {isExportMode ? (
+                  <div
+                    className="w-full min-h-[2.5em] whitespace-pre-wrap break-words rounded-lg bg-white/95 p-1.5 text-center text-xs font-bold leading-tight shadow-lg"
+                    style={{ border: `2px solid ${color.border}`, color: '#334155' }}
+                  >
+                    {draftText || 'ラベル'}
+                  </div>
+                ) : (
+                  <textarea
                   className="w-full bg-white/95 backdrop-blur-sm rounded-lg p-1.5 text-xs font-bold text-center resize-none focus:outline-none shadow-lg min-h-[2.5em] overflow-hidden transition-shadow focus:ring-2"
                   style={{
                     border: `2px solid ${color.border}`,
@@ -422,8 +432,9 @@ const Panel = React.memo(({
                   }}
                   placeholder="入力"
                   rows={Math.max(1, draftText.split('\n').length)}
-                />
-                {!isOverview && (
+                  />
+                )}
+                {!isOverview && !isExportMode && (
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
@@ -469,7 +480,7 @@ const Panel = React.memo(({
         </div>
       )}
 
-      {!resolvedImage && (!data.code || (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))) && !data.label && !isOverview && (
+      {!resolvedImage && (!data.code || (highlightEmpty && (!resolvedImage && (isEmpty || !!data.code)))) && !data.label && !isOverview && !isExportMode && (
         <div className={`flex flex-col items-center justify-center transition-opacity duration-300 ${(highlightEmpty && (!resolvedImage && (isEmpty || !!data.code))) ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
           <span className="text-[10px] select-none font-bold" style={{ color: (highlightEmpty && isEmpty) ? 'var(--m3-on-error-container)' : 'var(--m3-outline)' }}>
             {highlightEmpty && isEmpty ? '空き' : 'Drop Here'}
@@ -487,7 +498,7 @@ const Panel = React.memo(({
       )}
 
       {data.isText && (
-        isOverview ? (
+        (isOverview || isExportMode) ? (
           <div
             className="absolute inset-0 z-20 overflow-hidden pointer-events-none"
             style={{ background: labelStyle.bg || 'rgba(255,255,255,0.5)' }}
@@ -496,12 +507,12 @@ const Panel = React.memo(({
               className="absolute inset-x-0 top-0 h-[20%] flex items-center justify-center border-b px-1"
               style={{ background: 'rgba(255,255,255,0.42)', borderColor: 'rgba(100,116,139,0.28)' }}
             >
-              <span className="max-w-full truncate text-[9px] font-mono font-bold" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>
+              <span className={`max-w-full truncate font-mono font-bold ${isExportMode ? 'text-base tracking-wide' : 'text-[9px]'}`} style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>
                 {data.code || '介援隊コード'}
               </span>
             </div>
             <div className="absolute inset-x-0 top-[20%] bottom-0 flex items-center justify-center p-2 text-center overflow-hidden">
-              <p className="text-[8px] leading-tight break-words whitespace-pre-wrap font-bold font-sans" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>{data.text}</p>
+              <p className={`${isExportMode ? textSizeClass : 'text-[8px] leading-tight'} break-words whitespace-pre-wrap font-bold font-sans`} style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>{data.text}</p>
             </div>
           </div>
         ) : (
@@ -586,7 +597,7 @@ const Panel = React.memo(({
         </div>
       )}
 
-      {!isOverview && (
+      {!isOverview && !isExportMode && (
         <>
           {(resolvedImage || data.label || data.isText || data.code) && isHovered && !isSalesMode && (
             <button

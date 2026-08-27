@@ -27,7 +27,8 @@ import {
   getDoc,
   getDocs,
   runTransaction,
-  deleteField
+  deleteField,
+  increment
 } from 'firebase/firestore';
 import {
   Plus,
@@ -45,6 +46,7 @@ import {
   Split,
   Link as LinkIcon,
   FileSpreadsheet,
+  FileDown,
   Maximize,
   AlertCircle,
   Copy,
@@ -94,6 +96,8 @@ import {
   isSameStockImageList,
   normalizeStockImages
 } from './domain/images';
+import { buildPdfExportPlan } from './domain/pdfExport';
+import { WORK_ACTIONS, applyWorkLogDeltaToRecord } from './domain/workActivity';
 import {
   isSameSheetList,
   isSameTransferItemList,
@@ -124,6 +128,8 @@ import {
   parseNullableDragValue
 } from './lib/dragPayload';
 import { parseCSVLine, readFileAutoEncoding } from './lib/csv';
+import { createPdfRenderer, waitForPdfExportSurface } from './lib/pdfExport';
+import { useWorkActivityTracker } from './hooks/useWorkActivityTracker';
 import {
   buildFirestoreActionErrorMessage,
   getFirestoreErrorCode,
@@ -139,7 +145,9 @@ import AuthGate from './features/auth/AuthGate';
 import SalesCodeLookupModal from './features/sales/SalesCodeLookupModal';
 import SalesPopup from './features/sales/SalesPopup';
 import Sheet from './features/sheets/components/Sheet';
+import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
+import WorkLogDashboard from './features/workLogs/WorkLogDashboard';
 
 // --- Firebase Configuration / Local Storage Mode ---
 // Firebase設定 (daiwari-kun)
@@ -151,6 +159,8 @@ const firebaseConfig = {
   messagingSenderId: "712325109440",
   appId: "1:712325109440:web:a4dd5d7bcdbb8edf607f25"
 };
+
+const LOCAL_WORK_LOGS_KEY = 'daiwari_work_activity_logs_v1';
 
 // 優先順位: 1. グローバル設定があればそれを使用, 2. なければハードコードされた設定を使用
 let activeConfig = null;
@@ -262,6 +272,10 @@ export default function App() {
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
+  const [isWorkLogDashboardOpen, setIsWorkLogDashboardOpen] = useState(false);
+  const [workLogRecords, setWorkLogRecords] = useState([]);
+  const [isWorkLogLoading, setIsWorkLogLoading] = useState(false);
+  const [workLogErrorMessage, setWorkLogErrorMessage] = useState('');
   const [isQuickHelpMode, setIsQuickHelpMode] = useState(false);
   const [quickHelpPopup, setQuickHelpPopup] = useState(null);
   const logoTapCountRef = useRef(0);
@@ -323,6 +337,7 @@ export default function App() {
   const [progressMessage, setProgressMessage] = useState("");
   const [isDataLoaded, setIsDataLoaded] = useState(false); // データ読み込み完了フラグ
   const [useLegacyTempShelf, setUseLegacyTempShelf] = useState(false);
+  const [pdfExportPage, setPdfExportPage] = useState(null);
 
   // コレクション参照を appId に依存させる
   const sheetsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'sheets'), [appId, db]);
@@ -351,6 +366,7 @@ export default function App() {
   const excludedItemsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'excludedItems'), [appId, db]);
   const settingsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'settings'), [appId, db]);
   const salesChunksCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'salesDataChunks'), [appId, db]);
+  const workLogsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'activityLogs'), [appId]);
   const signedInUserName = useMemo(() => {
     const signedInEmail = normalizeEmail(firebaseUser?.email);
     if (signedInEmail) {
@@ -879,6 +895,60 @@ export default function App() {
   const runCloudTransaction = useCallback((transactionWork, options = {}) => {
     return runCloudWrite(() => runTransaction(db, transactionWork), options);
   }, [runCloudWrite]);
+
+  const flushWorkLogDelta = useCallback(async (delta) => {
+    if (!delta?.user?.uid || !delta.dateKey) return;
+    const documentId = `${delta.user.uid}_${delta.dateKey}`;
+
+    if (USE_LOCAL_STORAGE) {
+      const stored = JSON.parse(localStorage.getItem(LOCAL_WORK_LOGS_KEY) || '{}');
+      const previous = stored[documentId] || {};
+      stored[documentId] = {
+        ...applyWorkLogDeltaToRecord(previous, delta),
+        uid: delta.user.uid,
+        email: delta.user.email || '',
+        displayName: delta.user.displayName || 'ローカル利用者',
+        dateKey: delta.dateKey,
+        lastSeenAtMs: Date.now(),
+        version: 1
+      };
+      localStorage.setItem(LOCAL_WORK_LOGS_KEY, JSON.stringify(stored));
+      return;
+    }
+
+    if (!workLogsCollection) return;
+    const actionStats = {};
+    Object.entries(delta.actions || {}).forEach(([actionId, stats]) => {
+      const action = WORK_ACTIONS[actionId] || WORK_ACTIONS.other;
+      actionStats[actionId] = {
+        label: action.label,
+        count: increment(Math.max(0, Number(stats.count) || 0)),
+        activeMs: increment(Math.max(0, Math.round(Number(stats.activeMs) || 0)))
+      };
+    });
+    await runCloudWrite(() => setDoc(doc(workLogsCollection, documentId), {
+      uid: delta.user.uid,
+      email: delta.user.email || '',
+      displayName: delta.user.displayName || delta.user.email || '不明なアカウント',
+      dateKey: delta.dateKey,
+      totalActiveMs: increment(Math.max(0, Math.round(Number(delta.totalActiveMs) || 0))),
+      sessionCount: increment(Math.max(0, Number(delta.sessionCount) || 0)),
+      actionStats,
+      lastSeenAt: serverTimestamp(),
+      version: 1
+    }, { merge: true }), { key: `activity-log:${documentId}` });
+  }, [runCloudWrite, workLogsCollection]);
+
+  const workLogUser = useMemo(() => ({
+    uid: firebaseUser?.uid || '',
+    email: firebaseUser?.email || '',
+    displayName: signedInUserName || firebaseUser?.displayName || firebaseUser?.email || (USE_LOCAL_STORAGE ? 'ローカル利用者' : '')
+  }), [firebaseUser, signedInUserName]);
+  const { flushWorkActivityNow } = useWorkActivityTracker({
+    enabled: isAuthenticated && !!workLogUser.uid,
+    user: workLogUser,
+    onFlush: flushWorkLogDelta
+  });
 
   const buildTempShelfPayload = useCallback((basePayload = {}) => {
     const payload = { ...basePayload };
@@ -2538,6 +2608,39 @@ export default function App() {
     });
   };
 
+  const handleExportSelectedPdf = async () => {
+    if (isProcessing || selectedSheetIds.size === 0) return;
+    const exportPlan = buildPdfExportPlan({ sheets, selectedSheetIds, genres: GENRES });
+    if (exportPlan.pages.length === 0) {
+      showAlert('PDFへ出力するページを選択してください。');
+      return;
+    }
+
+    setIsProcessing(true);
+    setProgressValue(0);
+    setProgressMax(exportPlan.pages.length);
+    setProgressMessage('PDF出力の準備をしています...');
+
+    try {
+      const pdfRenderer = await createPdfRenderer();
+      for (let pageIndex = 0; pageIndex < exportPlan.pages.length; pageIndex++) {
+        const page = exportPlan.pages[pageIndex];
+        setPdfExportPage(page);
+        setProgressMessage(`Page ${page.pageNumber}（${page.genreLabel}）をPDFへ変換しています...`);
+        const surface = await waitForPdfExportSurface(page.sheet.id);
+        await pdfRenderer.appendSurface(surface);
+        setProgressValue(pageIndex + 1);
+      }
+      pdfRenderer.save(exportPlan.filename);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      showAlert(`PDF出力に失敗しました。\n${error?.message || '時間をおいて再度お試しください。'}`);
+    } finally {
+      setPdfExportPage(null);
+      setIsProcessing(false);
+    }
+  };
+
   const handleSwapPages = async () => {
     if (isLockedRef.current) return;
     if (selectedSheetIds.size !== 2) return;
@@ -3291,6 +3394,18 @@ export default function App() {
     return map;
   }, [images]);
 
+  const handleOpenAssignedImage = useCallback((sheetId) => {
+    if (!sheetId || !sheets.some((sheet) => sheet.id === sheetId)) return;
+    setGenreFilter('all');
+    setActiveSheetId(sheetId);
+    setViewMode('single');
+    setIsPageSelectionMode(false);
+    setSelectedSheetIds(new Set());
+    setIsLabelSelectionMode(false);
+    setIsMergeMode(false);
+    setSelection({ sheetId: null, indices: [] });
+  }, [sheets]);
+
   const currentList = useMemo(() => {
     if (viewMode === 'single') return sheets;
     return genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
@@ -3418,6 +3533,32 @@ export default function App() {
     setIsHiddenImportModalOpen(false);
     setIsSettingsOpen(true);
   }, []);
+
+  const loadWorkLogDashboard = useCallback(async () => {
+    setIsWorkLogLoading(true);
+    setWorkLogErrorMessage('');
+    try {
+      await flushWorkActivityNow();
+      if (USE_LOCAL_STORAGE) {
+        const stored = JSON.parse(localStorage.getItem(LOCAL_WORK_LOGS_KEY) || '{}');
+        setWorkLogRecords(Object.values(stored));
+      } else if (workLogsCollection) {
+        const snapshot = await getDocs(workLogsCollection);
+        setWorkLogRecords(snapshot.docs.map((logDoc) => ({ id: logDoc.id, ...logDoc.data() })));
+      }
+    } catch (error) {
+      console.error('Work log dashboard load failed:', error);
+      setWorkLogErrorMessage('作業ログを読み込めませんでした。権限または通信状態を確認してください。');
+    } finally {
+      setIsWorkLogLoading(false);
+    }
+  }, [flushWorkActivityNow, workLogsCollection]);
+
+  const openWorkLogDashboardFromHiddenMenu = useCallback(() => {
+    setIsHiddenImportModalOpen(false);
+    setIsWorkLogDashboardOpen(true);
+    void loadWorkLogDashboard();
+  }, [loadWorkLogDashboard]);
 
   const clearQuickHelpHighlight = useCallback(() => {
     const target = quickHelpHighlightRef.current;
@@ -3611,6 +3752,15 @@ export default function App() {
                 {selectedSheetIds.size} / {displaySheets.length}
               </span>
               <button
+                onClick={handleExportSelectedPdf}
+                disabled={selectedSheetIds.size === 0 || isProcessing}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all shadow-sm font-medium whitespace-nowrap ${selectedSheetIds.size > 0 && !isProcessing ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-md' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                title="選択したページを1つのPDFとして出力"
+                data-work-action="pdf_export"
+              >
+                <FileDown size={14} /> PDF出力
+              </button>
+              <button
                 onClick={handleSwapPages}
                 disabled={selectedSheetIds.size !== 2}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all shadow-sm font-medium whitespace-nowrap ${selectedSheetIds.size === 2 ? 'bg-indigo-500 text-white hover:bg-indigo-600 hover:shadow-md' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
@@ -3802,6 +3952,7 @@ export default function App() {
           onApplyDragPayloadToTemp={applyDragPayloadToTempShelf}
           onApplyDragPayloadToExcluded={applyDragPayloadToExcludedList}
           onApplyDragPayloadToStock={applyDragPayloadToStockList}
+          onOpenAssignedImage={handleOpenAssignedImage}
           onStartPointerDrag={startPointerDrag}
           imageDataById={imageDataById}
           onShowQuickHelp={showQuickHelp}
@@ -4103,7 +4254,20 @@ export default function App() {
         onClose={() => setIsHiddenImportModalOpen(false)}
         onOpenPageCsvImport={openPageCsvImportFromHiddenMenu}
         onOpenSalesCsvImport={openSalesCsvImportFromHiddenMenu}
+        onOpenWorkLogs={openWorkLogDashboardFromHiddenMenu}
       />
+
+      <WorkLogDashboard
+        isOpen={isWorkLogDashboardOpen}
+        onClose={() => setIsWorkLogDashboardOpen(false)}
+        records={workLogRecords}
+        isLoading={isWorkLogLoading}
+        errorMessage={workLogErrorMessage}
+        onRefresh={loadWorkLogDashboard}
+        isLocalMode={USE_LOCAL_STORAGE}
+      />
+
+      <PdfExportSurface page={pdfExportPage} imageDataById={imageDataById} />
 
       {/* Settings Modal */}
       <SettingsModal

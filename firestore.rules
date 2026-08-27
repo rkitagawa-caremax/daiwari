@@ -30,6 +30,43 @@ service cloud.firestore {
       allow read, write: if isAllowedGoogleUser();
     }
 
+    // Account activity logs: all allowed users can view the dashboard,
+    // but each account can only create/update its own immutable daily log.
+    match /artifacts/{appId}/activityLogs/{logId} {
+      allow read: if isAllowedGoogleUser();
+      allow create: if isAllowedGoogleUser()
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'dateKey', 'totalActiveMs',
+          'sessionCount', 'actionStats', 'lastSeenAt', 'version'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.totalActiveMs is int
+        && request.resource.data.totalActiveMs >= 0
+        && request.resource.data.sessionCount is int
+        && request.resource.data.sessionCount >= 0
+        && request.resource.data.actionStats is map
+        && request.resource.data.lastSeenAt == request.time
+        && request.resource.data.version == 1;
+      allow update: if isAllowedGoogleUser()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.dateKey == resource.data.dateKey
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'totalActiveMs', 'sessionCount',
+          'actionStats', 'lastSeenAt', 'version'
+        ])
+        && request.resource.data.totalActiveMs is int
+        && request.resource.data.totalActiveMs >= resource.data.totalActiveMs
+        && request.resource.data.sessionCount is int
+        && request.resource.data.sessionCount >= resource.data.sessionCount
+        && request.resource.data.actionStats is map
+        && request.resource.data.lastSeenAt == request.time
+        && request.resource.data.version == 1;
+      allow delete: if false;
+    }
+
     // Per-account private workspace data
     match /artifacts/{appId}/users/{userId}/{document=**} {
       allow read, write: if isAllowedGoogleUser() && request.auth.uid == userId;

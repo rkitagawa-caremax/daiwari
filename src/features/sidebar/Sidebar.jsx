@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { FREE_LABEL_COLORS, GENRES } from '../../constants/layout';
+import { buildSidebarImageResults } from '../../domain/sidebarImageSearch';
 import { getPanelFreeLabels } from '../../domain/panels';
 import {
   clearActiveNativeDragPayload,
@@ -78,6 +79,7 @@ const Sidebar = React.memo(({
   onApplyDragPayloadToTemp,
   onApplyDragPayloadToExcluded,
   onApplyDragPayloadToStock,
+  onOpenAssignedImage,
   onStartPointerDrag,
   imageDataById,
   onShowQuickHelp,
@@ -99,6 +101,7 @@ const Sidebar = React.memo(({
   };
 
   const getImageSelectionKey = useCallback((img) => {
+    if (img?.searchResultKey) return img.searchResultKey;
     if (img?.id) return `id:${img.id}`;
     const data = img?.data || '';
     const head = data.slice(0, 32);
@@ -204,38 +207,10 @@ const Sidebar = React.memo(({
     }
   };
 
-  // 画像検索フィルタリング
-  // - 配置済み画像 (どこかのシートのコマに使われているもの) は除外
-  // - 掲載除外リスト (excludedItems) に入っている画像も除外 (除外タブには引き続き表示)
+  // 通常時は未配置画像だけを表示し、検索中はコードが一致する配置済み画像も合成する。
   const filteredImages = useMemo(() => {
-    // 全シートで使用されている画像のSetを作成
-    const usedImageSet = new Set();
-    sheets.forEach(sheet => {
-      sheet.panels.forEach(p => {
-        if (p.image) usedImageSet.add(p.image);
-        if (p.imageId) usedImageSet.add(p.imageId);
-      });
-    });
-
-    // 掲載除外リスト (excludedItems) に入っている画像のキーセット
-    const excludedImageSet = new Set();
-    (excludedItems || []).forEach((item) => {
-      if (!item) return;
-      if (item.image) excludedImageSet.add(item.image);
-      if (item.imageId) excludedImageSet.add(item.imageId);
-    });
-
-    let result = images.filter(img =>
-      !usedImageSet.has(img.data)
-      && !usedImageSet.has(img.id)
-      && !excludedImageSet.has(img.data)
-      && !excludedImageSet.has(img.id)
-    );
-
-    if (!searchQuery) return result;
-    const lowerQuery = searchQuery.toLowerCase();
-    return result.filter(img => (img.name || '').toLowerCase().includes(lowerQuery));
-  }, [images, searchQuery, sheets, excludedItems]);
+    return buildSidebarImageResults({ images, sheets, excludedItems, searchQuery });
+  }, [images, sheets, excludedItems, searchQuery]);
 
   const activeTempItems = useMemo(() => tempItems || [], [tempItems]);
 
@@ -287,8 +262,13 @@ const Sidebar = React.memo(({
       className="fixed left-0 top-16 bottom-0 m3-surface border-r flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out"
       style={{ width, borderColor: 'var(--m3-outline-variant)' }}
     >
-      <div className="flex items-center justify-between px-4 py-4 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
-        <div className="flex p-1 rounded-full flex-1 mr-4 overflow-x-auto" style={{ background: 'var(--m3-surface-container-highest)' }}>
+      <div className="flex items-start gap-2 px-3 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
+        <div
+          className="grid min-w-0 flex-1 grid-cols-2 gap-px overflow-hidden rounded-xl border"
+          style={{ background: 'var(--m3-outline-variant)', borderColor: 'var(--m3-outline-variant)' }}
+          role="tablist"
+          aria-label="サイドパネル表示"
+        >
           {[
             { id: 'stock', icon: ImageIcon, label: '画像' },
             { id: 'dummy', icon: Type, label: 'ダミー' },
@@ -298,20 +278,25 @@ const Sidebar = React.memo(({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              data-work-action="navigation"
               onMouseEnter={(e) => {
                 const help = sidebarTabHelp[tab.id];
                 if (help) onShowQuickHelp?.(e, help.title, help.description);
               }}
               onMouseLeave={() => onHideQuickHelp?.()}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-full transition-all duration-200 whitespace-nowrap ${activeTab === tab.id ? 'bg-white shadow-sm' : 'hover:bg-black/5 opacity-70'}`}
-              style={activeTab === tab.id ? { color: 'var(--m3-primary)' } : { color: 'var(--m3-on-surface-variant)' }}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 px-2 py-2 transition-all duration-200 ${activeTab === tab.id ? 'relative z-10 shadow-sm' : 'hover:brightness-95'}`}
+              style={activeTab === tab.id
+                ? { color: 'var(--m3-on-primary-container)', background: 'var(--m3-primary-container)' }
+                : { color: 'var(--m3-on-surface-variant)', background: 'var(--m3-surface)' }}
             >
-              <tab.icon size={16} />
-              <span className="text-xs font-medium">{tab.label}</span>
+              <tab.icon size={18} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
+              <span className="truncate text-[11px] font-bold">{tab.label}</span>
             </button>
           ))}
         </div>
-        <button onClick={toggleOpen} className="m3-icon-btn flex-shrink-0">
+        <button onClick={toggleOpen} className="m3-icon-btn mt-0.5 flex-shrink-0" title="サイドパネルを閉じる" aria-label="サイドパネルを閉じる">
           <ChevronLeft size={24} />
         </button>
       </div>
@@ -322,10 +307,11 @@ const Sidebar = React.memo(({
             <Search className="absolute left-4 top-3.5 w-5 h-5 transition-colors" style={{ color: 'var(--m3-outline)' }} />
             <input
               type="text"
+              data-work-action="navigation"
               placeholder="画像検索..."
               value={searchQuery}
               onChange={(e) => onSearch(e.target.value)}
-              onMouseEnter={(e) => onShowQuickHelp?.(e, '画像検索', '画像名でライブラリを絞り込みます。キーワード入力で候補を素早く探せます。')}
+              onMouseEnter={(e) => onShowQuickHelp?.(e, '画像検索', '画像名・介援隊コードで検索します。配置済み画像はページ番号付きで表示され、クリックすると該当ページへ移動します。')}
               onMouseLeave={() => onHideQuickHelp?.()}
               className="w-full p-3 pl-12 rounded-full transition-all"
               style={{ background: 'var(--m3-surface-container-high)', color: 'var(--m3-on-surface)' }}
@@ -397,7 +383,7 @@ const Sidebar = React.memo(({
                 <span className="text-sm font-bold" style={{ color: 'var(--m3-primary)' }}>{selectedImageIds.size}枚選択中</span>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setSelectedImageIds(new Set(filteredImages.map((i) => getImageSelectionKey(i))))}
+                    onClick={() => setSelectedImageIds(new Set(filteredImages.filter((image) => !image.assignment).map((image) => getImageSelectionKey(image))))}
                     className="text-xs font-medium px-3 py-1.5 rounded-full hover:bg-black/5"
                     style={{ color: 'var(--m3-primary)' }}
                   >
@@ -418,11 +404,17 @@ const Sidebar = React.memo(({
             <div className="grid grid-cols-2 gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
               {filteredImages.map((img) => {
                 const selectionKey = getImageSelectionKey(img);
+                const assignment = img.assignment || null;
+                const assignmentGenre = assignment
+                  ? (GENRES.find((genre) => genre.id === assignment.genre) || GENRES[0])
+                  : null;
                 return (
                 <div
                   key={selectionKey}
                   className={`group relative border rounded-xl p-2 transition-all duration-200
-                    ${isImageSelectionMode
+                    ${assignment
+                      ? 'cursor-pointer hover:-translate-y-0.5'
+                      : isImageSelectionMode
                       ? 'cursor-pointer'
                       : 'cursor-grab active:cursor-grabbing hover:shadow-md hover:-translate-y-0.5'}
                     ${selectedImageIds.has(selectionKey)
@@ -432,10 +424,17 @@ const Sidebar = React.memo(({
                     background: 'var(--m3-surface)',
                     borderColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary)' : 'var(--m3-outline-variant)',
                     backgroundColor: selectedImageIds.has(selectionKey) ? 'var(--m3-primary-container)' : 'var(--m3-surface)',
-                    touchAction: isImageSelectionMode ? 'manipulation' : 'pan-y'
+                    touchAction: isImageSelectionMode || assignment ? 'manipulation' : 'pan-y',
+                    ...(assignment ? {
+                      borderColor: assignmentGenre.color,
+                      boxShadow: `0 0 7px ${assignmentGenre.color}, 0 0 16px ${assignmentGenre.color}99, inset 0 0 5px ${assignmentGenre.color}55`
+                    } : {})
                   }}
-                  draggable={!isImageSelectionMode}
-                  onPointerDown={!isImageSelectionMode ? (e) => onStartPointerDrag?.(e, {
+                  role={assignment ? 'button' : undefined}
+                  tabIndex={assignment ? 0 : undefined}
+                  aria-label={assignment ? `配置済み画像、ページ${assignment.sheetNumber}を開く` : undefined}
+                  draggable={!isImageSelectionMode && !assignment}
+                  onPointerDown={!isImageSelectionMode && !assignment ? (e) => onStartPointerDrag?.(e, {
                     payload: {
                       src: img.data,
                       imageId: img.id || '',
@@ -451,18 +450,27 @@ const Sidebar = React.memo(({
                     }
                   }) : undefined}
                   onClick={() => {
+                    if (assignment) {
+                      onOpenAssignedImage?.(assignment.sheetId);
+                      return;
+                    }
                     if (isImageSelectionMode) {
                       toggleImageSelection(selectionKey);
                     }
                   }}
+                  onKeyDown={(e) => {
+                    if (!assignment || (e.key !== 'Enter' && e.key !== ' ')) return;
+                    e.preventDefault();
+                    onOpenAssignedImage?.(assignment.sheetId);
+                  }}
                   onDoubleClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (isImageSelectionMode) return;
+                    if (isImageSelectionMode || assignment) return;
                     handleTogglePreview(img.data, img.name || '');
                   }}
                   onDragStart={(e) => {
-                    if (isImageSelectionMode) {
+                    if (isImageSelectionMode || assignment) {
                       e.preventDefault();
                       return;
                     }
@@ -480,17 +488,30 @@ const Sidebar = React.memo(({
                   <div className="relative aspect-square w-full rounded-lg overflow-hidden mb-2 bg-white flex items-center justify-center">
                     <img src={img.data} alt="stock" className="max-w-full max-h-full object-contain" loading="lazy" decoding="async" draggable={false} />
                     <FreeLabelPreview item={img} />
+                    {assignment && (
+                      <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/10 text-center">
+                        <span
+                          className="rounded-lg bg-white/65 px-2.5 py-1 text-lg font-black tracking-tight shadow-sm backdrop-blur-[1px]"
+                          style={{ color: assignmentGenre.color, textShadow: '0 1px 2px rgba(15, 23, 42, 0.25)' }}
+                        >
+                          Page {assignment.sheetNumber}
+                        </span>
+                        <span className="mt-1 rounded bg-slate-900/45 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                          {assignmentGenre.label}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="px-1">
                     <div className="text-[10px] truncate font-medium" style={{ color: 'var(--m3-on-surface)' }}>{img.name}</div>
                   </div>
 
-                  {isImageSelectionMode ? (
+                  {isImageSelectionMode && !assignment ? (
                     <div className="absolute top-2 left-2 w-6 h-6 rounded-full flex items-center justify-center transition-all"
                       style={{ background: selectedImageIds.has(selectionKey) ? 'var(--m3-primary)' : 'rgba(255,255,255,0.8)', border: selectedImageIds.has(selectionKey) ? 'none' : '1px solid var(--m3-outline)' }}>
                       {selectedImageIds.has(selectionKey) && <Check size={14} style={{ color: 'var(--m3-on-primary)' }} />}
                     </div>
-                  ) : (
+                  ) : !assignment ? (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -501,7 +522,7 @@ const Sidebar = React.memo(({
                     >
                       <Trash2 size={14} />
                     </button>
-                  )}
+                  ) : null}
                 </div>
                 );
               })}

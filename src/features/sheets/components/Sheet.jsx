@@ -8,6 +8,7 @@ const Sheet = React.memo(({
   panels,
   updatePanel,
   isOverview,
+  isExportMode = false,
   zoomScale,
   selection,
   onSelectPanel,
@@ -41,10 +42,11 @@ const Sheet = React.memo(({
 
   return (
     <div
-      className={`border transition-all duration-300 overflow-hidden ${isOverview ? 'hover:shadow-lg hover:scale-[1.02] cursor-pointer' : 'shadow-xl'}`}
+      data-pdf-export-sheet-id={isExportMode ? sheet.id : undefined}
+      className={`border transition-all duration-300 overflow-hidden ${isExportMode ? '' : (isOverview ? 'hover:shadow-lg hover:scale-[1.02] cursor-pointer' : 'shadow-xl')}`}
       style={{
-        width: isOverview ? '100%' : `${210 * zoomScale}mm`,
-        height: isOverview ? 'auto' : `${297 * zoomScale}mm`,
+        width: isExportMode ? '210mm' : (isOverview ? '100%' : `${210 * zoomScale}mm`),
+        height: isExportMode ? '297mm' : (isOverview ? 'auto' : `${297 * zoomScale}mm`),
         aspectRatio: '210/297',
         margin: '0 auto',
         display: 'flex',
@@ -80,6 +82,7 @@ const Sheet = React.memo(({
               onUpdateByIndex={(targetIndex, newData) => updatePanel(sheet.id, targetIndex, newData)}
               panels={panels}
               isOverview={isOverview}
+              isExportMode={isExportMode}
               isSelected={isSelected}
               onSelect={() => onSelectPanel && onSelectPanel(sheet.id, panelIndex)}
               highlightEmpty={highlightEmpty}
