@@ -6,6 +6,7 @@ import {
   FREE_LABEL_HALF_HEIGHT_PX,
   FREE_LABEL_HALF_WIDTH_PX
 } from '../../../constants/layout';
+import { hasPanelTransferableContent } from '../../../domain/panels';
 import { normalizeCode } from '../../../domain/productCodes';
 import {
   DAIWARI_PANEL_DROPZONE_PREFIX,
@@ -108,7 +109,7 @@ const Panel = React.memo(({
   };
 
   const handleDragStart = (event) => {
-    if (!resolvedImage && !data.label && !data.isText && !data.code) {
+    if (!hasTransferableContent) {
       event.preventDefault();
       return;
     }
@@ -150,7 +151,8 @@ const Panel = React.memo(({
   };
 
   const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
-  const isEmpty = !resolvedImage && !data.label && !data.code && !data.isText;
+  const hasTransferableContent = hasPanelTransferableContent(data);
+  const isEmpty = !hasTransferableContent;
   const freeLabelsCount = data.freeLabels?.length || 0;
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;

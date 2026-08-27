@@ -1,4 +1,4 @@
-import { isPanelDataEqual } from './panels.js';
+import { getPanelFreeLabels, isPanelDataEqual } from './panels.js';
 
 export const toComparableSeconds = (value) => {
   if (!value) return 0;
@@ -23,6 +23,7 @@ export const isSameTransferItemList = (leftItems = [], rightItems = []) => {
     if ((left.image || null) !== (right.image || null)) return false;
     if ((left.imageId || null) !== (right.imageId || null)) return false;
     if ((left.label || null) !== (right.label || null)) return false;
+    if (JSON.stringify(getPanelFreeLabels(left)) !== JSON.stringify(getPanelFreeLabels(right))) return false;
     if ((left.code || null) !== (right.code || null)) return false;
     if ((left.text || '') !== (right.text || '')) return false;
     if (!!left.isText !== !!right.isText) return false;

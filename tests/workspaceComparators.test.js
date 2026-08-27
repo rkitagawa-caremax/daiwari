@@ -28,9 +28,14 @@ test('transfer item comparison covers persisted identity and content fields', ()
   }];
   const same = [{ ...left[0], createdAt: { toDate: () => new Date(10000) } }];
   const changed = [{ ...left[0], text: 'changed' }];
+  const changedLabel = [{
+    ...left[0],
+    freeLabels: [{ id: 'label-1', text: 'changed', x: 50, y: 50, colorIndex: 0 }]
+  }];
 
   assert.equal(isSameTransferItemList(left, same), true);
   assert.equal(isSameTransferItemList(left, changed), false);
+  assert.equal(isSameTransferItemList(left, changedLabel), false);
 });
 
 test('sheet comparison uses the existing panel comparison contract', () => {

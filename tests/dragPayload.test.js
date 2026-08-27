@@ -38,6 +38,7 @@ test('drag payload normalization keeps a stable string-based shape', () => {
   assert.equal(normalized.imageId, '');
   assert.equal(normalized.isText, 'false');
   assert.equal(normalized.label, '');
+  assert.equal(normalized.freeLabels, '');
 });
 
 test('native drag payload round-trips and preserves the active panel move', () => {
@@ -86,6 +87,8 @@ test('panel assignment retains text payloads and filename code fallback', () => 
       code: 'A1234',
       isText: false,
       text: '',
+      freeLabels: [],
+      freeText: null,
       fromTempId: null,
       fromExcludedId: null
     }
@@ -99,6 +102,31 @@ test('panel assignment retains text payloads and filename code fallback', () => 
     'transferred'
   );
   assert.equal(extractPanelAssignmentFromDragPayload({}, 'fallback'), null);
+});
+
+test('temporary item drag payload round-trips free labels and legacy free text', () => {
+  const dataTransfer = createDataTransfer();
+  setDragPayload(dataTransfer, {
+    src: 'data:image/png;base64,image',
+    imageId: 'image-1',
+    fromTempId: 'temp-1',
+    freeLabels: [{ id: 'note-1', text: '持ち運ぶ', x: 30, y: 40, colorIndex: 3 }]
+  });
+
+  const assignment = extractPanelAssignmentFromDragPayload(getDragPayload(dataTransfer));
+  assert.deepEqual(assignment.freeLabels, [
+    { id: 'note-1', text: '持ち運ぶ', x: 30, y: 40, colorIndex: 3 }
+  ]);
+  assert.equal(assignment.freeText, null);
+
+  const legacyAssignment = extractPanelAssignmentFromDragPayload({
+    src: 'data:image/png;base64,legacy',
+    freeLabels: 'not-json',
+    freeText: '旧ラベル'
+  });
+  assert.deepEqual(legacyAssignment.freeLabels, [
+    { id: 'legacy', text: '旧ラベル', x: 50, y: 50, colorIndex: 0 }
+  ]);
 });
 
 test('drop events can be marked as handled exactly once', () => {

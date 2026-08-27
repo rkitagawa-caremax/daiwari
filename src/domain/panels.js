@@ -57,8 +57,28 @@ export const getPanelDataPatch = (currentPanel = {}, nextPanel = {}) => {
   return patch;
 };
 
+export const getPanelFreeLabels = (panel = {}) => {
+  const currentLabels = Array.isArray(panel.freeLabels)
+    ? panel.freeLabels
+      .filter((label) => label && typeof label === 'object' && !Array.isArray(label))
+      .map((label) => ({ ...label }))
+    : [];
+  if (currentLabels.length > 0) return currentLabels;
+
+  const legacyText = typeof panel.freeText === 'string' ? panel.freeText : '';
+  if (!legacyText) return [];
+  return [{ id: 'legacy', text: legacyText, x: 50, y: 50, colorIndex: 0 }];
+};
+
 export const hasPanelTransferableContent = (panel = {}) => {
-  return !!(panel.image || panel.imageId || panel.label || panel.isText || panel.code);
+  return !!(
+    panel.image
+    || panel.imageId
+    || panel.label
+    || panel.isText
+    || panel.code
+    || getPanelFreeLabels(panel).length > 0
+  );
 };
 
 export const clearPanelTransferableContent = (panel = {}) => ({
@@ -68,7 +88,25 @@ export const clearPanelTransferableContent = (panel = {}) => ({
   label: null,
   code: null,
   text: '',
-  isText: false
+  isText: false,
+  freeLabels: [],
+  freeText: null
+});
+
+export const getPanelTransferableContent = (panel = {}, movedText) => ({
+  image: panel.image || null,
+  imageId: panel.imageId || null,
+  label: panel.label || null,
+  code: panel.code || null,
+  text: movedText !== undefined ? movedText : (panel.text || ''),
+  isText: !!panel.isText,
+  freeLabels: getPanelFreeLabels(panel),
+  freeText: null
+});
+
+export const applyPanelTransferableContent = (targetPanel = {}, sourcePanel = {}, movedText) => ({
+  ...targetPanel,
+  ...getPanelTransferableContent(sourcePanel, movedText)
 });
 
 export const sanitizePanelData = (panel = {}) => {

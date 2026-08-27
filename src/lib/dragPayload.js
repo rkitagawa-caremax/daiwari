@@ -1,3 +1,5 @@
+import { getPanelFreeLabels } from '../domain/panels.js';
+
 const DAIWARI_DRAG_PAYLOAD_TYPE = 'application/x-daiwari-drag';
 const DAIWARI_DRAG_PAYLOAD_PREFIX = '__daiwari_drag__:';
 export const DAIWARI_DROPZONE_ATTR = 'data-daiwari-dropzone-id';
@@ -23,6 +25,8 @@ const DAIWARI_DRAG_FIELDS = [
   'hasTextPayload',
   'textPayload',
   'text',
+  'freeLabels',
+  'freeText',
   'fromTempId',
   'fromExcludedId'
 ];
@@ -31,6 +35,10 @@ export const normalizeDragPayload = (payload = {}) => {
   const normalized = { __daiwariDragPayload: true };
   DAIWARI_DRAG_FIELDS.forEach((field) => {
     const value = payload[field];
+    if (field === 'freeLabels' && Array.isArray(value)) {
+      normalized[field] = JSON.stringify(value);
+      return;
+    }
     normalized[field] = value === undefined || value === null ? '' : String(value);
   });
   return normalized;
@@ -166,6 +174,17 @@ export const extractPanelAssignmentFromDragPayload = (dragPayload = {}, fallback
   const isText = dragPayload.isText === 'true';
   const hasTextPayload = dragPayload.hasTextPayload === '1';
   const transferredText = hasTextPayload ? (dragPayload.textPayload || '') : (dragPayload.text || '');
+  let parsedFreeLabels = [];
+  try {
+    const parsed = JSON.parse(dragPayload.freeLabels || '[]');
+    parsedFreeLabels = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    parsedFreeLabels = [];
+  }
+  const freeLabels = getPanelFreeLabels({
+    freeLabels: parsedFreeLabels,
+    freeText: parseNullableDragValue(dragPayload.freeText)
+  });
   const fromTempId = parseNullableDragValue(dragPayload.fromTempId);
   const fromExcludedId = parseNullableDragValue(dragPayload.fromExcludedId);
 
@@ -176,7 +195,7 @@ export const extractPanelAssignmentFromDragPayload = (dragPayload = {}, fallback
     }
   }
 
-  if (!src && !imageId && !label && !code && !isText && !fromTempId && !fromExcludedId) {
+  if (!src && !imageId && !label && !code && !isText && freeLabels.length === 0 && !fromTempId && !fromExcludedId) {
     return null;
   }
 
@@ -189,6 +208,8 @@ export const extractPanelAssignmentFromDragPayload = (dragPayload = {}, fallback
     text: isText
       ? ((hasTextPayload || transferredText !== '') ? transferredText : fallbackText)
       : '',
+    freeLabels,
+    freeText: null,
     fromTempId: fromTempId || null,
     fromExcludedId: fromExcludedId || null
   };

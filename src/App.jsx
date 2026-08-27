@@ -76,11 +76,14 @@ import {
 import {
   DEFAULT_PANEL_DATA,
   PANEL_COUNT,
+  applyPanelTransferableContent,
   buildDefaultPanels,
   buildPanelMapUpdates,
   clearPanelTransferableContent,
   getPanelDataPatch,
+  getPanelFreeLabels,
   getPanelsFromDocData,
+  getPanelTransferableContent,
   hasPanelTransferableContent,
   sanitizePanelData,
   toPanelsMap
@@ -240,7 +243,7 @@ export default function App() {
   const [salesDataLastUpdated, setSalesDataLastUpdated] = useState(null);
 
   // UI State
-  const [viewMode, setViewMode] = useState('list');
+  const [viewMode, setViewMode] = useState('overview');
   const [zoomScale, setZoomScale] = useState(1);
   const [activeSheetId, setActiveSheetId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1409,12 +1412,7 @@ export default function App() {
 
       const newTempItem = {
         id: idbHelper.generateId(),
-        image: panel.image || null,
-        imageId: panel.imageId || null,
-        label: panel.label || null,
-        code: panel.code || null,
-        text: movedText !== undefined ? movedText : (panel.text || ''),
-        isText: panel.isText || false,
+        ...getPanelTransferableContent(panel, movedText),
         originalName: "退避アイテム",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -1447,12 +1445,7 @@ export default function App() {
         if (!hasPanelTransferableContent(sourcePanel)) return;
 
         transaction.set(tempRef, {
-          image: sourcePanel.image || null,
-          imageId: sourcePanel.imageId || null,
-          label: sourcePanel.label || null,
-          code: sourcePanel.code || null,
-          text: movedText !== undefined ? movedText : (sourcePanel.text || ''),
-          isText: sourcePanel.isText || false,
+          ...getPanelTransferableContent(sourcePanel, movedText),
           originalName: "退避アイテム",
           ...(forceLegacyOwner && tempShelfUserId ? { ownerUid: tempShelfUserId } : {}),
           createdAt: serverTimestamp()
@@ -1510,23 +1503,11 @@ export default function App() {
       return true;
     }
 
-    const hasTransferableData = !!(
-      assignment.image
-      || assignment.imageId
-      || assignment.label
-      || assignment.code
-      || assignment.isText
-    );
-    if (!hasTransferableData) return false;
+    if (!hasPanelTransferableContent(assignment)) return false;
 
     const originalName = parseNullableDragValue(dragPayload.name) || '仮置きアイテム';
     const itemPayload = {
-      image: assignment.image || null,
-      imageId: assignment.imageId || null,
-      label: assignment.label || null,
-      code: assignment.code || null,
-      text: typeof assignment.text === 'string' ? assignment.text : '',
-      isText: !!assignment.isText,
+      ...getPanelTransferableContent(assignment),
       originalName
     };
 
@@ -1639,12 +1620,7 @@ export default function App() {
 
       const newExcludedItem = {
         id: idbHelper.generateId(),
-        image: panel.image || null,
-        imageId: panel.imageId || null,
-        label: panel.label || null,
-        code: panel.code || null,
-        text: movedText !== undefined ? movedText : (panel.text || ''),
-        isText: panel.isText || false,
+        ...getPanelTransferableContent(panel, movedText),
         originalName: "掲載除外",
         createdAt: { seconds: Date.now() / 1000 }
       };
@@ -1677,12 +1653,7 @@ export default function App() {
         if (!hasPanelTransferableContent(sourcePanel)) return;
 
         transaction.set(excludedRef, {
-          image: sourcePanel.image || null,
-          imageId: sourcePanel.imageId || null,
-          label: sourcePanel.label || null,
-          code: sourcePanel.code || null,
-          text: movedText !== undefined ? movedText : (sourcePanel.text || ''),
-          isText: sourcePanel.isText || false,
+          ...getPanelTransferableContent(sourcePanel, movedText),
           originalName: "掲載除外",
           createdAt: serverTimestamp()
         });
@@ -1781,6 +1752,7 @@ export default function App() {
 
     const matchedItems = tempItems.filter((item) => {
       if (!item?.id) return false;
+      if (getPanelFreeLabels(item).length > 0) return false;
       const byId = !!assignedImageId && !!item.imageId && item.imageId === assignedImageId;
       const byData = !!assignedImage && !!item.image && item.image === assignedImage;
       return byId || byData;
@@ -1864,7 +1836,10 @@ export default function App() {
 
     const panelImage = panel.image || null;
     const isLibraryBackedImage = !!panel.imageId || (!!panelImage && images.some((img) => img?.data === panelImage));
-    const shouldPreserveInTemp = !!panel.label || !!panel.isText || (!!panelImage && !isLibraryBackedImage);
+    const shouldPreserveInTemp = !!panel.label
+      || !!panel.isText
+      || getPanelFreeLabels(panel).length > 0
+      || (!!panelImage && !isLibraryBackedImage);
 
     // ダミー/テキスト/ライブラリ未登録画像は消去ではなく仮置き場へ退避し、消失を防ぐ
     if (shouldPreserveInTemp) {
@@ -1872,10 +1847,7 @@ export default function App() {
       return;
     }
 
-    handlePanelUpdateWithCheck(sheetId, panelIndex, {
-      ...panel,
-      image: null, imageId: null, label: null, code: null, text: '', isText: false
-    });
+    handlePanelUpdateWithCheck(sheetId, panelIndex, clearPanelTransferableContent(panel));
   };
 
   const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
@@ -1896,15 +1868,7 @@ export default function App() {
 
         newPanels[fromIndex] = clearPanelTransferableContent(newPanels[fromIndex]);
 
-        newPanels[toIndex] = {
-          ...newPanels[toIndex],
-          image: dataToMove.image || null,
-          imageId: dataToMove.imageId || null,
-          label: dataToMove.label || null,
-          code: dataToMove.code || null,
-          text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText
-        };
+        newPanels[toIndex] = applyPanelTransferableContent(newPanels[toIndex], dataToMove, movedText);
 
         const newSheets = sheets.map(s => s.id === fromSheetId ? { ...s, panels: newPanels } : s);
         setSheets(newSheets);
@@ -1916,15 +1880,7 @@ export default function App() {
         newFromPanels[fromIndex] = clearPanelTransferableContent(newFromPanels[fromIndex]);
 
         const newToPanels = [...toSheet.panels];
-        newToPanels[toIndex] = {
-          ...newToPanels[toIndex],
-          image: dataToMove.image || null,
-          imageId: dataToMove.imageId || null,
-          label: dataToMove.label || null,
-          code: dataToMove.code || null,
-          text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText
-        };
+        newToPanels[toIndex] = applyPanelTransferableContent(newToPanels[toIndex], dataToMove, movedText);
 
         const newSheets = sheets.map(s => {
           if (s.id === fromSheetId) return { ...s, panels: newFromPanels };
@@ -1953,15 +1909,7 @@ export default function App() {
           const nextPanels = [...fromPanels];
           nextPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
           const targetPanel = nextPanels[toIndex] || {};
-          nextPanels[toIndex] = {
-            ...targetPanel,
-            image: dataToMove.image || null,
-            imageId: dataToMove.imageId || null,
-            label: dataToMove.label || null,
-            code: dataToMove.code || null,
-            text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-            isText: !!dataToMove.isText
-          };
+          nextPanels[toIndex] = applyPanelTransferableContent(targetPanel, dataToMove, movedText);
           const panelUpdates = buildPanelMapUpdates(fromPanels, nextPanels);
           if (Object.keys(panelUpdates).length > 0) {
             transaction.update(fromSheetRef, panelUpdates);
@@ -1977,15 +1925,7 @@ export default function App() {
         const nextToPanels = [...toPanels];
         nextFromPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
         const targetPanel = nextToPanels[toIndex] || {};
-        nextToPanels[toIndex] = {
-          ...targetPanel,
-          image: dataToMove.image || null,
-          imageId: dataToMove.imageId || null,
-          label: dataToMove.label || null,
-          code: dataToMove.code || null,
-          text: movedText !== undefined ? movedText : (dataToMove.text || ''),
-          isText: !!dataToMove.isText
-        };
+        nextToPanels[toIndex] = applyPanelTransferableContent(targetPanel, dataToMove, movedText);
 
         const fromUpdates = buildPanelMapUpdates(fromPanels, nextFromPanels);
         const toUpdates = buildPanelMapUpdates(toPanels, nextToPanels);
@@ -2630,12 +2570,9 @@ export default function App() {
                 if (shouldMoveToTempShelf) {
                   recoveredTempItems.push({
                     id: recoveredId,
+                    ...getPanelTransferableContent(p),
                     image: resolvedImage,
                     imageId: p.imageId || null,
-                    label: p.label || null,
-                    code: p.code || null,
-                    text: p.text || '',
-                    isText: !!p.isText,
                     originalName: p.code ? `${p.code}.png` : `recovered-${recoveredId}.png`,
                     createdAt: { seconds: Date.now() / 1000 }
                   });
@@ -2664,7 +2601,8 @@ export default function App() {
                   label: null,
                   code: null,
                   text: '',
-                  isText: false
+                  isText: false,
+                  ...(shouldMoveToTempShelf ? { freeLabels: [], freeText: null } : {})
                 }))
               };
             }
@@ -2701,6 +2639,8 @@ export default function App() {
               code: item.code || null,
               text: item.text || '',
               isText: !!item.isText,
+              freeLabels: getPanelFreeLabels(item),
+              freeText: null,
               originalName: item.originalName || "退避アイテム",
               ...(useLegacyTempShelf && tempShelfUserId ? { ownerUid: tempShelfUserId } : {}),
               createdAt: serverTimestamp()
@@ -2730,7 +2670,8 @@ export default function App() {
             label: null,
             code: null,
             text: '',
-            isText: false
+            isText: false,
+            ...(shouldMoveToTempShelf ? { freeLabels: [], freeText: null } : {})
           }));
 
           const ref = doc(sheetsCollection, id);

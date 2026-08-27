@@ -4,10 +4,15 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_PANEL_DATA,
   PANEL_COUNT,
+  applyPanelTransferableContent,
   buildDefaultPanels,
   buildPanelMapUpdates,
+  clearPanelTransferableContent,
   getPanelDataPatch,
+  getPanelFreeLabels,
   getPanelsFromDocData,
+  getPanelTransferableContent,
+  hasPanelTransferableContent,
   isPanelDataEqual,
   sanitizePanelData,
   toPanelsMap
@@ -35,6 +40,52 @@ test('panel patch contains changed values and nulls for removed fields', () => {
     image: null,
     meta: { x: 2 }
   });
+});
+
+test('panel transfer content carries free labels while preserving target layout', () => {
+  const source = {
+    image: 'data:image/png;base64,source',
+    imageId: 'image-1',
+    code: 'A1000',
+    text: 'source text',
+    rowSpan: 4,
+    colSpan: 1,
+    freeLabels: [{ id: 'label-1', text: '注記', x: 25, y: 75, colorIndex: 2 }]
+  };
+  const target = {
+    rowSpan: 2,
+    colSpan: 3,
+    freeLabels: [{ id: 'old', text: '古いラベル', x: 50, y: 50, colorIndex: 0 }]
+  };
+
+  const transferred = getPanelTransferableContent(source, 'edited text');
+  const assigned = applyPanelTransferableContent(target, source, 'edited text');
+  const cleared = clearPanelTransferableContent(source);
+
+  assert.deepEqual(transferred.freeLabels, source.freeLabels);
+  assert.notEqual(transferred.freeLabels, source.freeLabels);
+  assert.notEqual(transferred.freeLabels[0], source.freeLabels[0]);
+  assert.equal(transferred.text, 'edited text');
+  assert.equal(assigned.rowSpan, 2);
+  assert.equal(assigned.colSpan, 3);
+  assert.deepEqual(assigned.freeLabels, source.freeLabels);
+  assert.deepEqual(cleared.freeLabels, []);
+  assert.equal(cleared.freeText, null);
+  assert.equal(cleared.rowSpan, 4);
+  assert.equal(cleared.colSpan, 1);
+  assert.equal(hasPanelTransferableContent({ freeLabels: source.freeLabels }), true);
+
+  const assignmentWithoutLabels = applyPanelTransferableContent(target, { image: 'replacement' });
+  assert.deepEqual(assignmentWithoutLabels.freeLabels, []);
+});
+
+test('legacy free text is normalized into a movable free label', () => {
+  assert.deepEqual(getPanelFreeLabels({ freeText: '旧ラベル' }), [
+    { id: 'legacy', text: '旧ラベル', x: 50, y: 50, colorIndex: 0 }
+  ]);
+  assert.deepEqual(getPanelTransferableContent({ freeText: '旧ラベル' }).freeLabels, [
+    { id: 'legacy', text: '旧ラベル', x: 50, y: 50, colorIndex: 0 }
+  ]);
 });
 
 test('panel sanitization is shallow, nulls undefined, and prefers imageId', () => {

@@ -1,19 +1,16 @@
 import React from 'react';
-import { Trash2 } from 'lucide-react';
 
 import { GENRES } from '../../../constants/layout';
 import Panel from './Panel';
 
 const Sheet = React.memo(({
   sheet,
-  index,
   panels,
   updatePanel,
   isOverview,
   zoomScale,
   selection,
   onSelectPanel,
-  onDeleteSheet,
   highlightEmpty,
   highlightLabels,
   onApplyDragPayloadToPanel,
@@ -101,22 +98,6 @@ const Sheet = React.memo(({
         })}
       </div>
 
-      {isOverview && (
-        <div className="text-center text-[10px] py-1.5 border-t flex justify-between items-center px-3 font-medium" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)', color: 'var(--m3-on-surface-variant)' }}>
-          <span className="truncate">Page {index + 1} - {genre.label}</span>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              onDeleteSheet(sheet.id);
-            }}
-            className="p-1.5 rounded-full transition-colors hover:bg-black/5"
-            style={{ color: 'var(--m3-on-surface-variant)' }}
-            title="削除"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      )}
     </div>
   );
 });

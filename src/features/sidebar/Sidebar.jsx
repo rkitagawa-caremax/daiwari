@@ -15,7 +15,8 @@ import {
   X
 } from 'lucide-react';
 
-import { GENRES } from '../../constants/layout';
+import { FREE_LABEL_COLORS, GENRES } from '../../constants/layout';
+import { getPanelFreeLabels } from '../../domain/panels';
 import {
   clearActiveNativeDragPayload,
   getDragPayload,
@@ -23,6 +24,36 @@ import {
   markDropEventHandled,
   setDragPayload
 } from '../../lib/dragPayload';
+
+const FreeLabelPreview = ({ item }) => {
+  const labels = getPanelFreeLabels(item);
+  if (labels.length === 0) return null;
+
+  return labels.map((label, index) => {
+    const rawColorIndex = Number.parseInt(label.colorIndex, 10);
+    const colorIndex = Number.isNaN(rawColorIndex) ? index : rawColorIndex;
+    const color = FREE_LABEL_COLORS[((colorIndex % FREE_LABEL_COLORS.length) + FREE_LABEL_COLORS.length) % FREE_LABEL_COLORS.length];
+    const rawX = Number(label.x);
+    const rawY = Number(label.y);
+    const x = Number.isFinite(rawX) ? Math.min(100, Math.max(0, rawX)) : 50;
+    const y = Number.isFinite(rawY) ? Math.min(100, Math.max(0, rawY)) : 50;
+
+    return (
+      <span
+        key={label.id || `free-label-${index}`}
+        className="pointer-events-none absolute z-10 max-w-[90%] -translate-x-1/2 -translate-y-1/2 truncate rounded px-1 py-0.5 text-[8px] font-bold leading-tight text-white shadow"
+        style={{
+          left: `${x}%`,
+          top: `${y}%`,
+          backgroundColor: color.bg,
+          border: `1px solid ${color.border}`
+        }}
+      >
+        {label.text || 'ラベル'}
+      </span>
+    );
+  });
+};
 
 // ... Sidebar Component ...
 const Sidebar = React.memo(({
@@ -705,6 +736,8 @@ const Sidebar = React.memo(({
                               hasTextPayload: '1',
                               textPayload: payloadText,
                               text: payloadText,
+                              freeLabels: item.freeLabels || [],
+                              freeText: item.freeText || '',
                               fromExcludedId: item.id,
                               imageId: item.imageId || ''
                             },
@@ -733,12 +766,14 @@ const Sidebar = React.memo(({
                             hasTextPayload: '1',
                             textPayload: payloadText,
                             text: payloadText,
+                            freeLabels: item.freeLabels || [],
+                            freeText: item.freeText || '',
                             fromExcludedId: item.id,
                             imageId: item.imageId || ''
                           });
                         }}
                       >
-                        <div className="w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
+                        <div className="relative w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
                           {resolvedImg ? (
                             <img src={resolvedImg} alt="excluded" className="w-full h-full object-contain" draggable={false} />
                           ) : (
@@ -746,6 +781,7 @@ const Sidebar = React.memo(({
                               <Ban size={16} />
                             </div>
                           )}
+                          <FreeLabelPreview item={item} />
                         </div>
 
                         <div className="w-full flex justify-between items-center text-[9px]">
@@ -828,6 +864,8 @@ const Sidebar = React.memo(({
                           hasTextPayload: '1',
                           textPayload: payloadText,
                           text: payloadText,
+                          freeLabels: item.freeLabels || [],
+                          freeText: item.freeText || '',
                           fromTempId: item.id,
                           imageId: item.imageId || ''
                         },
@@ -856,18 +894,23 @@ const Sidebar = React.memo(({
                         hasTextPayload: '1',
                         textPayload: payloadText,
                         text: payloadText,
+                        freeLabels: item.freeLabels || [],
+                        freeText: item.freeText || '',
                         fromTempId: item.id,
                         imageId: item.imageId || ''
                       });
                     }}
                   >
-                    {resolvedImg ? (
-                      <img src={resolvedImg} alt="temp" className="w-full h-16 object-contain rounded" draggable={false} />
-                    ) : (
-                      <div className="w-full h-16 flex flex-col items-center justify-center bg-slate-50 rounded text-slate-400">
-                        <span className="text-[10px] font-mono">{item.code || 'No Image'}</span>
-                      </div>
-                    )}
+                    <div className="relative w-full h-16 overflow-hidden rounded">
+                      {resolvedImg ? (
+                        <img src={resolvedImg} alt="temp" className="w-full h-full object-contain" draggable={false} />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+                          <span className="text-[10px] font-mono">{item.code || 'No Image'}</span>
+                        </div>
+                      )}
+                      <FreeLabelPreview item={item} />
+                    </div>
 
                     {item.label && (
                       <div className="absolute top-1 left-1 bg-slate-800/80 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded shadow-sm">
