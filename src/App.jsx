@@ -59,6 +59,7 @@ import {
   CheckCircle2,
   Tag,
   ChevronDown,
+  ChevronUp,
   MoreHorizontal
 } from 'lucide-react';
 
@@ -247,6 +248,7 @@ export default function App() {
   const [zoomScale, setZoomScale] = useState(1);
   const [activeSheetId, setActiveSheetId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isTopBarsVisible, setIsTopBarsVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [searchQuery, setSearchQuery] = useState("");
   const [genreFilter, setGenreFilter] = useState('all');
@@ -3444,6 +3446,7 @@ export default function App() {
     <div className={`flex flex-col h-screen overflow-hidden transition-all duration-700 ease-in-out`} style={{ background: 'var(--app-bg)', color: 'var(--m3-on-surface)' }}>
 
       {/* Top Navigation Bar - M3 Expressive Style */}
+      {isTopBarsVisible && (
       <div className="h-20 flex items-center justify-between px-6 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
         <div className="flex items-center gap-4 flex-shrink-0">
           <div className="flex items-center">
@@ -3704,8 +3707,36 @@ export default function App() {
             <FileSpreadsheet size={16} /> <span>出力</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              setIsTopBarsVisible(false);
+              hideQuickHelp();
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all duration-200 shadow-sm whitespace-nowrap"
+            title="上部の操作バーを隠す"
+            aria-label="上部の操作バーを隠す"
+          >
+            <ChevronUp size={17} />
+            <span className="hidden 2xl:inline">バーを隠す</span>
+          </button>
+
         </div>
       </div>
+      )}
+
+      {!isTopBarsVisible && (
+        <button
+          type="button"
+          onClick={() => setIsTopBarsVisible(true)}
+          className="fixed right-3 top-2 z-[90] flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-2 text-xs font-bold text-slate-600 shadow-lg backdrop-blur hover:bg-slate-50 transition-all"
+          title="上部の操作バーを表示"
+          aria-label="上部の操作バーを表示"
+        >
+          <ChevronDown size={17} />
+          バーを表示
+        </button>
+      )}
 
       <div className="flex flex-1 overflow-hidden relative">
         <Sidebar
@@ -3748,12 +3779,13 @@ export default function App() {
             className={`relative z-10 flex flex-col ${viewMode === 'single' ? 'gap-4' : 'gap-8'}`}
           >
             {/* Header Controls inside content area */}
-            <div className={`flex justify-between items-center gap-2 flex-wrap ${viewMode === 'single'
-              ? `sticky top-0 z-40 rounded-xl border px-2 py-1.5 backdrop-blur ${isSalesMode
-                ? 'bg-slate-900/85 border-slate-700 shadow-lg shadow-slate-900/20'
-                : 'bg-white/90 border-slate-200 shadow-lg shadow-slate-200/70'}`
-              : ''
-              }`}>
+            {isTopBarsVisible && (
+              <div className={`flex justify-between items-center gap-2 flex-wrap ${viewMode === 'single'
+                ? `sticky top-0 z-40 rounded-xl border px-2 py-1.5 backdrop-blur ${isSalesMode
+                  ? 'bg-slate-900/85 border-slate-700 shadow-lg shadow-slate-900/20'
+                  : 'bg-white/90 border-slate-200 shadow-lg shadow-slate-200/70'}`
+                : ''
+                }`}>
               <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg shadow-sm border border-slate-100">
                 <span className="text-xs font-bold text-slate-600">ジャンル:</span>
                 <select
@@ -3838,7 +3870,8 @@ export default function App() {
                 </button>
               </div>
 
-            </div>
+              </div>
+            )}
 
             <div
               className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}
@@ -3892,6 +3925,44 @@ export default function App() {
                       </div>
 
                       <div className={`relative ${isPageSelectionMode ? 'pointer-events-none' : ''}`}>
+                        {viewMode === 'single' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleNavigatePage('prev');
+                              }}
+                              disabled={currentIndex <= 0}
+                              className={`absolute left-2 sm:-left-14 top-1/2 z-50 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border bg-white/95 shadow-lg backdrop-blur transition-all ${currentIndex > 0
+                                ? 'border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:scale-105'
+                                : 'border-slate-100 text-slate-300 opacity-40 cursor-not-allowed'
+                                }`}
+                              title="前のページ"
+                              aria-label="前のページ"
+                            >
+                              <ChevronLeft size={24} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleNavigatePage('next');
+                              }}
+                              disabled={currentIndex === -1 || currentIndex >= currentList.length - 1}
+                              className={`absolute right-2 sm:-right-14 top-1/2 z-50 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border bg-white/95 shadow-lg backdrop-blur transition-all ${currentIndex !== -1 && currentIndex < currentList.length - 1
+                                ? 'border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:scale-105'
+                                : 'border-slate-100 text-slate-300 opacity-40 cursor-not-allowed'
+                                }`}
+                              title="次のページ"
+                              aria-label="次のページ"
+                            >
+                              <ChevronRight size={24} />
+                            </button>
+                          </>
+                        )}
+
                         <Sheet
                           sheet={sheet}
                           index={sheets.findIndex(s => s.id === sheet.id)}
