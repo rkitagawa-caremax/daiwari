@@ -42,6 +42,7 @@ const Panel = React.memo(({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
+  const codeInputRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
   const [labelDrafts, setLabelDrafts] = useState({});
   const isFocusedRef = useRef(false);
@@ -59,6 +60,12 @@ const Panel = React.memo(({
       setLocalText(data.text || '');
     }
   }, [data.text]);
+
+  useEffect(() => {
+    if (codeInputRef.current && document.activeElement !== codeInputRef.current) {
+      codeInputRef.current.value = (data.code || '').toString();
+    }
+  }, [data.code]);
 
   useEffect(() => {
     const labels = data.freeLabels || (data.freeText
@@ -173,8 +180,17 @@ const Panel = React.memo(({
 
   const handleTextBlur = () => {
     isFocusedRef.current = false;
-    if (localText !== data.text) {
-      onUpdate({ ...data, text: localText });
+    const normalizedCode = normalizeCode(codeInputRef.current?.value || (data.code || '').toString());
+    if (localText !== (data.text || '') || normalizedCode !== normalizeCode((data.code || '').toString())) {
+      onUpdate({ ...data, text: localText, code: normalizedCode || null });
+    }
+  };
+
+  const handleCodeBlur = (event) => {
+    const normalizedCode = normalizeCode(event.currentTarget.value);
+    event.currentTarget.value = normalizedCode;
+    if (normalizedCode !== normalizeCode((data.code || '').toString()) || localText !== (data.text || '')) {
+      onUpdate({ ...data, text: localText, code: normalizedCode || null });
     }
   };
 
@@ -465,21 +481,56 @@ const Panel = React.memo(({
       {data.isText && (
         isOverview ? (
           <div
-            className="absolute inset-0 p-2 z-20 flex items-center justify-center text-center overflow-hidden pointer-events-none"
+            className="absolute inset-0 z-20 overflow-hidden pointer-events-none"
             style={{ background: labelStyle.bg || 'rgba(255,255,255,0.5)' }}
           >
-            <p className="text-[8px] leading-tight break-words whitespace-pre-wrap font-bold font-sans" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>{data.text}</p>
+            <div
+              className="absolute inset-x-0 top-0 h-[20%] flex items-center justify-center border-b px-1"
+              style={{ background: 'rgba(255,255,255,0.42)', borderColor: 'rgba(100,116,139,0.28)' }}
+            >
+              <span className="max-w-full truncate text-[6px] font-mono font-bold" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>
+                {data.code || '介援隊コード'}
+              </span>
+            </div>
+            <div className="absolute inset-x-0 top-[20%] bottom-0 flex items-center justify-center p-2 text-center overflow-hidden">
+              <p className="text-[8px] leading-tight break-words whitespace-pre-wrap font-bold font-sans" style={{ color: labelStyle.text || 'var(--m3-on-surface)' }}>{data.text}</p>
+            </div>
           </div>
         ) : (
           <div
             data-text-editor="true"
-            className="absolute inset-0 z-20 flex items-center justify-center p-4 cursor-text transition-colors hover:brightness-95 focus-within:brightness-100"
+            className="absolute inset-0 z-20 cursor-text transition-colors hover:brightness-95 focus-within:brightness-100"
             style={{ background: labelStyle.bg || 'rgba(255,255,255,0.4)' }}
-            onClick={(event) => { event.stopPropagation(); handleFocusTextarea(); }}
+            onClick={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
           >
+            <div
+              className="absolute inset-x-0 top-0 h-[20%] min-h-[28px] z-20 flex items-center border-b px-2 pr-9"
+              style={{ background: 'rgba(255,255,255,0.5)', borderColor: 'rgba(100,116,139,0.32)' }}
+            >
+              <input
+                ref={codeInputRef}
+                type="text"
+                defaultValue={(data.code || '').toString()}
+                onBlur={handleCodeBlur}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                }}
+                placeholder="介援隊コード"
+                aria-label="介援隊コード"
+                className="h-[80%] min-w-0 w-full rounded border border-slate-400/40 bg-white/80 px-1.5 text-center text-[10px] font-mono font-bold text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300"
+                draggable={false}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </div>
+
             <button
-              className="absolute top-1 left-1 rounded-md p-1.5 cursor-grab active:cursor-grabbing border shadow-sm z-30"
+              type="button"
+              className="absolute bottom-1 left-1 rounded-md p-1.5 cursor-grab active:cursor-grabbing border shadow-sm z-30"
               style={{ background: 'var(--m3-surface)', borderColor: 'var(--m3-outline-variant)', color: 'var(--m3-on-surface-variant)', touchAction: 'none' }}
               title="ドラッグして移動"
               draggable
@@ -490,20 +541,26 @@ const Panel = React.memo(({
             >
               <GripVertical size={12} />
             </button>
-            <textarea
-              ref={textareaRef}
-              className={`w-full bg-transparent resize-none focus:outline-none text-sm font-bold text-center overflow-hidden font-sans placeholder:text-slate-400/70 ${labelStyle.text || 'text-slate-800'}`}
-              value={localText}
-              onChange={handleTextChange}
-              onFocus={() => { isFocusedRef.current = true; }}
-              onBlur={handleTextBlur}
-              placeholder="テキストを入力"
-              rows={Math.max(2, (localText || '').split('\n').length)}
-              style={{ maxHeight: '100%' }}
-              draggable={false}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => event.stopPropagation()}
-            />
+
+            <div
+              className="absolute inset-x-0 top-[20%] bottom-0 flex items-center justify-center p-4"
+              onClick={(event) => { event.stopPropagation(); handleFocusTextarea(); }}
+            >
+              <textarea
+                ref={textareaRef}
+                className={`w-full bg-transparent resize-none focus:outline-none text-sm font-bold text-center overflow-hidden font-sans placeholder:text-slate-400/70 ${labelStyle.text || 'text-slate-800'}`}
+                value={localText}
+                onChange={handleTextChange}
+                onFocus={() => { isFocusedRef.current = true; }}
+                onBlur={handleTextBlur}
+                placeholder="テキストを入力"
+                rows={Math.max(2, (localText || '').split('\n').length)}
+                style={{ maxHeight: '100%' }}
+                draggable={false}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </div>
           </div>
         )
       )}

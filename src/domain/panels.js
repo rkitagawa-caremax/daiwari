@@ -70,6 +70,12 @@ export const getPanelFreeLabels = (panel = {}) => {
   return [{ id: 'legacy', text: legacyText, x: 50, y: 50, colorIndex: 0 }];
 };
 
+export const getPanelCsvCode = (panel = {}) => {
+  const code = typeof panel.code === 'string' ? panel.code : '';
+  if (panel.isText) return code;
+  return panel.label ? 'ダミーコマ' : code;
+};
+
 export const hasPanelTransferableContent = (panel = {}) => {
   return !!(
     panel.image

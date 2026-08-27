@@ -81,6 +81,7 @@ import {
   buildDefaultPanels,
   buildPanelMapUpdates,
   clearPanelTransferableContent,
+  getPanelCsvCode,
   getPanelDataPatch,
   getPanelFreeLabels,
   getPanelsFromDocData,
@@ -2750,10 +2751,7 @@ export default function App() {
             visibleCounter++;
             panelNum = visibleCounter;
           }
-          let codeVal = panel.code || '';
-          if (panel.label) {
-            codeVal = 'ダミーコマ';
-          }
+          const codeVal = getPanelCsvCode(panel);
           let sizeVal = panel.sizeType || getSizeType(panel.rowSpan || 1, panel.colSpan || 1);
           let textVal = panel.text || '';
           if (/[,"\n]/.test(textVal)) {
@@ -2890,6 +2888,7 @@ export default function App() {
         if (textVal) {
           targetLabel = 'テキスト';
           isText = true;
+          targetCode = codeVal ? normalizeCode(codeVal) : null;
         } else if (isDummyMarker) {
           // ダミーコマの種別を判定: cols[6]（ラベル列）、cols[5]（コマ数列）、cols[4]の順にチェック
           const dummyLabel = (cols[6] || '').trim();
@@ -3651,30 +3650,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-          {/* Zoom Controls (Fixed bottom-left) - M3 Style */}
-          {/* Zoom Controls */}
-          {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
-            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 mr-2 opacity-0 animate-in fade-in slide-in-from-right-4 duration-500" style={{ opacity: 1 }}>
-              <button
-                onClick={() => setZoomScale(s => Math.max(0.5, s - 0.1))}
-                className="p-1.5 hover:bg-white hover:shadow-sm rounded-md text-slate-500 transition-all active:scale-95"
-                title="縮小"
-              >
-                <ZoomOut size={16} />
-              </button>
-              <span className="text-xs font-mono font-bold w-12 text-center text-slate-600 select-none">
-                {Math.round(zoomScale * 100)}%
-              </span>
-              <button
-                onClick={() => setZoomScale(s => Math.min(1.5, s + 0.1))}
-                className="p-1.5 hover:bg-white hover:shadow-sm rounded-md text-slate-500 transition-all active:scale-95"
-                title="拡大"
-              >
-                <ZoomIn size={16} />
-              </button>
-            </div>
-          )}
-
           {!isPageSelectionMode && viewMode === 'overview' && (
             <button
               onClick={() => setHighlightLabels(!highlightLabels)}
@@ -3707,35 +3682,53 @@ export default function App() {
             <FileSpreadsheet size={16} /> <span>出力</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setIsTopBarsVisible(false);
-              hideQuickHelp();
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all duration-200 shadow-sm whitespace-nowrap"
-            title="上部の操作バーを隠す"
-            aria-label="上部の操作バーを隠す"
-          >
-            <ChevronUp size={17} />
-            <span className="hidden 2xl:inline">バーを隠す</span>
-          </button>
-
         </div>
       </div>
       )}
 
-      {!isTopBarsVisible && (
-        <button
-          type="button"
-          onClick={() => setIsTopBarsVisible(true)}
-          className="fixed right-3 top-2 z-[90] flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-2 text-xs font-bold text-slate-600 shadow-lg backdrop-blur hover:bg-slate-50 transition-all"
-          title="上部の操作バーを表示"
-          aria-label="上部の操作バーを表示"
+      <button
+        type="button"
+        onClick={() => {
+          setIsTopBarsVisible((current) => !current);
+          hideQuickHelp();
+        }}
+        className={`fixed right-3 z-[90] flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-500 shadow-md backdrop-blur transition-all duration-300 hover:bg-white hover:text-slate-700 hover:shadow-lg ${isTopBarsVisible ? 'top-[9.5rem]' : 'top-2'}`}
+        title={isTopBarsVisible ? '上部の操作バーを隠す' : '上部の操作バーを表示'}
+        aria-label={isTopBarsVisible ? '上部の操作バーを隠す' : '上部の操作バーを表示'}
+        aria-pressed={!isTopBarsVisible}
+      >
+        {isTopBarsVisible ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+      </button>
+
+      {(viewMode === 'list' || viewMode === 'single') && (
+        <div
+          className="fixed bottom-4 right-4 z-[90] flex items-center gap-0.5 rounded-xl border border-slate-200/80 bg-white/80 p-1 text-slate-500 shadow-sm backdrop-blur opacity-65 transition-all duration-200 hover:bg-white/95 hover:opacity-100 hover:shadow-md focus-within:opacity-100"
+          aria-label="表示倍率"
         >
-          <ChevronDown size={17} />
-          バーを表示
-        </button>
+          <button
+            type="button"
+            onClick={() => setZoomScale((scale) => Math.max(0.5, scale - 0.1))}
+            disabled={zoomScale <= 0.5}
+            className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30"
+            title="縮小"
+            aria-label="表示を縮小"
+          >
+            <ZoomOut size={15} />
+          </button>
+          <span className="w-10 select-none text-center font-mono text-[10px] font-bold text-slate-500" aria-live="polite">
+            {Math.round(zoomScale * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => setZoomScale((scale) => Math.min(1.5, scale + 0.1))}
+            disabled={zoomScale >= 1.5}
+            className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30"
+            title="拡大"
+            aria-label="表示を拡大"
+          >
+            <ZoomIn size={15} />
+          </button>
+        </div>
       )}
 
       <div className="flex flex-1 overflow-hidden relative">

@@ -9,6 +9,7 @@ import {
   buildPanelMapUpdates,
   clearPanelTransferableContent,
   getPanelDataPatch,
+  getPanelCsvCode,
   getPanelFreeLabels,
   getPanelsFromDocData,
   getPanelTransferableContent,
@@ -66,6 +67,7 @@ test('panel transfer content carries free labels while preserving target layout'
   assert.notEqual(transferred.freeLabels, source.freeLabels);
   assert.notEqual(transferred.freeLabels[0], source.freeLabels[0]);
   assert.equal(transferred.text, 'edited text');
+  assert.equal(transferred.code, 'A1000');
   assert.equal(assigned.rowSpan, 2);
   assert.equal(assigned.colSpan, 3);
   assert.deepEqual(assigned.freeLabels, source.freeLabels);
@@ -77,6 +79,13 @@ test('panel transfer content carries free labels while preserving target layout'
 
   const assignmentWithoutLabels = applyPanelTransferableContent(target, { image: 'replacement' });
   assert.deepEqual(assignmentWithoutLabels.freeLabels, []);
+});
+
+test('CSV code keeps text dummy codes while retaining legacy dummy markers', () => {
+  assert.equal(getPanelCsvCode({ label: 'テキスト', isText: true, code: 'E1931' }), 'E1931');
+  assert.equal(getPanelCsvCode({ label: 'テキスト', isText: true, code: null }), '');
+  assert.equal(getPanelCsvCode({ label: 'タイトル', code: 'E1931' }), 'ダミーコマ');
+  assert.equal(getPanelCsvCode({ code: 'E1931' }), 'E1931');
 });
 
 test('legacy free text is normalized into a movable free label', () => {
