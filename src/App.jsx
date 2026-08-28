@@ -4377,10 +4377,10 @@ export default function App() {
               onClick={() => setHighlightLabels(!highlightLabels)}
               onMouseEnter={(e) => showQuickHelp(e, 'ラベル強調', 'ラベルが1つ以上あるコマを緑色で強調表示します。もう一度押すと解除します。')}
               onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-2 px-3 py-2 border rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap ${highlightLabels ? 'bg-emerald-500 text-white border-emerald-600 shadow-md shadow-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${highlightLabels ? 'bg-emerald-500 text-white border-emerald-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
               title="自由ラベルがあるコマを緑色で強調表示"
             >
-              <Tag size={16} /> <span>ラベル強調</span>
+              <Tag size={14} strokeWidth={2.5} /> <span>ラベル強調</span>
             </button>
           )}
 
@@ -4388,20 +4388,20 @@ export default function App() {
             onClick={() => setHighlightEmpty(!highlightEmpty)}
             onMouseEnter={(e) => showQuickHelp(e, '空き強調', '空きコマを赤色で強調表示します。全体表示時の確認に使います。')}
             onMouseLeave={hideQuickHelp}
-            className={`flex items-center gap-2 px-3 py-2 border rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap ${highlightEmpty ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${highlightEmpty ? 'bg-rose-500 text-white border-rose-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
             title="空きコマを赤色で強調表示"
           >
-            <AlertCircle size={16} /> <span>空き強調</span>
+            <AlertCircle size={14} strokeWidth={2.5} /> <span>空き強調</span>
           </button>
 
           <button
             onClick={handleExportCSV}
             onMouseEnter={(e) => showQuickHelp(e, '出力', '現在のページ情報をCSVで出力します。外部共有やバックアップに使えます。')}
             onMouseLeave={hideQuickHelp}
-            className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-100 text-sm font-medium transition-all duration-200 shadow-sm hover:shadow whitespace-nowrap"
+            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-full transition-all duration-300 border-2 border-emerald-500 bg-white text-emerald-600 hover:bg-emerald-50 shadow-sm hover:shadow whitespace-nowrap"
             title="ページ情報をCSVでダウンロード"
           >
-            <FileSpreadsheet size={16} /> <span>出力</span>
+            <FileSpreadsheet size={16} strokeWidth={2.5} /> <span>出力</span>
           </button>
 
         </div>

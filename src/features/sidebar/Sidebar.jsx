@@ -297,9 +297,9 @@ const Sidebar = React.memo(({
               onMouseLeave={() => onHideQuickHelp?.()}
               role="tab"
               aria-selected={activeTab === tab.id}
-              className={`flex min-h-10 min-w-0 flex-col items-center justify-center gap-0 px-2 py-1.5 transition-all duration-200 ${activeTab === tab.id ? 'relative z-10 shadow-sm' : 'hover:brightness-95'}`}
+              className={`flex min-h-10 min-w-0 flex-col items-center justify-center gap-0 px-2 py-1.5 transition-all duration-200 ${activeTab === tab.id ? 'relative z-10 shadow-sm' : 'opacity-40 hover:opacity-100 hover:brightness-95'}`}
               style={activeTab === tab.id
-                ? { color: 'var(--m3-on-primary-container)', background: 'var(--m3-primary-container)' }
+                ? { color: '#f8fafc', background: '#334155' }
                 : { color: 'var(--m3-on-surface-variant)', background: 'var(--m3-surface)' }}
             >
               <tab.icon size={16} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
