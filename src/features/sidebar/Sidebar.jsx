@@ -57,6 +57,19 @@ const FreeLabelPreview = ({ item }) => {
   });
 };
 
+const DUMMY_OPTIONS = [
+  { color: 'var(--dummy-red)', text: 'var(--dummy-text-color)', label: 'タイトル' },
+  { color: 'var(--dummy-green)', text: 'var(--dummy-text-color)', label: '埋草' },
+  { color: 'var(--dummy-volt)', text: 'var(--dummy-text-color)', label: 'テキスト', isText: true },
+];
+
+const getSheetEmptyCount = (sheet) => {
+  const panels = Array.isArray(sheet?.panels) ? sheet.panels : [];
+  const pureEmpty = panels.filter((panel) => !panel.hidden && !panel.image && !panel.imageId && !panel.label).length;
+  const dummy = panels.filter((panel) => !panel.hidden && panel.label && panel.label !== 'タイトル' && panel.label !== '埋草' && panel.label !== 'テキスト').length;
+  return pureEmpty + dummy;
+};
+
 // ... Sidebar Component ...
 const Sidebar = React.memo(({
   isLocked,
@@ -231,19 +244,15 @@ const Sidebar = React.memo(({
     });
   }, [excludedItems, excludedSearchQuery]);
 
-  // 空き状況タブのジャンル絞り込み後の合計空きコマ数。
-  // statusGenreFilter === 'all' なら全シート、ジャンル指定なら該当ジャンルのみ。
-  // 計算ロジックは下のシート一覧 (pureEmptyCount + dummyCount) と完全に一致する。
-  const statusFilteredEmptyCount = useMemo(() => {
+  const statusFilteredSheets = useMemo(() => {
     return (sheets || [])
-      .filter((sheet) => statusGenreFilter === 'all' || sheet.genre === statusGenreFilter)
-      .reduce((total, sheet) => {
-        const panels = Array.isArray(sheet.panels) ? sheet.panels : [];
-        const pureEmpty = panels.filter((p) => !p.hidden && !p.image && !p.imageId && !p.label).length;
-        const dummy = panels.filter((p) => !p.hidden && p.label && p.label !== 'タイトル' && p.label !== '埋草' && p.label !== 'テキスト').length;
-        return total + pureEmpty + dummy;
-      }, 0);
+      .map((sheet, originalIndex) => ({ sheet, originalIndex }))
+      .filter(({ sheet }) => statusGenreFilter === 'all' || sheet.genre === statusGenreFilter);
   }, [sheets, statusGenreFilter]);
+
+  const statusFilteredEmptyCount = useMemo(() => {
+    return statusFilteredSheets.reduce((total, { sheet }) => total + getSheetEmptyCount(sheet), 0);
+  }, [statusFilteredSheets]);
 
   if (!isOpen) {
     return (
@@ -304,9 +313,9 @@ const Sidebar = React.memo(({
       </div>
 
       {activeTab === 'stock' && (
-        <div className="p-4 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface)' }}>
+        <div className="flex-shrink-0 border-b p-3" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface)' }}>
           <div className="relative group">
-            <Search className="absolute left-4 top-3.5 w-5 h-5 transition-colors" style={{ color: 'var(--m3-outline)' }} />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors" style={{ color: 'var(--m3-outline)' }} />
             <input
               type="text"
               data-work-action="navigation"
@@ -315,13 +324,13 @@ const Sidebar = React.memo(({
               onChange={(e) => onSearch(e.target.value)}
               onMouseEnter={(e) => onShowQuickHelp?.(e, '画像検索', '画像名・介援隊コードで検索します。配置済み画像はページ番号付きで表示され、クリックすると該当ページへ移動します。')}
               onMouseLeave={() => onHideQuickHelp?.()}
-              className="w-full p-3 pl-12 rounded-full transition-all"
+              className="w-full rounded-lg py-2.5 pl-10 pr-8 text-sm transition-all"
               style={{ background: 'var(--m3-surface-container-high)', color: 'var(--m3-on-surface)' }}
             />
             {searchQuery && (
               <button
                 onClick={() => onSearch('')}
-                className="absolute right-3 top-3 p-1 rounded-full hover:bg-black/10 transition-colors"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 transition-colors hover:bg-black/10"
                 style={{ color: 'var(--m3-on-surface-variant)' }}
               >
                 <X size={16} />
@@ -332,7 +341,7 @@ const Sidebar = React.memo(({
       )}
 
       <div
-        className="flex-1 overflow-y-auto p-4 relative"
+        className="flex-1 overflow-y-auto p-3 relative"
         style={{ background: 'var(--m3-surface-container-low)' }}
         data-daiwari-dropzone-id={activeTab === 'stock' ? 'stock' : undefined}
         onDragOverCapture={(e) => e.preventDefault()}
@@ -342,19 +351,20 @@ const Sidebar = React.memo(({
       >
 
         {activeTab === 'stock' && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div className="space-y-2">
               <label
-                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group"
+                className="flex h-24 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all group"
                 style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface)' }}
                 onMouseEnter={(e) => onShowQuickHelp?.(e, 'クリックしてアップロード', '画像ファイルを選択してライブラリに追加します。複数選択アップロードにも対応します。')}
                 onMouseLeave={() => onHideQuickHelp?.()}
               >
-                <div className="flex flex-col items-center pt-2 pb-3">
-                  <div className="p-3 rounded-full mb-3 transition-colors" style={{ background: 'var(--m3-primary-container)' }}>
-                    <ImageIcon className="w-6 h-6" style={{ color: 'var(--m3-on-primary-container)' }} />
+                <div className="flex flex-col items-center py-2">
+                  <div className="mb-2 rounded-full p-2 transition-colors" style={{ background: 'var(--m3-primary-container)' }}>
+                    <ImageIcon className="h-5 w-5" style={{ color: 'var(--m3-on-primary-container)' }} />
                   </div>
-                  <p className="text-sm font-medium" style={{ color: 'var(--m3-on-surface-variant)' }}>クリックしてアップロード</p>
+                  <p className="text-xs font-bold" style={{ color: 'var(--m3-on-surface-variant)' }}>画像を追加</p>
+                  <p className="mt-0.5 text-[10px]" style={{ color: 'var(--m3-outline)' }}>クリックして選択</p>
                 </div>
                 <input type="file" className="hidden" accept="image/*" multiple onChange={onUpload} />
               </label>
@@ -381,8 +391,8 @@ const Sidebar = React.memo(({
             </div>
 
             {isImageSelectionMode && (
-              <div className="flex items-center justify-between p-4 rounded-xl shadow-sm m3-animate-fade-in" style={{ background: 'var(--m3-surface-container-high)' }}>
-                <span className="text-sm font-bold" style={{ color: 'var(--m3-primary)' }}>{selectedImageIds.size}枚選択中</span>
+              <div className="flex items-center justify-between rounded-lg p-2.5 m3-animate-fade-in" style={{ background: 'var(--m3-surface-container-high)' }}>
+                <span className="text-xs font-bold" style={{ color: 'var(--m3-primary)' }}>{selectedImageIds.size}枚選択</span>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setSelectedImageIds(new Set(filteredImages.filter((image) => !image.assignment).map((image) => getImageSelectionKey(image))))}
@@ -403,7 +413,7 @@ const Sidebar = React.memo(({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
+            <div className="grid grid-cols-2 gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
               {filteredImages.map((img) => {
                 const selectionKey = getImageSelectionKey(img);
                 const assignment = img.assignment || null;
@@ -413,7 +423,7 @@ const Sidebar = React.memo(({
                 return (
                 <div
                   key={selectionKey}
-                  className={`group relative border rounded-xl p-2 transition-all duration-200
+                  className={`group relative rounded-lg border p-1.5 transition-all duration-200
                     ${assignment
                       ? 'cursor-pointer hover:-translate-y-0.5'
                       : isImageSelectionMode
@@ -487,7 +497,7 @@ const Sidebar = React.memo(({
                     });
                   }}
                 >
-                  <div className="relative aspect-square w-full rounded-lg overflow-hidden mb-2 bg-white flex items-center justify-center">
+                  <div className="relative mb-1 aspect-square w-full overflow-hidden rounded-md bg-white flex items-center justify-center">
                     <img src={img.data} alt="stock" className="max-w-full max-h-full object-contain" loading="lazy" decoding="async" draggable={false} />
                     <FreeLabelPreview item={img} />
                     {assignment && (
@@ -541,19 +551,17 @@ const Sidebar = React.memo(({
 
         {/* Dummy Tab */}
         {activeTab === 'dummy' && (
-          <div className="space-y-4">
-            <p className="text-xs font-medium" style={{ color: 'var(--m3-on-surface-variant)' }}>ドラッグして配置できます</p>
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between px-0.5">
+              <p className="text-xs font-bold" style={{ color: 'var(--m3-on-surface)' }}>ダミーコマ</p>
+              <p className="text-[10px]" style={{ color: 'var(--m3-outline)' }}>ドラッグして配置</p>
+            </div>
 
-            {[
-              { color: 'var(--dummy-gray)', text: 'var(--dummy-text-color)', label: '新規商品未確定' },
-              { color: 'var(--dummy-red)', text: 'var(--dummy-text-color)', label: 'タイトル' },
-              { color: 'var(--dummy-green)', text: 'var(--dummy-text-color)', label: '埋草' },
-              { color: 'var(--dummy-volt)', text: 'var(--dummy-text-color)', label: 'テキスト', isText: true },
-            ].map((dummy) => (
+            {DUMMY_OPTIONS.map((dummy) => (
               <div
                 key={dummy.label}
-                className="h-24 border-2 border-dashed rounded-xl flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:-translate-y-0.5 transition-all"
-                style={{ background: dummy.color, borderColor: 'var(--m3-outline-variant)', color: dummy.text, touchAction: 'pan-y' }}
+                className="flex h-16 cursor-grab items-center justify-between rounded-lg border px-4 active:cursor-grabbing hover:-translate-y-0.5 hover:shadow-sm transition-all"
+                style={{ background: dummy.color, borderColor: 'rgba(100, 116, 139, 0.24)', color: dummy.text, touchAction: 'pan-y' }}
                 draggable
                 onPointerDown={(e) => {
                   const payload = createDummyDragPayload(dummy);
@@ -570,7 +578,8 @@ const Sidebar = React.memo(({
                   setDragPayload(e.dataTransfer, createDummyDragPayload(dummy));
                 }}
               >
-                <span className="font-bold text-sm">【{dummy.label}】</span>
+                <span className="text-sm font-bold">{dummy.label}</span>
+                <span className="rounded-full bg-white/55 px-2 py-1 text-[9px] font-bold">配置</span>
               </div>
             ))}
           </div>
@@ -579,121 +588,119 @@ const Sidebar = React.memo(({
 
         {/* Status Tab */}
         {activeTab === 'status' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-bold text-slate-600 flex items-center gap-2 text-xs">
-                <Info size={16} /> 空き状況
-              </h3>
-              <div className="flex items-center gap-2">
+          <div className="space-y-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                    <Info size={14} /> 空き状況
+                  </p>
+                  <p className="mt-1 text-[10px] text-slate-400">{statusFilteredSheets.length}ページを表示</p>
+                </div>
                 <span
-                  className="text-xs font-bold text-rose-500 tabular-nums"
+                  className={`rounded-full px-2.5 py-1 text-xs font-bold tabular-nums ${statusFilteredEmptyCount > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}
                   title={statusGenreFilter === 'all' ? '全ジャンルの空きコマ合計' : 'このジャンルの空きコマ合計'}
                 >
-                  空き {statusFilteredEmptyCount}
+                  {statusFilteredEmptyCount > 0 ? `空き ${statusFilteredEmptyCount}` : 'すべて完了'}
                 </span>
-                <select
-                  value={statusGenreFilter}
-                  onChange={(e) => setStatusGenreFilter(e.target.value)}
-                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-600"
-                >
-                  <option value="all">全ジャンル</option>
-                  {GENRES.map(g => (
-                    <option key={g.id} value={g.id}>{g.label}</option>
-                  ))}
-                </select>
               </div>
+              <select
+                value={statusGenreFilter}
+                onChange={(e) => setStatusGenreFilter(e.target.value)}
+                className="mt-2.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="all">全ジャンル</option>
+                {GENRES.map(g => (
+                  <option key={g.id} value={g.id}>{g.label}</option>
+                ))}
+              </select>
             </div>
 
-            <div className="space-y-2">
-              {sheets
-                .map((sheet, originalIndex) => ({ sheet, originalIndex }))
-                .filter(({ sheet }) => statusGenreFilter === 'all' || sheet.genre === statusGenreFilter)
-                .map(({ sheet, originalIndex }) => {
-                  const pureEmptyCount = sheet.panels.filter(p => !p.hidden && !p.image && !p.imageId && !p.label).length;
-                  const dummyCount = sheet.panels.filter(p => !p.hidden && p.label && p.label !== 'タイトル' && p.label !== '埋草' && p.label !== 'テキスト').length;
-                  const totalEmpty = pureEmptyCount + dummyCount;
-
-                  const dummyDetails = sheet.panels.reduce((acc, p) => {
-                    if (!p.hidden && p.label && p.label !== 'タイトル' && p.label !== '埋草') {
-                      acc[p.label] = (acc[p.label] || 0) + 1;
-                    }
-                    return acc;
-                  }, {});
-
+            <div className="space-y-1.5">
+              {statusFilteredSheets.map(({ sheet, originalIndex }) => {
+                  const totalEmpty = getSheetEmptyCount(sheet);
                   const genre = GENRES.find(g => g.id === sheet.genre) || GENRES[0];
 
                   return (
-                    <div key={sheet.id} className="flex flex-col bg-white border border-slate-100 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-center mb-2">
+                    <div
+                      key={sheet.id}
+                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5"
+                      style={{ borderLeft: `4px solid ${genre.color}` }}
+                    >
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-700 text-xs">P{originalIndex + 1}</span>
-                          <span
-                            className="text-[10px] px-2 py-0.5 rounded-full font-medium truncate max-w-[100px]"
-                            style={{
-                              backgroundColor: genre.color,
-                              color: '#1e293b' // Darker text for better contrast
-                            }}
-                          >
-                            {genre.label}
-                          </span>
+                          <span className="text-xs font-bold text-slate-700">P{originalIndex + 1}</span>
+                          <span className="truncate text-[10px] font-medium text-slate-500">{genre.label}</span>
                         </div>
-                        <span className={`font-mono text-xs font-bold ${totalEmpty > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                          {totalEmpty > 0 ? `空き: ${totalEmpty}` : '完了'}
-                        </span>
                       </div>
-
-                      {Object.keys(dummyDetails).length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pl-4 border-l-2 border-slate-200 ml-1">
-                          {Object.entries(dummyDetails).map(([label, count]) => {
-                            const dummyAttr = [
-                              { color: 'bg-[var(--dummy-gray)]', border: 'border-transparent', text: 'text-[var(--dummy-text-color)]', label: '新規商品未確定' },
-                              { color: 'bg-[var(--dummy-orange)]', border: 'border-transparent', text: 'text-[var(--dummy-text-color)]', label: 'その他' },
-                              { color: 'bg-[var(--dummy-red)]', border: 'border-transparent', text: 'text-[var(--dummy-text-color)]', label: 'タイトル' },
-                              { color: 'bg-[var(--dummy-green)]', border: 'border-transparent', text: 'text-[var(--dummy-text-color)]', label: '埋草' },
-                              { color: 'bg-[var(--dummy-volt)]', border: 'border-transparent', text: 'text-[var(--dummy-text-color)]', label: 'テキスト' },
-                            ].find(d => d.label === label) || { color: 'bg-slate-50', text: 'text-slate-500', border: 'border-slate-200' };
-
-                            return (
-                              <span key={label} className={`text-[9.5px] px-2 py-0.5 ${dummyAttr.color} ${dummyAttr.text} rounded-full border ${dummyAttr.border} font-bold shadow-sm`}>
-                                {label}: {count}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <span className={`font-mono text-xs font-bold ${totalEmpty > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                        {totalEmpty > 0 ? `${totalEmpty}コマ` : '完了'}
+                      </span>
                     </div>
                   );
                 })}
-              {sheets.length === 0 && <p className="text-xs text-slate-400 text-center py-4">ページがありません</p>}
+              {statusFilteredSheets.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-xs text-slate-400">
+                  対象ページがありません
+                </div>
+              )}
             </div>
           </div>
         )}
         {activeTab === 'excluded' && (
           <div
-            className="flex-1 flex flex-col h-full bg-rose-50/30 rounded-xl border border-rose-100 overflow-hidden"
+            className="flex h-full flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white"
             data-daiwari-dropzone-id="excluded"
             onDragOverCapture={(e) => e.preventDefault()}
             onDropCapture={handleDropToExcluded}
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDropToExcluded}
           >
-            <div className="p-2 border-b border-rose-100 bg-white/60">
+            <div className="space-y-2.5 border-b border-slate-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Ban size={15} className="flex-shrink-0 text-rose-500" />
+                  <span className="truncate text-xs font-bold text-slate-700">掲載除外</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">
+                    {excludedSearchQuery ? `${filteredExcludedItems.length}/${excludedItems.length}` : excludedItems.length}件
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={onExportExcludedCSV}
+                    disabled={excludedItems.length === 0}
+                    className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+                    title="除外リストをCSVで出力"
+                  >
+                    <FileSpreadsheet size={12} /> CSV
+                  </button>
+                  <button
+                    onClick={onBulkDeleteExcluded}
+                    disabled={excludedItems.length === 0}
+                    className="rounded-md border border-slate-200 p-1.5 text-rose-500 transition-colors hover:border-rose-200 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-35"
+                    title="除外リストを全て空にする"
+                    aria-label="除外リストを全て空にする"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-300" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="除外リストを検索 (コード・ラベル・名前)"
+                  placeholder="コード・ラベル・名前で検索"
                   value={excludedSearchQuery}
                   onChange={(e) => setExcludedSearchQuery(e.target.value)}
                   onMouseEnter={(e) => onShowQuickHelp?.(e, '除外リスト検索', 'コード・ラベル・画像名で除外リストを絞り込みます。')}
                   onMouseLeave={() => onHideQuickHelp?.()}
-                  className="w-full pl-9 pr-8 py-1.5 text-xs rounded-full bg-white border border-rose-200 text-rose-700 placeholder-rose-300 focus:outline-none focus:border-rose-400 focus:ring-1 focus:ring-rose-200 transition-colors"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-8 text-xs text-slate-700 placeholder-slate-400 transition-colors focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-200"
                 />
                 {excludedSearchQuery && (
                   <button
                     type="button"
                     onClick={() => setExcludedSearchQuery('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
                     title="検索クリア"
                   >
                     <X size={12} />
@@ -701,47 +708,16 @@ const Sidebar = React.memo(({
                 )}
               </div>
             </div>
-            <div className="p-3 border-b border-rose-100 flex items-center justify-between bg-white/50">
-              <div className="flex items-center gap-2 text-sm font-bold text-rose-600">
-                <Ban size={16} />
-                <span>掲載除外リスト</span>
-                {excludedSearchQuery && excludedItems.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-500 border border-rose-100 font-medium">
-                    {filteredExcludedItems.length}/{excludedItems.length}件
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={onExportExcludedCSV}
-                  disabled={excludedItems.length === 0}
-                  className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border transition-colors font-medium ${excludedItems.length > 0 ? 'bg-white text-rose-600 border-rose-200 hover:bg-rose-50' : 'bg-slate-50 text-slate-300 border-transparent cursor-not-allowed'}`}
-                  title="除外リストをCSVで出力"
-                >
-                  <FileSpreadsheet size={12} />
-                </button>
-                <button
-                  onClick={onBulkDeleteExcluded}
-                  disabled={excludedItems.length === 0}
-                  className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border transition-colors font-medium ${excludedItems.length > 0 ? 'bg-white text-rose-600 border-rose-200 hover:bg-rose-500 hover:text-white' : 'bg-slate-50 text-slate-300 border-transparent cursor-not-allowed'}`}
-                  title="除外リストを全て空にする"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="flex-1 overflow-y-auto p-2.5">
               {excludedItems.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-rose-300 py-8 border-2 border-dashed border-rose-200/50 rounded-lg m-1">
-                  <Ban size={24} className="mb-2 opacity-50" />
-                  <p className="text-[10px]">アイテムがありません</p>
-                  <p className="text-[9px] opacity-70">ここへドロップして除外</p>
+                <div className="m-1 flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 py-8 text-slate-400">
+                  <Ban size={22} className="mb-2 opacity-50" />
+                  <p className="text-xs font-medium">ここにドロップして除外</p>
                 </div>
               ) : filteredExcludedItems.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-rose-300 py-8 border-2 border-dashed border-rose-200/50 rounded-lg m-1">
-                  <Search size={24} className="mb-2 opacity-50" />
-                  <p className="text-[10px]">検索結果なし</p>
-                  <p className="text-[9px] opacity-70">キーワードを変えて再検索</p>
+                <div className="m-1 flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 py-8 text-slate-400">
+                  <Search size={22} className="mb-2 opacity-50" />
+                  <p className="text-xs font-medium">検索結果なし</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
@@ -750,7 +726,7 @@ const Sidebar = React.memo(({
                     return (
                       <div
                         key={item.id}
-                        className="group relative border border-rose-100 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex flex-col items-center transition-all"
+                        className="group relative flex cursor-grab flex-col items-center rounded-lg border border-slate-200 bg-white p-1.5 transition-all hover:border-slate-300 hover:shadow-sm active:cursor-grabbing"
                         style={{ touchAction: 'none' }}
                         draggable
                         onPointerDown={(e) => {
@@ -803,7 +779,7 @@ const Sidebar = React.memo(({
                           });
                         }}
                       >
-                        <div className="relative w-full aspect-square bg-slate-50 rounded mb-2 overflow-hidden">
+                        <div className="relative mb-1 w-full aspect-square overflow-hidden rounded-md bg-slate-50">
                           {resolvedImg ? (
                             <img src={resolvedImg} alt="excluded" className="w-full h-full object-contain" draggable={false} />
                           ) : (
@@ -814,16 +790,20 @@ const Sidebar = React.memo(({
                           <FreeLabelPreview item={item} />
                         </div>
 
-                        <div className="w-full flex justify-between items-center text-[9px]">
-                          <span className="font-bold text-rose-500 truncate max-w-[60px] font-mono">{item.code || 'No Code'}</span>
+                        <div className="flex w-full min-w-0 items-center gap-1 text-[9px]">
+                          <span className="min-w-0 flex-1 truncate font-mono font-bold text-slate-700">{item.code || item.originalName || 'コードなし'}</span>
                           {item.label && (
-                            <span className="bg-slate-100 text-slate-500 px-1 rounded truncate max-w-[50px]">{item.label}</span>
+                            <span className="max-w-[48px] truncate rounded bg-slate-100 px-1 text-slate-500">{item.label}</span>
                           )}
                         </div>
 
                         <button
-                          onClick={() => onDeleteFromExcluded(item.id)}
-                          className="absolute -top-1.5 -right-1.5 bg-white rounded-full p-1 shadow-sm text-rose-400 hover:text-rose-600 hover:bg-rose-50 border border-rose-100 opacity-0 group-hover:opacity-100 transition-all"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDeleteFromExcluded(item.id);
+                          }}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          className="absolute right-1 top-1 rounded-full border border-slate-200 bg-white/90 p-1 text-slate-400 shadow-sm transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                           title="完全に削除"
                         >
                           <X size={12} strokeWidth={3} />
@@ -840,7 +820,7 @@ const Sidebar = React.memo(({
 
       {/* Temp Shelf (Fixed at bottom) */}
       <div
-        className="relative h-64 border-t border-slate-200 bg-slate-50 flex flex-col flex-shrink-0"
+        className="relative flex h-52 flex-shrink-0 flex-col border-t border-slate-200 bg-slate-50"
         data-daiwari-dropzone-id="temp"
         onDragOverCapture={(e) => e.preventDefault()}
         onDropCapture={handleDropToTemp}
@@ -848,36 +828,35 @@ const Sidebar = React.memo(({
         onDrop={handleDropToTemp}
       >
         <div
-          className="px-4 py-2 border-b border-slate-200 flex items-center justify-between bg-white"
+          className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2"
           onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ログイン中のGoogleアカウント専用の仮置き場です。')}
           onMouseLeave={() => onHideQuickHelp?.()}
         >
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-            <div className="p-1 bg-indigo-100 text-indigo-600 rounded">
-              <ClipboardList size={14} />
-            </div>
-            <span>仮置き場（あなた専用）</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold text-slate-700">
+            <ClipboardList size={14} className="flex-shrink-0 text-indigo-500" />
+            <span className="truncate">仮置き場</span>
+            <span className="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-600">
               {activeTempItems.length}件
             </span>
           </div>
-          <span className="text-[10px] text-slate-400 font-medium">Googleアカウント別</span>
+          <span className="text-[10px] font-medium text-slate-400">自分専用</span>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="flex-1 overflow-y-auto p-2">
           {activeTempItems.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-              <p className="text-xs font-medium">ここにドロップ</p>
+            <div className="flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-400">
+              <ClipboardList size={18} className="mb-1 opacity-50" />
+              <p className="text-[11px] font-medium">ここにドロップ</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               {activeTempItems.map((item) => {
                 const resolvedImg = item.image || (item.imageId ? imageDataById?.[item.imageId] : null);
                 const hoverCodeText = (item.code || '').trim();
                 return (
                   <div
                     key={item.id}
-                    className="group relative border border-slate-200 rounded-lg p-2 bg-white hover:shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center min-h-[80px] transition-all"
+                    className="group relative flex min-h-[78px] cursor-grab flex-col items-center rounded-lg border border-slate-200 bg-white p-1.5 transition-all hover:border-slate-300 hover:shadow-sm active:cursor-grabbing"
                     title={hoverCodeText || undefined}
                     style={{ touchAction: 'none' }}
                     draggable
@@ -931,7 +910,7 @@ const Sidebar = React.memo(({
                       });
                     }}
                   >
-                    <div className="relative w-full h-16 overflow-hidden rounded">
+                    <div className="relative h-14 w-full overflow-hidden rounded-md bg-slate-50">
                       {resolvedImg ? (
                         <img src={resolvedImg} alt="temp" className="w-full h-full object-contain" draggable={false} />
                       ) : (
@@ -943,20 +922,21 @@ const Sidebar = React.memo(({
                     </div>
 
                     {item.label && (
-                      <div className="absolute top-1 left-1 bg-slate-800/80 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded shadow-sm">
+                      <div className="absolute left-1 top-1 max-w-[65%] truncate rounded bg-slate-800/75 px-1.5 py-0.5 text-[8px] text-white">
                         {item.label}
                       </div>
                     )}
-                    {hoverCodeText && (
-                      <div className="absolute left-1 right-1 bottom-1 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                        <div className="mx-auto max-w-full truncate text-[10px] font-mono font-bold text-white bg-slate-900/85 px-2 py-1 rounded shadow-md text-center">
-                          {hoverCodeText}
-                        </div>
-                      </div>
-                    )}
+                    <p className="mt-1 w-full truncate text-center font-mono text-[9px] font-bold text-slate-600">
+                      {hoverCodeText || item.originalName || '仮置き'}
+                    </p>
                     <button
-                      onClick={() => onDeleteFromTemp(item.id)}
-                      className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all border border-slate-100"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteFromTemp(item.id);
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      className="absolute right-1 top-1 rounded-full border border-slate-200 bg-white/90 p-1 text-slate-400 shadow-sm transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                      title="仮置き場から削除"
                     >
                       <X size={12} strokeWidth={3} />
                     </button>
