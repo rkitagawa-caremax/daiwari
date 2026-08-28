@@ -293,7 +293,7 @@ const Sidebar = React.memo(({
               role="tab"
               aria-selected={activeTab === tab.id}
               className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 transition-all duration-200 ${activeTab === tab.id
-                ? 'bg-white text-slate-800 shadow-sm'
+                ? 'relative z-10 bg-white text-slate-800 shadow-[0_0_14px_4px_rgba(100,116,139,0.35)]'
                 : 'text-slate-400 hover:bg-slate-200/60 hover:text-slate-600'}`}
             >
               <tab.icon size={14} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
