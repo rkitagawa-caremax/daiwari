@@ -62,7 +62,10 @@ const Sheet = React.memo(({
         margin: '0 auto',
         display: 'flex',
         flexDirection: 'column',
-        borderRadius: 'var(--m3-shape-corner-lg)',
+        // 画面表示では上側のみ角丸 (下側は四角)。PDF出力は従来どおり全周角丸。
+        borderRadius: isExportMode
+          ? 'var(--m3-shape-corner-lg)'
+          : 'var(--m3-shape-corner-lg) var(--m3-shape-corner-lg) 0 0',
         background: 'var(--m3-surface)',
         borderColor: 'var(--m3-outline-variant)'
       }}

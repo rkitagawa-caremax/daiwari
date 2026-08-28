@@ -40,7 +40,7 @@ const SheetControlPanel = React.memo(({
   return (
     <aside
       data-sheet-control-panel="true"
-      className="fixed right-3 top-1/2 z-[92] w-40 -translate-y-1/2 rounded-2xl border border-slate-200/80 bg-white/90 p-2 shadow-lg shadow-slate-300/25 backdrop-blur-md"
+      className="w-full flex-shrink-0 rounded-2xl border border-slate-200/80 bg-white/90 p-2 shadow-lg shadow-slate-300/25 backdrop-blur-md"
       aria-label="ページ編集コントロール"
     >
       <div className="mb-1.5 flex items-center gap-2 px-1.5 py-1 text-[10px] font-bold tracking-wide text-slate-400">

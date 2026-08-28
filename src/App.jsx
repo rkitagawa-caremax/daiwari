@@ -162,6 +162,7 @@ import Sheet from './features/sheets/components/Sheet';
 import SheetControlPanel from './features/sheets/components/SheetControlPanel';
 import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
+import TempShelfPanel from './features/sidebar/TempShelfPanel';
 import WorkLogDashboard from './features/workLogs/WorkLogDashboard';
 import {
   applyUndoEntryToWorkspace,
@@ -4423,6 +4424,16 @@ export default function App() {
               </button>
 
               <button
+                onClick={handleAddSheet}
+                onMouseEnter={(e) => showQuickHelp(e, '+ページ追加', '新しいページを末尾に追加します。続けてクリックすると複数追加できます。')}
+                onMouseLeave={hideQuickHelp}
+                className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full border border-indigo-600 bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition-all duration-300 active:scale-95 whitespace-nowrap"
+                title="新しいページを末尾に追加"
+              >
+                <Plus size={14} strokeWidth={3} /> ページ追加
+              </button>
+
+              <button
                 onClick={() => {
                   setIsToolsMenuOpen(false);
                   handleExportCSV();
@@ -4456,6 +4467,7 @@ export default function App() {
       </button>
 
       {(viewMode === 'list' || viewMode === 'single') && (
+        <div className="fixed right-3 top-1/2 z-[92] flex max-h-[92vh] w-40 -translate-y-1/2 flex-col gap-2">
         <SheetControlPanel
           viewMode={viewMode}
           isLocked={isLocked}
@@ -4480,6 +4492,16 @@ export default function App() {
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
         />
+        <TempShelfPanel
+          tempItems={tempItems}
+          imageDataById={imageDataById}
+          onDeleteFromTemp={handleDeleteFromTemp}
+          onApplyDragPayloadToTemp={applyDragPayloadToTempShelf}
+          onStartPointerDrag={startPointerDrag}
+          onShowQuickHelp={showQuickHelp}
+          onHideQuickHelp={hideQuickHelp}
+        />
+        </div>
       )}
 
       {(viewMode === 'list' || viewMode === 'single') && (
@@ -4528,13 +4550,10 @@ export default function App() {
           onBulkDeleteImages={handleBulkDeleteImages}
           onSearch={setSearchQuery}
           searchQuery={searchQuery}
-          tempItems={tempItems}
           excludedItems={excludedItems}
-          onDeleteFromTemp={handleDeleteFromTemp}
           onDeleteFromExcluded={handleDeleteFromExcluded}
           onExportExcludedCSV={handleExportExcludedCSV}
           onBulkDeleteExcluded={handleBulkDeleteExcluded}
-          onApplyDragPayloadToTemp={applyDragPayloadToTempShelf}
           onApplyDragPayloadToExcluded={applyDragPayloadToExcludedList}
           onApplyDragPayloadToStock={applyDragPayloadToStockList}
           onOpenAssignedImage={handleOpenAssignedImage}
@@ -4607,16 +4626,6 @@ export default function App() {
                   </button>
                 </nav>
 
-                <div className="justify-self-end">
-                  <button
-                    onClick={handleAddSheet}
-                    onMouseEnter={(e) => showQuickHelp(e, '+ページ追加', '新しいページを末尾に追加します。')}
-                    onMouseLeave={hideQuickHelp}
-                    className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap"
-                  >
-                    <Plus size={14} strokeWidth={3} /> +ページ追加
-                  </button>
-                </div>
               </div>
             )}
 
