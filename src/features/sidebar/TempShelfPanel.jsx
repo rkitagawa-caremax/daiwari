@@ -65,9 +65,9 @@ const TempShelfPanel = React.memo(({
         <span className="text-[9px] font-medium text-slate-400">自分専用</span>
       </div>
 
-      <div className="max-h-52 flex-1 overflow-y-auto p-1.5">
+      <div className="max-h-96 min-h-40 flex-1 overflow-y-auto p-1.5">
         {items.length === 0 ? (
-          <div className="flex h-14 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-400">
+          <div className="flex h-36 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-400">
             <p className="text-[10px] font-medium">ここにドロップ</p>
           </div>
         ) : (

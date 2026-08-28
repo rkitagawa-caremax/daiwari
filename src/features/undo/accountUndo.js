@@ -208,6 +208,7 @@ const getFirestoreData = (domain, item, options = {}) => {
       code: item?.code || null,
       freeLabels: getPanelFreeLabels(item),
       freeText: null,
+      ...(Array.isArray(item?.workedBy) && item.workedBy.length > 0 ? { workedBy: item.workedBy } : {}),
       createdAt
     };
   }

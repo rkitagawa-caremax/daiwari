@@ -17,6 +17,7 @@ import {
 import { FREE_LABEL_COLORS, GENRES } from '../../constants/layout';
 import ImagePreviewModal from '../../components/dialogs/ImagePreviewModal';
 import { buildSidebarImageResults } from '../../domain/sidebarImageSearch';
+import { isImageWorkedByUser } from '../../domain/images';
 import { getPanelFreeLabels } from '../../domain/panels';
 import {
   clearActiveNativeDragPayload,
@@ -93,10 +94,13 @@ const Sidebar = React.memo(({
   onOpenAssignedImage,
   onStartPointerDrag,
   imageDataById,
+  currentUserUid,
   onShowQuickHelp,
   onHideQuickHelp
 }) => {
   const [activeTab, setActiveTab] = useState('stock');
+  // ライブラリ表示: false = 自分が作業した画像のみ / true = 全アカウントの未配置画像 (ALL)
+  const [showAllImages, setShowAllImages] = useState(false);
   const [resizing, setResizing] = useState(false);
   const [statusGenreFilter, setStatusGenreFilter] = useState('all');
   const [isImageSelectionMode, setIsImageSelectionMode] = useState(false);
@@ -208,9 +212,17 @@ const Sidebar = React.memo(({
   };
 
   // 通常時は未配置画像だけを表示し、検索中はコードが一致する配置済み画像も合成する。
+  // ALL OFF の間は「自分が作業した画像」(アップロード / コマから解除) のみ表示する。
+  // workedBy 未記録の既存画像は互換のため全員に表示する。
   const filteredImages = useMemo(() => {
-    return buildSidebarImageResults({ images, sheets, excludedItems, searchQuery });
-  }, [images, sheets, excludedItems, searchQuery]);
+    return buildSidebarImageResults({
+      images,
+      sheets,
+      excludedItems,
+      searchQuery,
+      imageFilter: showAllImages ? null : (image) => isImageWorkedByUser(image, currentUserUid)
+    });
+  }, [images, sheets, excludedItems, searchQuery, showAllImages, currentUserUid]);
 
 
   // 除外リスト検索: code / label / originalName / text を case-insensitive で部分一致
@@ -259,8 +271,7 @@ const Sidebar = React.memo(({
     >
       <div className="flex items-start gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
         <div
-          className="grid min-w-0 flex-1 grid-cols-2 gap-px overflow-hidden rounded-lg border"
-          style={{ background: 'var(--m3-outline-variant)', borderColor: 'var(--m3-outline-variant)' }}
+          className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1"
           role="tablist"
           aria-label="サイドパネル表示"
         >
@@ -281,13 +292,12 @@ const Sidebar = React.memo(({
               onMouseLeave={() => onHideQuickHelp?.()}
               role="tab"
               aria-selected={activeTab === tab.id}
-              className={`flex min-h-10 min-w-0 flex-col items-center justify-center gap-0 px-2 py-1.5 transition-all duration-200 ${activeTab === tab.id ? 'relative z-10 shadow-sm' : 'opacity-40 hover:opacity-100 hover:brightness-95'}`}
-              style={activeTab === tab.id
-                ? { color: '#f8fafc', background: '#334155' }
-                : { color: 'var(--m3-on-surface-variant)', background: 'var(--m3-surface)' }}
+              className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 transition-all duration-200 ${activeTab === tab.id
+                ? 'bg-white text-slate-800 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-200/60 hover:text-slate-600'}`}
             >
-              <tab.icon size={16} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
-              <span className="truncate text-[10px] font-bold leading-tight">{tab.label}</span>
+              <tab.icon size={14} strokeWidth={activeTab === tab.id ? 2.6 : 2} />
+              <span className="truncate text-[11px] font-bold leading-none">{tab.label}</span>
             </button>
           ))}
         </div>
@@ -359,6 +369,18 @@ const Sidebar = React.memo(({
                 {searchQuery ? '検索結果' : 'ライブラリ'}
                 <span className="px-2 py-0.5 rounded-full text-xs" style={{ background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' }}>{filteredImages.length}</span>
               </span>
+              <button
+                onClick={() => setShowAllImages((prev) => !prev)}
+                onMouseEnter={(e) => onShowQuickHelp?.(e, 'ALL (全画像表示)', 'ONで全アカウントの未配置画像を表示します。OFFの間は自分がアップロード、またはコマから外した画像のみ表示します。')}
+                onMouseLeave={() => onHideQuickHelp?.()}
+                className={`ml-auto mr-1 rounded-full border px-2.5 py-1 text-[10px] font-extrabold tracking-wide transition-all ${showAllImages
+                  ? 'border-slate-700 bg-slate-700 text-white shadow-sm'
+                  : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50'}`}
+                title={showAllImages ? '全アカウントの画像を表示中 (クリックで自分の作業画像のみに)' : '自分の作業画像のみ表示中 (クリックで全画像表示)'}
+                aria-pressed={showAllImages}
+              >
+                ALL
+              </button>
               <button
                 onClick={() => {
                   setIsImageSelectionMode(!isImageSelectionMode);

@@ -74,3 +74,30 @@ test('sidebar assigned search resolves legacy panel image data without a stock r
   assert.equal(result[0].assignment.sheetId, 'legacy-sheet');
   assert.equal(result[0].assignment.sheetNumber, 1);
 });
+
+test('sidebar image filter narrows unassigned list but keeps assigned search results', () => {
+  const workImages = [
+    { id: 'mine', name: 'mine.png', data: 'data:mine', workedBy: ['user-a'] },
+    { id: 'others', name: 'others.png', data: 'data:others', workedBy: ['user-b'] },
+    { id: 'legacy', name: 'legacy.png', data: 'data:legacy-2' }
+  ];
+  const onlyMine = (image) => !image.workedBy || image.workedBy.includes('user-a');
+
+  const filtered = buildSidebarImageResults({ images: workImages, imageFilter: onlyMine });
+  assert.deepEqual(filtered.map((image) => image.id), ['mine', 'legacy']);
+
+  // フィルタなし (ALL) は従来どおり全件
+  const all = buildSidebarImageResults({ images: workImages });
+  assert.deepEqual(all.map((image) => image.id), ['mine', 'others', 'legacy']);
+
+  // 検索時、配置済みナビゲーション結果はフィルタの影響を受けない
+  const searched = buildSidebarImageResults({
+    images: [...images, ...workImages],
+    sheets,
+    excludedItems,
+    searchQuery: 'e1931',
+    imageFilter: onlyMine
+  });
+  assert.equal(searched.length, 1);
+  assert.equal(searched[0].id, 'assigned-image');
+});

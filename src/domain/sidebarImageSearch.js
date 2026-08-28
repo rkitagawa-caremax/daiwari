@@ -32,7 +32,10 @@ export const buildSidebarImageResults = ({
   images = [],
   sheets = [],
   excludedItems = [],
-  searchQuery = ''
+  searchQuery = '',
+  // 未配置リストにのみ適用する表示フィルタ (null で無効)。
+  // 検索時の配置済みナビゲーション結果には適用しない。
+  imageFilter = null
 } = {}) => {
   const safeImages = Array.isArray(images) ? images.filter(Boolean) : [];
   const safeSheets = Array.isArray(sheets) ? sheets.filter(Boolean) : [];
@@ -103,7 +106,9 @@ export const buildSidebarImageResults = ({
   });
 
   let availableImages = safeImages.filter((image) => (
-    !hasImageKey(usedImageKeys, image) && !hasImageKey(excludedImageKeys, image)
+    !hasImageKey(usedImageKeys, image)
+    && !hasImageKey(excludedImageKeys, image)
+    && (typeof imageFilter !== 'function' || imageFilter(image))
   ));
 
   if (query) {

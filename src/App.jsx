@@ -28,7 +28,8 @@ import {
   getDocs,
   runTransaction,
   deleteField,
-  increment
+  increment,
+  arrayUnion
 } from 'firebase/firestore';
 import {
   Plus,
@@ -2300,15 +2301,22 @@ export default function App() {
       freeLabels: getPanelFreeLabels(panel),
       freeText: null
     };
+    // コマから外す操作も「自分が作業した画像」として記録する
+    const mergedWorkedBy = undoAccountId
+      ? Array.from(new Set([...(stockImage?.workedBy || []), undoAccountId]))
+      : (stockImage?.workedBy || null);
 
     try {
       let returnedImage;
       if (stockImage) {
-        returnedImage = { ...stockImage, ...libraryMetadata };
+        returnedImage = { ...stockImage, ...libraryMetadata, workedBy: mergedWorkedBy };
         if (!USE_LOCAL_STORAGE) {
           if (!imagesCollection) return;
           await runCloudWrite(
-            () => updateDoc(doc(imagesCollection, stockImage.id), libraryMetadata),
+            () => updateDoc(doc(imagesCollection, stockImage.id), {
+              ...libraryMetadata,
+              ...(undoAccountId ? { workedBy: arrayUnion(undoAccountId) } : {})
+            }),
             { key: 'images' }
           );
         }
@@ -2319,6 +2327,7 @@ export default function App() {
           name: fallbackName,
           data: panelImage,
           ...libraryMetadata,
+          workedBy: undoAccountId ? [undoAccountId] : null,
           createdAt: { seconds: Date.now() / 1000 }
         };
 
@@ -2328,6 +2337,7 @@ export default function App() {
             name: fallbackName,
             data: panelImage,
             ...libraryMetadata,
+            ...(undoAccountId ? { workedBy: [undoAccountId] } : {}),
             createdAt: serverTimestamp()
           });
           returnedImage = { ...returnedImage, id: imageRef.id };
@@ -2840,6 +2850,7 @@ export default function App() {
           id: idbHelper.generateId(),
           name: file.name,
           data: compressedDataUrl,
+          workedBy: undoAccountId ? [undoAccountId] : null,
           createdAt: { seconds: Date.now() / 1000 }
         };
 
@@ -2849,6 +2860,7 @@ export default function App() {
           const imageDocRef = await addDoc(imagesCollection, {
             name: file.name,
             data: compressedDataUrl,
+            ...(undoAccountId ? { workedBy: [undoAccountId] } : {}),
             createdAt: serverTimestamp()
           });
           newImages.push({ ...newImage, id: imageDocRef.id });
@@ -3230,6 +3242,7 @@ export default function App() {
                     id: recoveredId,
                     name: p.code ? `${p.code}.png` : `recovered-${recoveredId}.png`,
                     data: resolvedImage,
+                    workedBy: undoAccountId ? [undoAccountId] : null,
                     createdAt: { seconds: Date.now() / 1000 }
                   });
                 }
@@ -3303,6 +3316,7 @@ export default function App() {
             batch.set(ref, {
               name: img.name,
               data: img.data,
+              ...(Array.isArray(img.workedBy) && img.workedBy.length > 0 ? { workedBy: img.workedBy } : {}),
               createdAt: serverTimestamp()
             });
           });
@@ -4559,6 +4573,7 @@ export default function App() {
           onOpenAssignedImage={handleOpenAssignedImage}
           onStartPointerDrag={startPointerDrag}
           imageDataById={imageDataById}
+          currentUserUid={undoAccountId}
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
         />

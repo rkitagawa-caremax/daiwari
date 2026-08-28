@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  isImageWorkedByUser,
   isSameStockImageList,
   normalizeStockImageEntry,
   normalizeStockImages
@@ -48,4 +49,28 @@ test('stock image list comparison ignores timestamps but detects identity change
   assert.equal(isSameStockImageList(left, [{ ...left[0], createdAt: { seconds: 2 } }]), true);
   assert.equal(isSameStockImageList(left, changed), false);
   assert.equal(isSameStockImageList(left, changedLabel), false);
+});
+
+test('workedBy is preserved by normalization and compared as identity', () => {
+  const entry = normalizeStockImageEntry({ id: 'image-1', data: 'data:one', workedBy: ['user-a'] });
+  assert.deepEqual(entry.workedBy, ['user-a']);
+  // 未記録・空配列は null に正規化される
+  assert.equal(normalizeStockImageEntry({ id: 'image-2', data: 'data:two' }).workedBy, null);
+  assert.equal(normalizeStockImageEntry({ id: 'image-3', data: 'data:three', workedBy: [] }).workedBy, null);
+
+  const base = [{ id: 'image-1', data: 'data:one', workedBy: ['user-a'] }];
+  assert.equal(isSameStockImageList(base, [{ ...base[0] }]), true);
+  assert.equal(isSameStockImageList(base, [{ ...base[0], workedBy: ['user-a', 'user-b'] }]), false);
+});
+
+test('worked-by filter shows own and legacy images only', () => {
+  // 未記録 (既存データ) は互換のため全員に表示
+  assert.equal(isImageWorkedByUser({ id: 'legacy' }, 'user-a'), true);
+  assert.equal(isImageWorkedByUser({ id: 'legacy', workedBy: [] }, 'user-a'), true);
+  // 記録済みは作業者のみ
+  assert.equal(isImageWorkedByUser({ workedBy: ['user-a'] }, 'user-a'), true);
+  assert.equal(isImageWorkedByUser({ workedBy: ['user-b'] }, 'user-a'), false);
+  assert.equal(isImageWorkedByUser({ workedBy: ['user-b', 'user-a'] }, 'user-a'), true);
+  // ユーザー未確定時は隠さない
+  assert.equal(isImageWorkedByUser({ workedBy: ['user-b'] }, null), true);
 });

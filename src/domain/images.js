@@ -21,6 +21,8 @@ export const normalizeStockImageEntry = (item, imageDataById = {}) => {
     code: item.code || null,
     freeLabels: getPanelFreeLabels(item),
     freeText: null,
+    // 作業したアカウント (アップロード / コマから解除) の UID 一覧。未記録の既存画像は null。
+    workedBy: Array.isArray(item.workedBy) && item.workedBy.length > 0 ? [...item.workedBy] : null,
     createdAt: item.createdAt || { seconds: Date.now() / 1000 }
   };
 };
@@ -52,6 +54,15 @@ export const isSameStockImageList = (leftItems = [], rightItems = []) => {
     if ((left?.name || null) !== (right?.name || null)) return false;
     if ((left?.code || null) !== (right?.code || null)) return false;
     if (JSON.stringify(getPanelFreeLabels(left)) !== JSON.stringify(getPanelFreeLabels(right))) return false;
+    if (JSON.stringify(left?.workedBy || null) !== JSON.stringify(right?.workedBy || null)) return false;
   }
   return true;
+};
+
+// 作業者フィルタ: workedBy 未記録の既存画像は全員に表示し、記録済みは本人のみに表示する。
+export const isImageWorkedByUser = (image, userId) => {
+  const workedBy = Array.isArray(image?.workedBy) ? image.workedBy : null;
+  if (!workedBy || workedBy.length === 0) return true;
+  if (!userId) return true;
+  return workedBy.includes(userId);
 };
