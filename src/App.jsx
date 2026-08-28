@@ -42,9 +42,6 @@ import {
   ZoomOut,
   Layout,
   Check,
-  Merge,
-  Split,
-  Link as LinkIcon,
   FileSpreadsheet,
   FileDown,
   Maximize,
@@ -158,6 +155,7 @@ import AuthGate from './features/auth/AuthGate';
 import SalesCodeLookupModal from './features/sales/SalesCodeLookupModal';
 import SalesPopup from './features/sales/SalesPopup';
 import Sheet from './features/sheets/components/Sheet';
+import SheetControlPanel from './features/sheets/components/SheetControlPanel';
 import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
 import WorkLogDashboard from './features/workLogs/WorkLogDashboard';
@@ -4111,42 +4109,6 @@ export default function App() {
             </div>
           )}
 
-          {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
-            <div className={`flex items-center gap-1 ml-2 rounded-xl p-1 border ${isSalesMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-              <button
-                onClick={toggleMergeMode}
-                onMouseEnter={(e) => showQuickHelp(e, 'コマ結合', 'コマの結合/分離モードを切り替えます。複数コマを選択して結合できます。')}
-                onMouseLeave={hideQuickHelp}
-                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap ${isMergeMode ? 'bg-indigo-100 text-indigo-700 shadow-inner' : (isSalesMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-white hover:shadow-sm')}`}
-                title="コマ結合・分離モードの切り替え"
-              >
-                <LinkIcon size={16} /> <span className="hidden lg:inline">コマ結合</span>
-              </button>
-
-              {isMergeMode && (
-                <>
-                  <div className="w-px h-6 bg-slate-300 mx-2 opacity-50"></div>
-                  <button
-                    onClick={handleMerge}
-                    disabled={!canMerge}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all font-medium whitespace-nowrap ${canMerge ? 'bg-white shadow text-emerald-600 hover:text-emerald-700 hover:shadow-md' : 'text-slate-400 cursor-not-allowed'}`}
-                    title="選択したコマを結合（長方形のみ）"
-                  >
-                    <Merge size={16} /> 結合
-                  </button>
-                  <button
-                    onClick={handleSplit}
-                    disabled={!canSplit}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all font-medium whitespace-nowrap ${canSplit ? 'bg-white shadow text-amber-600 hover:text-amber-700 hover:shadow-md' : 'text-slate-400 cursor-not-allowed'}`}
-                    title="選択したコマを分離"
-                  >
-                    <Split size={16} /> 分離
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
           {/* 実績モード Toggle - 詳細表示時のみ */}
           {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
             <button
@@ -4223,6 +4185,31 @@ export default function App() {
         {isTopBarsVisible ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
       </button>
 
+      <SheetControlPanel
+        viewMode={viewMode}
+        isLocked={isLocked}
+        isPageSelectionMode={isPageSelectionMode}
+        isMergeMode={isMergeMode}
+        canMerge={canMerge}
+        canSplit={canSplit}
+        isLabelSelectionMode={isLabelSelectionMode}
+        activeSheetLabelCount={activeSheetLabelCount}
+        isPanelArrangeMode={!!panelArrangeSession}
+        onToggleMergeMode={toggleMergeMode}
+        onMerge={handleMerge}
+        onSplit={handleSplit}
+        onToggleLabelMode={() => {
+          if (panelArrangeSession) {
+            showAlert('ホバリング中はラベル追加モードへ切り替えできません。');
+            return;
+          }
+          setIsLabelSelectionMode((current) => !current);
+        }}
+        onDeleteLabels={handleBulkDeletePageLabels}
+        onShowQuickHelp={showQuickHelp}
+        onHideQuickHelp={hideQuickHelp}
+      />
+
       {(viewMode === 'list' || viewMode === 'single') && (
         <div
           className="fixed bottom-4 right-4 z-[90] flex items-center gap-0.5 rounded-xl border border-slate-200/80 bg-white/80 p-1 text-slate-500 shadow-sm backdrop-blur opacity-65 transition-all duration-200 hover:bg-white/95 hover:opacity-100 hover:shadow-md focus-within:opacity-100"
@@ -4298,102 +4285,66 @@ export default function App() {
           >
             {/* Header Controls inside content area */}
             {isTopBarsVisible && (
-              <div className={`flex justify-between items-center gap-2 flex-wrap ${viewMode === 'single'
-                ? `sticky top-0 z-40 rounded-xl border px-2 py-1.5 backdrop-blur ${isSalesMode
-                  ? 'bg-slate-900/85 border-slate-700 shadow-lg shadow-slate-900/20'
-                  : 'bg-white/90 border-slate-200 shadow-lg shadow-slate-200/70'}`
-                : ''
-                }`}>
-              <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg shadow-sm border border-slate-100">
-                <span className="text-xs font-bold text-slate-600">ジャンル:</span>
-                <select
-                  value={genreFilter}
-                  onChange={(e) => setGenreFilter(e.target.value)}
-                  className="bg-slate-50 border-none rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 font-medium cursor-pointer hover:bg-slate-100 transition-colors"
-                >
-                  <option value="all">全て表示</option>
-                  {GENRES.map(g => (
-                    <option key={g.id} value={g.id}>{g.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Page Nav */}
-              <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg shadow-sm border ${isSalesMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-                <button
-                  onClick={() => handleNavigatePage('prev')}
-                  disabled={viewMode !== 'single' || currentIndex <= 0}
-                  className="p-1.5 hover:bg-slate-100 rounded-md text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <div className="flex flex-col items-center min-w-[5rem]">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">Page</span>
-                  <span className="font-mono text-base font-bold leading-none flex items-baseline">
-                    {viewMode === 'single' && activeSheetId ? currentIndex + 1 : '-'}
-                    <span className="text-slate-400 text-xs mx-1 font-normal">/</span>
-                    <span className="text-sm text-slate-500 font-medium">{currentList.length}</span>
-                  </span>
+              <div
+                data-display-context-controls="true"
+                className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-1 py-1 ${viewMode === 'single'
+                  ? 'sticky top-0 z-40 backdrop-blur-sm'
+                  : ''}`}
+              >
+                <div data-genre-filter-control="true" className="flex min-w-0 items-center gap-1.5 justify-self-start text-slate-400">
+                  <span className="text-[10px] font-medium tracking-wide">ジャンル</span>
+                  <select
+                    value={genreFilter}
+                    onChange={(e) => setGenreFilter(e.target.value)}
+                    className="max-w-36 cursor-pointer border-none bg-transparent py-1 pr-1 text-xs font-medium text-slate-500 outline-none transition-colors hover:text-slate-700 focus:text-indigo-600"
+                    aria-label="表示ジャンル"
+                  >
+                    <option value="all">全て表示</option>
+                    {GENRES.map(g => (
+                      <option key={g.id} value={g.id}>{g.label}</option>
+                    ))}
+                  </select>
                 </div>
-                <button
-                  onClick={() => handleNavigatePage('next')}
-                  disabled={viewMode !== 'single' || currentIndex === -1 || currentIndex >= currentList.length - 1}
-                  className="p-1.5 hover:bg-slate-100 rounded-md text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
 
-              {/* Header Controls inside Detail Area */}
-              <div className="flex items-center gap-2 flex-wrap justify-end">
-                {viewMode === 'single' && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={handleBulkDeletePageLabels}
-                      onMouseEnter={(e) => showQuickHelp(e, 'ラベル一括削除', 'このページの自由ラベルをまとめて削除します。確認後に実行されます。')}
-                      onMouseLeave={hideQuickHelp}
-                      disabled={activeSheetLabelCount === 0}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${activeSheetLabelCount > 0
-                        ? 'bg-rose-600 text-white hover:bg-rose-700'
-                        : 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                        }`}
-                    >
-                      <Trash2 size={14} strokeWidth={3} />
-                      ラベル一括削除
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        if (panelArrangeSession) {
-                          showAlert('ホバリング中はラベル追加モードへ切り替えできません。');
-                          return;
-                        }
-                        setIsLabelSelectionMode(!isLabelSelectionMode);
-                      }}
-                      onMouseEnter={(e) => showQuickHelp(e, 'ラベル追加', '自由ラベル配置モードをON/OFFします。ON中はコマ内クリックでラベルを配置できます。')}
-                      onMouseLeave={hideQuickHelp}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${isLabelSelectionMode
-                        ? 'bg-emerald-600 text-white shadow-emerald-200 ring-2 ring-emerald-500/30'
-                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                        }`}
-                    >
-                      <Tag size={14} strokeWidth={3} className={isLabelSelectionMode ? 'animate-pulse' : ''} />
-                      {isLabelSelectionMode ? '配置中...' : 'ラベル追加'}
-                    </button>
+                <nav data-page-navigation="true" className="flex items-center justify-center gap-1 text-slate-400" aria-label="ページ移動">
+                  <button
+                    type="button"
+                    onClick={() => handleNavigatePage('prev')}
+                    disabled={viewMode !== 'single' || currentIndex <= 0}
+                    className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-200/50 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-20"
+                    aria-label="前のページ"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <div className="flex min-w-[6.25rem] items-baseline justify-center gap-1.5 whitespace-nowrap">
+                    <span className="text-[9px] font-medium uppercase tracking-wider text-slate-400">Page</span>
+                    <span className={`font-mono text-xs font-semibold ${isSalesMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                      {viewMode === 'single' && activeSheetId ? currentIndex + 1 : '-'}
+                      <span className="mx-1 font-normal text-slate-300">/</span>
+                      <span className="font-medium text-slate-400">{currentList.length}</span>
+                    </span>
                   </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => handleNavigatePage('next')}
+                    disabled={viewMode !== 'single' || currentIndex === -1 || currentIndex >= currentList.length - 1}
+                    className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-200/50 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-20"
+                    aria-label="次のページ"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </nav>
 
-                {/* Add Page Button */}
-                <button
-                  onClick={handleAddSheet}
-                  onMouseEnter={(e) => showQuickHelp(e, '+ページ追加', '新しいページを末尾に追加します。')}
-                  onMouseLeave={hideQuickHelp}
-                  className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap"
-                >
-                  <Plus size={14} strokeWidth={3} /> +ページ追加
-                </button>
-              </div>
-
+                <div className="justify-self-end">
+                  <button
+                    onClick={handleAddSheet}
+                    onMouseEnter={(e) => showQuickHelp(e, '+ページ追加', '新しいページを末尾に追加します。')}
+                    onMouseLeave={hideQuickHelp}
+                    className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap"
+                  >
+                    <Plus size={14} strokeWidth={3} /> +ページ追加
+                  </button>
+                </div>
               </div>
             )}
 
@@ -4562,7 +4513,7 @@ export default function App() {
       )}
 
       {panelArrangeModeSheetId && (
-        <div className="fixed right-4 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
+        <div className="fixed right-48 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
               <ArrowLeftRight size={17} />
