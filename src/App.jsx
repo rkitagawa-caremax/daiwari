@@ -139,6 +139,7 @@ import {
 import { parseCSVLine, readFileAutoEncoding } from './lib/csv';
 import { createPdfRenderer, waitForPdfExportSurface } from './lib/pdfExport';
 import { useWorkActivityTracker } from './hooks/useWorkActivityTracker';
+import { useWorkspaceUndoState } from './hooks/useWorkspaceUndoState';
 import {
   buildFirestoreActionErrorMessage,
   getFirestoreErrorCode,
@@ -159,6 +160,12 @@ import SheetControlPanel from './features/sheets/components/SheetControlPanel';
 import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
 import WorkLogDashboard from './features/workLogs/WorkLogDashboard';
+import {
+  applyUndoEntryToWorkspace,
+  countUndoEntryChanges,
+  restoreCloudUndoEntry,
+  undoEntryHasClientConflict
+} from './features/undo/accountUndo';
 
 // --- Firebase Configuration / Local Storage Mode ---
 // Firebase設定 (daiwari-kun)
@@ -258,10 +265,26 @@ export default function App() {
   }, [appId]);
 
   // Data State
-  const [sheets, setSheets] = useState([]);
-  const [images, setImages] = useState([]);
-  const [tempItems, setTempItems] = useState([]);
-  const [excludedItems, setExcludedItems] = useState([]);
+  const undoAccountId = USE_LOCAL_STORAGE ? 'local_user' : (firebaseUser?.uid || null);
+  const {
+    excludedItems,
+    getLatestUndoEntry,
+    images,
+    isUndoApplyingRef,
+    isUndoBusyRef,
+    removeUndoEntry,
+    setExcludedItems,
+    setImages,
+    setSheets,
+    setTempItems,
+    sheets,
+    syncExcludedItems,
+    syncImages,
+    syncSheets,
+    syncTempItems,
+    tempItems,
+    workspaceStateRef
+  } = useWorkspaceUndoState({ accountId: undoAccountId });
   const [salesData, setSalesData] = useState(null); // { code: [{name, spec, count}] }
   const [salesDataLastUpdated, setSalesDataLastUpdated] = useState(null);
 
@@ -301,6 +324,8 @@ export default function App() {
   const [isPanelArrangeFinalizing, setIsPanelArrangeFinalizing] = useState(false);
   const panelArrangeModeSheetId = panelArrangeSession?.sheetId || null;
   const [assignedImagePreview, setAssignedImagePreview] = useState(null);
+  const [undoNotice, setUndoNotice] = useState(null);
+  const undoNoticeTimerRef = useRef(null);
   const salesModeLongPressTimerRef = useRef(null);
   const salesModeLongPressTriggeredRef = useRef(false);
   const pointerDragOverlayRef = useRef(null);
@@ -322,6 +347,10 @@ export default function App() {
   const [isLocked, setIsLocked] = useState(false);
   const isLockedRef = useRef(false);
   useEffect(() => { isLockedRef.current = isLocked; }, [isLocked]);
+
+  useEffect(() => () => {
+    if (undoNoticeTimerRef.current) clearTimeout(undoNoticeTimerRef.current);
+  }, []);
 
   const lockHoldTimerRef = useRef(null);
   const lockHoldFiredRef = useRef(false);
@@ -584,10 +613,10 @@ export default function App() {
           });
           const normalizedSavedImages = normalizeStockImages(loadedImages, loadedImageDataById);
 
-          setSheets(savedSheets || []);
-          setImages(normalizedSavedImages);
-          setTempItems(savedTempItems || []);
-          setExcludedItems(savedExcludedItems || []);
+          syncSheets(savedSheets || []);
+          syncImages(normalizedSavedImages);
+          syncTempItems(savedTempItems || []);
+          syncExcludedItems(savedExcludedItems || []);
           if (savedSalesData) setSalesData(savedSalesData);
 
           if (!isSameStockImageList(loadedImages, normalizedSavedImages)) {
@@ -667,7 +696,7 @@ export default function App() {
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [syncExcludedItems, syncImages, syncSheets, syncTempItems]);
 
   const handleGoogleSignIn = useCallback(async () => {
     if (USE_LOCAL_STORAGE || !auth) return;
@@ -704,17 +733,17 @@ export default function App() {
       await signOut(auth);
       setIsAuthenticated(false);
       setFirebaseUser(null);
-      setSheets([]);
-      setImages([]);
-      setTempItems([]);
-      setExcludedItems([]);
+      syncSheets([]);
+      syncImages([]);
+      syncTempItems([]);
+      syncExcludedItems([]);
       setSalesData(null);
       setIsDataLoaded(false);
       setAuthErrorMessage('');
     } catch (error) {
       console.error('Logout failed:', error);
     }
-  }, []);
+  }, [syncExcludedItems, syncImages, syncSheets, syncTempItems]);
 
   // --- Data Sync ---
   // 自動保存 (Auto-Save) - IndexedDB with Debounce
@@ -823,9 +852,9 @@ export default function App() {
 
     const normalizedImages = normalizeStockImages(images, imageDataMap);
     if (!isSameStockImageList(images, normalizedImages)) {
-      setImages(normalizedImages);
+      syncImages(normalizedImages);
     }
-  }, [images, isDataLoaded]);
+  }, [images, isDataLoaded, syncImages]);
 
   useEffect(() => {
     // 詳細単一表示以外ではラベル配置モードを自動解除
@@ -868,7 +897,7 @@ export default function App() {
         if (isCancelled) return;
         if (Array.isArray(cachedBundle?.items)) {
           const cachedImages = normalizeStockImages(cachedBundle.items);
-          setImages((prev) => (isSameStockImageList(prev, cachedImages) ? prev : cachedImages));
+          syncImages((prev) => (isSameStockImageList(prev, cachedImages) ? prev : cachedImages));
         }
       } catch (error) {
         console.error("Cloud image cache load failed:", error);
@@ -888,7 +917,7 @@ export default function App() {
           }
         });
         const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
-        setImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
+        syncImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
         await idbHelper.setItem(CLOUD_IMAGES_CACHE_KEY, {
           items: normalizedLoadedImages,
           fetchedAt: Date.now()
@@ -950,7 +979,10 @@ export default function App() {
         };
       });
       loadedSheets.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-      setSheets((prev) => (isSameSheetList(prev, loadedSheets) ? prev : loadedSheets));
+      const updateSheets = snapshot.metadata.hasPendingWrites && !isUndoApplyingRef.current
+        ? setSheets
+        : syncSheets;
+      updateSheets((prev) => (isSameSheetList(prev, loadedSheets) ? prev : loadedSheets));
     }, (err) => console.error("Sheet Sync Error", err));
 
     void loadImagesWithCache();
@@ -958,7 +990,10 @@ export default function App() {
     const unsubscribeExcluded = onSnapshot(excludedItemsCollection, (snapshot) => {
       const loadedExcluded = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       loadedExcluded.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setExcludedItems((prev) => (isSameTransferItemList(prev, loadedExcluded) ? prev : loadedExcluded));
+      const updateExcludedItems = snapshot.metadata.hasPendingWrites && !isUndoApplyingRef.current
+        ? setExcludedItems
+        : syncExcludedItems;
+      updateExcludedItems((prev) => (isSameTransferItemList(prev, loadedExcluded) ? prev : loadedExcluded));
     }, (err) => console.error("Excluded Items Sync Error", err));
 
     void loadSalesWithCache();
@@ -977,7 +1012,19 @@ export default function App() {
       unsubscribeExcluded();
       unsubscribeMeta();
     };
-  }, [isAuthenticated, sheetsCollection, imagesCollection, excludedItemsCollection, settingsCollection, salesChunksCollection]);
+  }, [
+    excludedItemsCollection,
+    imagesCollection,
+    isAuthenticated,
+    salesChunksCollection,
+    setExcludedItems,
+    setSheets,
+    settingsCollection,
+    sheetsCollection,
+    syncExcludedItems,
+    syncImages,
+    syncSheets
+  ]);
 
   useEffect(() => {
     if (USE_LOCAL_STORAGE) return;
@@ -989,7 +1036,10 @@ export default function App() {
         loadedTemps = loadedTemps.filter((item) => item?.ownerUid === tempShelfUserId);
       }
       loadedTemps.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setTempItems((prev) => (isSameTransferItemList(prev, loadedTemps) ? prev : loadedTemps));
+      const updateTempItems = snapshot.metadata.hasPendingWrites && !isUndoApplyingRef.current
+        ? setTempItems
+        : syncTempItems;
+      updateTempItems((prev) => (isSameTransferItemList(prev, loadedTemps) ? prev : loadedTemps));
     }, (err) => {
       console.error("Temp Shelf Sync Error", err);
       const code = getFirestoreErrorCode(err);
@@ -1002,7 +1052,15 @@ export default function App() {
     return () => {
       unsubscribeTemp();
     };
-  }, [isAuthenticated, tempShelfCollection, tempShelfSyncSource, useLegacyTempShelf, tempShelfUserId]);
+  }, [
+    isAuthenticated,
+    setTempItems,
+    syncTempItems,
+    tempShelfCollection,
+    tempShelfSyncSource,
+    tempShelfUserId,
+    useLegacyTempShelf
+  ]);
 
   const requestConfirm = (message, action) => {
     setConfirmDialog({
@@ -1018,6 +1076,15 @@ export default function App() {
   const showAlert = (message, title = "通知", closeOnBackdrop = false) => {
     setAlertDialog({ isOpen: true, message, title, closeOnBackdrop });
   };
+
+  const showUndoNotice = useCallback((message, tone = 'success') => {
+    if (undoNoticeTimerRef.current) clearTimeout(undoNoticeTimerRef.current);
+    setUndoNotice({ message, tone });
+    undoNoticeTimerRef.current = setTimeout(() => {
+      setUndoNotice(null);
+      undoNoticeTimerRef.current = null;
+    }, 2600);
+  }, []);
 
   const cloudWriteQueuesRef = useRef(new Map());
 
@@ -1044,6 +1111,119 @@ export default function App() {
   const runCloudTransaction = useCallback((transactionWork, options = {}) => {
     return runCloudWrite(() => runTransaction(db, transactionWork), options);
   }, [runCloudWrite]);
+
+  const handleUndoLatest = useCallback(async () => {
+    const accountId = undoAccountId;
+    if (!accountId || isUndoBusyRef.current) return;
+    if (isLockedRef.current) {
+      showUndoNotice('ロック中は操作を戻せません。', 'warning');
+      return;
+    }
+    if (isProcessing || panelArrangeSession) {
+      showUndoNotice('処理またはホバリングを完了してから操作を戻してください。', 'warning');
+      return;
+    }
+
+    const entry = getLatestUndoEntry(accountId);
+    if (!entry) {
+      showUndoNotice('このアカウントで戻せる操作はありません。', 'neutral');
+      return;
+    }
+
+    if (undoEntryHasClientConflict(entry, workspaceStateRef.current)) {
+      removeUndoEntry(accountId, entry.id);
+      showUndoNotice('別の更新が重なったため、安全のためこの操作は戻しませんでした。', 'warning');
+      return;
+    }
+
+    if (countUndoEntryChanges(entry) > 450) {
+      removeUndoEntry(accountId, entry.id);
+      showUndoNotice('一度に戻すデータ量が大きいため、この操作は戻せません。', 'warning');
+      return;
+    }
+
+    isUndoBusyRef.current = true;
+    isUndoApplyingRef.current = true;
+    try {
+      if (!USE_LOCAL_STORAGE) {
+        await restoreCloudUndoEntry({
+          accountId,
+          collections: {
+            sheets: sheetsCollection,
+            images: imagesCollection,
+            tempItems: tempShelfCollection,
+            excludedItems: excludedItemsCollection
+          },
+          entry,
+          ownerUid: tempShelfUserId,
+          runCloudTransaction,
+          useLegacyTempShelf
+        });
+      }
+
+      const restoredWorkspace = applyUndoEntryToWorkspace(entry, workspaceStateRef.current);
+      syncSheets(restoredWorkspace.sheets);
+      syncImages(restoredWorkspace.images);
+      syncTempItems(restoredWorkspace.tempItems);
+      syncExcludedItems(restoredWorkspace.excludedItems);
+      removeUndoEntry(accountId, entry.id);
+      setSelection({ sheetId: null, indices: [] });
+      setIsMergeMode(false);
+      setIsLabelSelectionMode(false);
+      showUndoNotice('直前の編集操作を戻しました。');
+    } catch (error) {
+      console.error('Undo failed:', error);
+      if (error?.code === 'undo-conflict') {
+        removeUndoEntry(accountId, entry.id);
+        showUndoNotice('別のアカウントによる更新を検出したため、操作は戻しませんでした。', 'warning');
+      } else {
+        showUndoNotice('操作を戻せませんでした。通信状態を確認して再度お試しください。', 'warning');
+      }
+    } finally {
+      isUndoApplyingRef.current = false;
+      isUndoBusyRef.current = false;
+    }
+  }, [
+    excludedItemsCollection,
+    getLatestUndoEntry,
+    imagesCollection,
+    isProcessing,
+    isUndoApplyingRef,
+    isUndoBusyRef,
+    panelArrangeSession,
+    removeUndoEntry,
+    runCloudTransaction,
+    sheetsCollection,
+    showUndoNotice,
+    syncExcludedItems,
+    syncImages,
+    syncSheets,
+    syncTempItems,
+    tempShelfCollection,
+    tempShelfUserId,
+    undoAccountId,
+    useLegacyTempShelf,
+    workspaceStateRef
+  ]);
+
+  useEffect(() => {
+    const handleUndoShortcut = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      if (String(event.key || '').toLowerCase() !== 'z') return;
+      const target = event.target;
+      const isEditable = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || target?.isContentEditable;
+      if (isEditable) return;
+
+      event.preventDefault();
+      void handleUndoLatest();
+    };
+
+    window.addEventListener('keydown', handleUndoShortcut);
+    return () => window.removeEventListener('keydown', handleUndoShortcut);
+  }, [handleUndoLatest]);
 
   const flushWorkLogDelta = useCallback(async (delta) => {
     if (!delta?.user?.uid || !delta.dateKey) return;
@@ -1467,7 +1647,7 @@ export default function App() {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
     }
-  }, [canMerge, panelArrangeSession, selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
+  }, [canMerge, panelArrangeSession, selection, setSheets, sheets, sheetsCollection, runCloudTransaction, showAlert]);
 
   const handleSplit = useCallback(async () => {
     if (isLockedRef.current) return;
@@ -1553,7 +1733,7 @@ export default function App() {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
     }
-  }, [selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
+  }, [selection, setSheets, sheets, sheetsCollection, runCloudTransaction, showAlert]);
 
   // --- Core Actions ---
 
@@ -1592,7 +1772,7 @@ export default function App() {
       console.error("Error adding sheet: ", e);
       showAlert("ページの追加に失敗しました。");
     }
-  }, [isAuthenticated, sheets, sheetsCollection]);
+  }, [isAuthenticated, setSheets, sheets, sheetsCollection]);
 
   const handleUpdatePanel = useCallback(async (sheetId, panelIndex, newData) => {
     if (isLockedRef.current) return;
@@ -1635,7 +1815,7 @@ export default function App() {
       console.error("Panel update transaction failed:", error);
       showAlert(buildFirestoreActionErrorMessage("コマの更新に失敗しました。少し待ってから再実行してください。", error));
     }
-  }, [sheets, sheetsCollection, showAlert, runCloudWrite]);
+  }, [setSheets, sheets, sheetsCollection, showAlert, runCloudWrite]);
 
   // --- Temp & Excluded Logic (Restored) ---
 
@@ -1813,7 +1993,7 @@ export default function App() {
       }
       return false;
     }
-  }, [tempShelfCollection, excludedItemsCollection, runCloudWrite, showAlert, useLegacyTempShelf, legacyTempShelfCollection, tempShelfUserId, buildTempShelfPayload]);
+  }, [tempShelfCollection, excludedItemsCollection, runCloudWrite, showAlert, useLegacyTempShelf, legacyTempShelfCollection, tempShelfUserId, buildTempShelfPayload, setExcludedItems, setTempItems]);
 
   const handleDeleteFromTemp = async (id) => {
     if (isLockedRef.current) return;
@@ -2017,7 +2197,7 @@ export default function App() {
       }
       console.error("Delete matched temp items failed:", error);
     });
-  }, [tempItems, tempShelfCollection, runCloudWrite, useLegacyTempShelf]);
+  }, [setTempItems, tempItems, tempShelfCollection, runCloudWrite, useLegacyTempShelf]);
 
   const handlePanelUpdateWithCheck = (sheetId, panelIndex, newData) => {
     if (isLockedRef.current) return;
@@ -2401,6 +2581,7 @@ export default function App() {
     isPanelArrangeFinalizing,
     panelArrangeSession,
     runCloudTransaction,
+    setSheets,
     sheets,
     sheetsCollection,
     showAlert
@@ -3803,7 +3984,7 @@ export default function App() {
         }
       }
     );
-  }, [viewMode, activeSheetId, sheets, activeSheetLabelCount, sheetsCollection, requestConfirm, showAlert, runCloudTransaction]);
+  }, [viewMode, activeSheetId, setSheets, sheets, activeSheetLabelCount, sheetsCollection, requestConfirm, showAlert, runCloudTransaction]);
 
   const handleLogoSecretTap = useCallback(() => {
     logoTapCountRef.current += 1;
@@ -4185,30 +4366,32 @@ export default function App() {
         {isTopBarsVisible ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
       </button>
 
-      <SheetControlPanel
-        viewMode={viewMode}
-        isLocked={isLocked}
-        isPageSelectionMode={isPageSelectionMode}
-        isMergeMode={isMergeMode}
-        canMerge={canMerge}
-        canSplit={canSplit}
-        isLabelSelectionMode={isLabelSelectionMode}
-        activeSheetLabelCount={activeSheetLabelCount}
-        isPanelArrangeMode={!!panelArrangeSession}
-        onToggleMergeMode={toggleMergeMode}
-        onMerge={handleMerge}
-        onSplit={handleSplit}
-        onToggleLabelMode={() => {
-          if (panelArrangeSession) {
-            showAlert('ホバリング中はラベル追加モードへ切り替えできません。');
-            return;
-          }
-          setIsLabelSelectionMode((current) => !current);
-        }}
-        onDeleteLabels={handleBulkDeletePageLabels}
-        onShowQuickHelp={showQuickHelp}
-        onHideQuickHelp={hideQuickHelp}
-      />
+      {(viewMode === 'list' || viewMode === 'single') && (
+        <SheetControlPanel
+          viewMode={viewMode}
+          isLocked={isLocked}
+          isPageSelectionMode={isPageSelectionMode}
+          isMergeMode={isMergeMode}
+          canMerge={canMerge}
+          canSplit={canSplit}
+          isLabelSelectionMode={isLabelSelectionMode}
+          activeSheetLabelCount={activeSheetLabelCount}
+          isPanelArrangeMode={!!panelArrangeSession}
+          onToggleMergeMode={toggleMergeMode}
+          onMerge={handleMerge}
+          onSplit={handleSplit}
+          onToggleLabelMode={() => {
+            if (panelArrangeSession) {
+              showAlert('ホバリング中はラベル追加モードへ切り替えできません。');
+              return;
+            }
+            setIsLabelSelectionMode((current) => !current);
+          }}
+          onDeleteLabels={handleBulkDeletePageLabels}
+          onShowQuickHelp={showQuickHelp}
+          onHideQuickHelp={hideQuickHelp}
+        />
+      )}
 
       {(viewMode === 'list' || viewMode === 'single') && (
         <div
@@ -4566,6 +4749,21 @@ export default function App() {
               {pointerDragPreview.code || pointerDragPreview.label || pointerDragPreview.text || '移動中'}
             </p>
           </div>
+        </div>
+      )}
+
+      {undoNotice && (
+        <div
+          className={`fixed bottom-5 left-1/2 z-[210] -translate-x-1/2 rounded-full border px-4 py-2 text-xs font-bold shadow-lg backdrop-blur-md ${undoNotice.tone === 'warning'
+            ? 'border-amber-200 bg-amber-50/95 text-amber-800'
+            : undoNotice.tone === 'neutral'
+              ? 'border-slate-200 bg-white/95 text-slate-600'
+              : 'border-emerald-200 bg-emerald-50/95 text-emerald-800'
+            }`}
+          role="status"
+          aria-live="polite"
+        >
+          {undoNotice.message}
         </div>
       )}
 
