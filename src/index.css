@@ -508,6 +508,39 @@ button:active {
     animation: m3-scale-in 0.2s cubic-bezier(0.2, 0, 0, 1) forwards;
 }
 
+@keyframes daiwari-panel-hover {
+    0%, 100% {
+        transform: translate3d(0, -3px, 0) rotate(-0.25deg) scale(0.985);
+    }
+
+    50% {
+        transform: translate3d(0, -5px, 0) rotate(0.25deg) scale(0.99);
+    }
+}
+
+.daiwari-panel-arrange-image {
+    z-index: 14;
+    inset: 3px;
+    opacity: 0.45;
+    filter: drop-shadow(0 10px 10px rgba(15, 23, 42, 0.22));
+    animation: daiwari-panel-hover 1.35s ease-in-out infinite;
+}
+
+.daiwari-panel-arrange-image-active {
+    z-index: 24;
+    opacity: 1;
+    filter: drop-shadow(0 15px 14px rgba(15, 23, 42, 0.3));
+    animation: none;
+    transform: translate3d(0, -7px, 0) scale(1.025);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .daiwari-panel-arrange-image {
+        animation: none;
+        transform: translate3d(0, -4px, 0) scale(0.985);
+    }
+}
+
 /* Legacy support - ios-glass mapped to M3 */
 .ios-glass {
     @apply backdrop-blur-xl;

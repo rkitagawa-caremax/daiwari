@@ -2,12 +2,16 @@ import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  PANEL_ARRANGE_HOLD_MS,
+  PANEL_ARRANGE_MOVE_TOLERANCE_PX,
   clearActiveNativeDragPayload,
   extractPanelAssignmentFromDragPayload,
+  extractPanelArrangeDragPayload,
   extractPanelMoveDragPayload,
   getActiveNativeDragPayload,
   getActivePanelMoveDragPayload,
   getDragPayload,
+  hasPanelArrangeHoldMoved,
   isDropEventHandled,
   markDropEventHandled,
   normalizeDragPayload,
@@ -72,6 +76,23 @@ test('panel move extraction rejects incomplete and non-panel payloads', () => {
     }),
     { sourceSheetId: 'sheet-2', sourceIndex: 4, movedText: 'text' }
   );
+});
+
+test('panel arrange payload requires its explicit mode and owning sheet', () => {
+  assert.equal(PANEL_ARRANGE_HOLD_MS, 3000);
+  assert.equal(PANEL_ARRANGE_MOVE_TOLERANCE_PX, 4);
+  assert.equal(extractPanelArrangeDragPayload({ arrangeMode: true }), null);
+  assert.equal(extractPanelArrangeDragPayload({ arrangeSheetId: 'sheet-1' }), null);
+  assert.deepEqual(
+    extractPanelArrangeDragPayload({ arrangeMode: 'true', arrangeSheetId: 'sheet-1' }),
+    { sheetId: 'sheet-1' }
+  );
+});
+
+test('panel arrange hold is cancelled at the movement tolerance boundary', () => {
+  assert.equal(hasPanelArrangeHoldMoved(10, 10, 13, 10), false);
+  assert.equal(hasPanelArrangeHoldMoved(10, 10, 14, 10), true);
+  assert.equal(hasPanelArrangeHoldMoved(10, 10, 12, 13), false);
 });
 
 test('panel assignment retains text payloads and filename code fallback', () => {

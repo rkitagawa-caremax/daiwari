@@ -90,6 +90,7 @@ import {
   getPanelTransferableContent,
   hasPanelTransferableContent,
   sanitizePanelData,
+  swapPanelTransferableContent,
   toPanelsMap
 } from './domain/panels';
 import {
@@ -115,13 +116,16 @@ import {
 import {
   DAIWARI_DROPZONE_ATTR,
   DAIWARI_PANEL_DROPZONE_PREFIX,
+  PANEL_ARRANGE_HOLD_MS,
   POINTER_DRAG_THRESHOLD_PX,
   clearActiveNativeDragPayload,
   extractPanelAssignmentFromDragPayload,
+  extractPanelArrangeDragPayload,
   extractPanelMoveDragPayload,
   getActiveNativeDragPayload,
   getActivePanelMoveDragPayload,
   getDragPayload,
+  hasPanelArrangeHoldMoved,
   isDropEventHandled,
   markDropEventHandled,
   normalizeDragPayload,
@@ -286,11 +290,14 @@ export default function App() {
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
   const [pointerDragPreview, setPointerDragPreview] = useState(null);
+  const [panelArrangeModeSheetId, setPanelArrangeModeSheetId] = useState(null);
+  const [arrangeDraggingPanelKey, setArrangeDraggingPanelKey] = useState(null);
   const [assignedImagePreview, setAssignedImagePreview] = useState(null);
   const salesModeLongPressTimerRef = useRef(null);
   const salesModeLongPressTriggeredRef = useRef(false);
   const pointerDragOverlayRef = useRef(null);
   const pointerDragSessionRef = useRef(null);
+  const panelArrangeHoldRef = useRef(null);
   const suppressNextClickRef = useRef(false);
 
   // Sales Popup State
@@ -332,6 +339,147 @@ export default function App() {
   useEffect(() => () => {
     if (lockHoldTimerRef.current) clearTimeout(lockHoldTimerRef.current);
   }, []);
+
+  const clearPanelArrangeHold = useCallback(() => {
+    const session = panelArrangeHoldRef.current;
+    if (!session) return;
+
+    if (session.timerId) clearTimeout(session.timerId);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('pointermove', session.handleMove);
+      document.removeEventListener('pointerup', session.handleRelease);
+      document.removeEventListener('pointercancel', session.handleRelease);
+      document.removeEventListener('scroll', session.handleRelease, true);
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('blur', session.handleRelease);
+    }
+    panelArrangeHoldRef.current = null;
+  }, []);
+
+  const exitPanelArrangeMode = useCallback(() => {
+    clearPanelArrangeHold();
+    setArrangeDraggingPanelKey(null);
+    setPanelArrangeModeSheetId(null);
+  }, [clearPanelArrangeHold]);
+
+  const startPanelArrangeHold = useCallback((event, target = {}) => {
+    if (
+      !event
+      || event.isPrimary === false
+      || (event.button !== undefined && event.button !== 0)
+      || viewMode !== 'single'
+      || !activeSheetId
+      || target.sheetId !== activeSheetId
+      || panelArrangeModeSheetId
+      || isLocked
+      || isMergeMode
+      || isPageSelectionMode
+      || isLabelSelectionMode
+      || isSalesMode
+    ) return;
+
+    clearPanelArrangeHold();
+
+    const session = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      timerId: null,
+      handleMove: null,
+      handleRelease: null
+    };
+
+    session.handleMove = (moveEvent) => {
+      if (!moveEvent || moveEvent.pointerId !== session.pointerId) return;
+      if (hasPanelArrangeHoldMoved(
+        session.startX,
+        session.startY,
+        moveEvent.clientX,
+        moveEvent.clientY
+      )) {
+        clearPanelArrangeHold();
+      }
+    };
+    session.handleRelease = (releaseEvent) => {
+      if (releaseEvent?.pointerId !== undefined && releaseEvent.pointerId !== session.pointerId) return;
+      clearPanelArrangeHold();
+    };
+    session.timerId = setTimeout(() => {
+      if (panelArrangeHoldRef.current !== session) return;
+      clearPanelArrangeHold();
+      suppressNextClickRef.current = true;
+      setArrangeDraggingPanelKey(null);
+      setPanelArrangeModeSheetId(target.sheetId);
+      try {
+        navigator.vibrate?.(35);
+      } catch (error) {
+        void error;
+      }
+    }, PANEL_ARRANGE_HOLD_MS);
+
+    panelArrangeHoldRef.current = session;
+    document.addEventListener('pointermove', session.handleMove, { passive: true });
+    document.addEventListener('pointerup', session.handleRelease);
+    document.addEventListener('pointercancel', session.handleRelease);
+    document.addEventListener('scroll', session.handleRelease, true);
+    window.addEventListener('blur', session.handleRelease);
+  }, [
+    activeSheetId,
+    clearPanelArrangeHold,
+    isLabelSelectionMode,
+    isLocked,
+    isMergeMode,
+    isPageSelectionMode,
+    isSalesMode,
+    panelArrangeModeSheetId,
+    viewMode
+  ]);
+
+  const handleArrangeDragStateChange = useCallback((sheetId, panelIndex, isDragging) => {
+    const panelKey = `${sheetId}:${panelIndex}`;
+    setArrangeDraggingPanelKey((current) => {
+      if (!isDragging) return current === panelKey ? null : current;
+      return panelArrangeModeSheetId === sheetId ? panelKey : current;
+    });
+  }, [panelArrangeModeSheetId]);
+
+  useEffect(() => () => {
+    clearPanelArrangeHold();
+  }, [clearPanelArrangeHold]);
+
+  useEffect(() => {
+    if (!panelArrangeModeSheetId) return;
+    const shouldExit = (
+      viewMode !== 'single'
+      || activeSheetId !== panelArrangeModeSheetId
+      || isLocked
+      || isMergeMode
+      || isPageSelectionMode
+      || isLabelSelectionMode
+      || isSalesMode
+    );
+    if (shouldExit) exitPanelArrangeMode();
+  }, [
+    activeSheetId,
+    exitPanelArrangeMode,
+    isLabelSelectionMode,
+    isLocked,
+    isMergeMode,
+    isPageSelectionMode,
+    isSalesMode,
+    panelArrangeModeSheetId,
+    viewMode
+  ]);
+
+  useEffect(() => {
+    if (!panelArrangeModeSheetId) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') exitPanelArrangeMode();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [exitPanelArrangeMode, panelArrangeModeSheetId]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressValue, setProgressValue] = useState(0);
@@ -1973,7 +2121,7 @@ export default function App() {
     }
   };
 
-  const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
+  const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText, options = {}) => {
     if (isLockedRef.current) return;
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
 
@@ -1989,9 +2137,14 @@ export default function App() {
         const newPanels = [...fromSheet.panels];
         const dataToMove = { ...newPanels[fromIndex] };
 
-        newPanels[fromIndex] = clearPanelTransferableContent(newPanels[fromIndex]);
-
-        newPanels[toIndex] = applyPanelTransferableContent(newPanels[toIndex], dataToMove, movedText);
+        if (options.swapTargetContent) {
+          const swapped = swapPanelTransferableContent(dataToMove, newPanels[toIndex], movedText);
+          newPanels[fromIndex] = swapped.sourcePanel;
+          newPanels[toIndex] = swapped.targetPanel;
+        } else {
+          newPanels[fromIndex] = clearPanelTransferableContent(newPanels[fromIndex]);
+          newPanels[toIndex] = applyPanelTransferableContent(newPanels[toIndex], dataToMove, movedText);
+        }
 
         const newSheets = sheets.map(s => s.id === fromSheetId ? { ...s, panels: newPanels } : s);
         setSheets(newSheets);
@@ -2030,9 +2183,15 @@ export default function App() {
 
         if (fromSheetId === toSheetId) {
           const nextPanels = [...fromPanels];
-          nextPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
           const targetPanel = nextPanels[toIndex] || {};
-          nextPanels[toIndex] = applyPanelTransferableContent(targetPanel, dataToMove, movedText);
+          if (options.swapTargetContent) {
+            const swapped = swapPanelTransferableContent(dataToMove, targetPanel, movedText);
+            nextPanels[fromIndex] = swapped.sourcePanel;
+            nextPanels[toIndex] = swapped.targetPanel;
+          } else {
+            nextPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
+            nextPanels[toIndex] = applyPanelTransferableContent(targetPanel, dataToMove, movedText);
+          }
           const panelUpdates = buildPanelMapUpdates(fromPanels, nextPanels);
           if (Object.keys(panelUpdates).length > 0) {
             transaction.update(fromSheetRef, panelUpdates);
@@ -2068,15 +2227,23 @@ export default function App() {
   const applyDragPayloadToPanel = useCallback((targetSheetId, targetIndex, dragPayload = {}) => {
     if (!targetSheetId || Number.isNaN(targetIndex)) return false;
 
+    const arrangePayload = extractPanelArrangeDragPayload(dragPayload);
     const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
     if (movePayload) {
+      if (arrangePayload && (
+        arrangePayload.sheetId !== movePayload.sourceSheetId
+        || arrangePayload.sheetId !== targetSheetId
+      )) return false;
+
       void handleMovePanel(
         movePayload.sourceSheetId,
         movePayload.sourceIndex,
         targetSheetId,
         targetIndex,
-        movePayload.movedText
+        movePayload.movedText,
+        { swapTargetContent: !!arrangePayload }
       );
+      if (arrangePayload) exitPanelArrangeMode();
       return true;
     }
 
@@ -2095,9 +2262,10 @@ export default function App() {
       ...assignment
     });
     return true;
-  }, [handleMovePanel, handlePanelUpdateWithCheck, sheets]);
+  }, [exitPanelArrangeMode, handleMovePanel, handlePanelUpdateWithCheck, sheets]);
 
   const applyDragPayloadToTempShelf = useCallback((dragPayload = {}) => {
+    if (extractPanelArrangeDragPayload(dragPayload)) return false;
     const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
     if (movePayload) {
       void handleMoveToTemp(
@@ -2117,6 +2285,7 @@ export default function App() {
   }, [handleMoveToTemp, handleAddDragItemToTempShelf]);
 
   const applyDragPayloadToStockList = useCallback((dragPayload = {}) => {
+    if (extractPanelArrangeDragPayload(dragPayload)) return false;
     const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
     if (!movePayload) return false;
     void handleMoveToStock(
@@ -2128,6 +2297,7 @@ export default function App() {
   }, [handleMoveToStock]);
 
   const applyDragPayloadToExcludedList = useCallback((dragPayload = {}) => {
+    if (extractPanelArrangeDragPayload(dragPayload)) return false;
     const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
     if (!movePayload) return false;
     void handleMoveToExcluded(
@@ -2140,6 +2310,9 @@ export default function App() {
 
   const dispatchPointerDropToZone = useCallback((zoneId, dragPayload = {}) => {
     if (!zoneId) return false;
+    if (extractPanelArrangeDragPayload(dragPayload) && !zoneId.startsWith(DAIWARI_PANEL_DROPZONE_PREFIX)) {
+      return false;
+    }
     if (zoneId === 'temp') return applyDragPayloadToTempShelf(dragPayload);
     if (zoneId === 'stock') return applyDragPayloadToStockList(dragPayload);
     if (zoneId === 'excluded') return applyDragPayloadToExcludedList(dragPayload);
@@ -2252,12 +2425,16 @@ export default function App() {
 
     const finishPointerDrag = (pointerEvent, shouldDrop) => {
       if (!pointerEvent || pointerEvent.pointerId !== session.pointerId) return;
+      const wasActive = session.active;
       clearPointerDragSession();
-      if (!session.active) return;
-      suppressNextClickRef.current = true;
-      if (shouldDrop) {
-        handlePointerDropAtPoint(pointerEvent.clientX, pointerEvent.clientY, session.payload);
+      let handled = false;
+      if (wasActive) {
+        suppressNextClickRef.current = true;
+        if (shouldDrop) {
+          handled = handlePointerDropAtPoint(pointerEvent.clientX, pointerEvent.clientY, session.payload);
+        }
       }
+      config.onFinish?.({ active: wasActive, handled });
     };
 
     session.handleMove = (moveEvent) => {
@@ -4192,6 +4369,11 @@ export default function App() {
                           isLabelMode={isLabelSelectionMode}
                           onChangeGenre={(genreId) => handleChangeGenre(sheet.id, genreId)}
                           onPreviewImage={handlePreviewAssignedImage}
+                          isArrangeMode={panelArrangeModeSheetId === sheet.id}
+                          arrangeDraggingPanelKey={arrangeDraggingPanelKey}
+                          onStartArrangeHold={startPanelArrangeHold}
+                          onCancelArrangeHold={clearPanelArrangeHold}
+                          onArrangeDragStateChange={handleArrangeDragStateChange}
                         />
 
                       </div>
@@ -4228,6 +4410,27 @@ export default function App() {
             <p className="text-[13px] font-bold text-sky-700">{quickHelpPopup.title}</p>
             <p className="text-[12px] leading-relaxed text-slate-700 mt-1.5">{quickHelpPopup.description}</p>
           </div>
+        </div>
+      )}
+
+      {panelArrangeModeSheetId && (
+        <div className="fixed bottom-20 left-1/2 z-[155] flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-sky-200 bg-white/95 px-4 py-2.5 shadow-xl backdrop-blur-md">
+          <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
+            <ArrowLeftRight size={17} />
+          </div>
+          <div className="min-w-0">
+            <p className="whitespace-nowrap text-xs font-extrabold text-slate-800">画像の配置変更中</p>
+            <p className="whitespace-nowrap text-[10px] text-slate-500">画像を押したまま移動・ドロップ</p>
+          </div>
+          <button
+            type="button"
+            onClick={exitPanelArrangeMode}
+            className="ml-1 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            title="配置変更を終了（Esc）"
+            aria-label="配置変更を終了"
+          >
+            <X size={15} />
+          </button>
         </div>
       )}
 

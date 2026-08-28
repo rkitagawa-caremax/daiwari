@@ -24,7 +24,12 @@ const Sheet = React.memo(({
   imageDataById,
   isLabelMode,
   onChangeGenre,
-  onPreviewImage
+  onPreviewImage,
+  isArrangeMode = false,
+  arrangeDraggingPanelKey = null,
+  onStartArrangeHold,
+  onCancelArrangeHold,
+  onArrangeDragStateChange
 }) => {
   const genre = GENRES.find((candidate) => candidate.id === sheet.genre) || GENRES[0];
 
@@ -119,6 +124,11 @@ const Sheet = React.memo(({
               imageDataById={imageDataById}
               isLabelMode={isLabelMode}
               onPreviewImage={onPreviewImage}
+              isArrangeMode={isArrangeMode}
+              isArrangeDragging={arrangeDraggingPanelKey === `${sheet.id}:${panelIndex}`}
+              onStartArrangeHold={onStartArrangeHold}
+              onCancelArrangeHold={onCancelArrangeHold}
+              onArrangeDragStateChange={onArrangeDragStateChange}
             />
           );
         })}

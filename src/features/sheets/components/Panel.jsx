@@ -40,9 +40,15 @@ const Panel = React.memo(({
   onLeaveSales,
   imageDataById,
   isLabelMode,
-  onPreviewImage
+  onPreviewImage,
+  isArrangeMode = false,
+  isArrangeDragging = false,
+  onStartArrangeHold,
+  onCancelArrangeHold,
+  onArrangeDragStateChange
 }) => {
   const [isHovered, setIsHovered] = useState(false);
+  const [isArrangeDragOver, setIsArrangeDragOver] = useState(false);
   const textareaRef = useRef(null);
   const codeInputRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
@@ -103,6 +109,7 @@ const Panel = React.memo(({
 
   const handleDrop = (event) => {
     event.preventDefault();
+    setIsArrangeDragOver(false);
     if (isOverview) return;
     const nativeDropEvent = event.nativeEvent;
     if (isDropEventHandled(nativeDropEvent)) return;
@@ -118,6 +125,7 @@ const Panel = React.memo(({
   };
 
   const handleDragStart = (event) => {
+    onCancelArrangeHold?.();
     if (!hasTransferableContent) {
       event.preventDefault();
       return;
@@ -128,9 +136,22 @@ const Panel = React.memo(({
       moveSourceType: 'panel',
       sourceSheetId: sheetId,
       sourceIndex: index,
-      textData: currentText || ''
+      textData: currentText || '',
+      arrangeMode: isArrangeMode && !!resolvedImage,
+      arrangeSheetId: isArrangeMode ? sheetId : ''
     });
     event.dataTransfer.effectAllowed = 'move';
+    if (isArrangeMode && resolvedImage) {
+      onArrangeDragStateChange?.(sheetId, index, true);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setIsArrangeDragOver(false);
+    clearActiveNativeDragPayload();
+    if (isArrangeMode) {
+      onArrangeDragStateChange?.(sheetId, index, false);
+    }
   };
 
   const handlePointerDragStart = (event) => {
@@ -141,13 +162,20 @@ const Panel = React.memo(({
         moveSourceType: 'panel',
         sourceSheetId: sheetId,
         sourceIndex: index,
-        textData: currentText || ''
+        textData: currentText || '',
+        arrangeMode: isArrangeMode && !!resolvedImage,
+        arrangeSheetId: isArrangeMode ? sheetId : ''
       },
       preview: {
         image: resolvedImage || null,
         label: data.label || null,
         code: data.code || null,
         text: data.isText ? (currentText || data.text || '') : ''
+      },
+      onFinish: () => {
+        if (isArrangeMode) {
+          onArrangeDragStateChange?.(sheetId, index, false);
+        }
       }
     });
   };
@@ -159,6 +187,18 @@ const Panel = React.memo(({
     }
   };
 
+  const handleDragEnter = (event) => {
+    if (!isArrangeMode) return;
+    event.preventDefault();
+    setIsArrangeDragOver(true);
+  };
+
+  const handleDragLeave = (event) => {
+    if (!isArrangeMode) return;
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setIsArrangeDragOver(false);
+  };
+
   const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
   const hasTransferableContent = hasPanelTransferableContent(data);
   const isEmpty = !hasTransferableContent;
@@ -166,6 +206,7 @@ const Panel = React.memo(({
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
   const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
+  const isArrangeImage = isArrangeMode && !!resolvedImage;
   const textLength = Array.from(localText || '').length;
   const textSizeClass = textLength > 180
     ? 'text-[9px]'
@@ -312,8 +353,31 @@ const Panel = React.memo(({
     if (onSelect) onSelect();
   };
 
+  const handlePanelPointerDown = (event) => {
+    if (isExportMode || isOverview || isLabelMode) return;
+    if (event.target.closest?.('textarea, input, button, select, [contenteditable="true"]')) return;
+
+    if (isArrangeMode) {
+      if (!resolvedImage) return;
+      onArrangeDragStateChange?.(sheetId, index, true);
+      handlePointerDragStart(event);
+      return;
+    }
+
+    onStartArrangeHold?.(event, { sheetId, panelIndex: index });
+    if (!isEmpty && !data.isText) {
+      handlePointerDragStart(event);
+    }
+  };
+
+  const handlePanelPointerRelease = () => {
+    if (isArrangeMode) {
+      onArrangeDragStateChange?.(sheetId, index, false);
+    }
+  };
+
   const handleImageDoubleClick = (event) => {
-    if (!resolvedImage || isExportMode || isLabelMode) return;
+    if (!resolvedImage || isExportMode || isLabelMode || isArrangeMode) return;
     if (event.target.closest?.('textarea, input, button, select, [contenteditable="true"]')) return;
     event.preventDefault();
     event.stopPropagation();
@@ -339,16 +403,23 @@ const Panel = React.memo(({
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
         ${(shouldHighlightLabel || shouldHighlightEmpty) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'}
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
-        ${!isEmpty && !isOverview && !data.isText ? 'cursor-grab active:cursor-grabbing' : ''}
+        ${(!isEmpty && !isOverview && !data.isText) || isArrangeImage ? 'cursor-grab active:cursor-grabbing' : ''}
+        ${isArrangeMode ? 'ring-1 ring-inset ring-sky-300/35' : ''}
+        ${isArrangeDragOver ? 'z-30 ring-4 ring-inset ring-sky-400 bg-sky-50/70' : ''}
         ${isSalesMode ? 'hover:ring-4 hover:z-40' : ''}
       `}
-      draggable={!isExportMode && !isEmpty && !isOverview && !isLabelMode && !data.isText}
+      draggable={!isExportMode && !isOverview && !isLabelMode && (isArrangeMode ? isArrangeImage : (!isEmpty && !data.isText))}
       onDragStart={isExportMode ? undefined : handleDragStart}
+      onDragEnd={isExportMode ? undefined : handleDragEnd}
+      onDragEnter={isExportMode ? undefined : handleDragEnter}
+      onDragLeave={isExportMode ? undefined : handleDragLeave}
       onDropCapture={isExportMode ? undefined : handleDrop}
       onDragOverCapture={isExportMode ? undefined : handleDragOver}
       onDrop={isExportMode ? undefined : handleDrop}
       onDragOver={isExportMode ? undefined : handleDragOver}
-      onPointerDown={!isExportMode && !isEmpty && !isOverview && !isLabelMode && !data.isText ? handlePointerDragStart : undefined}
+      onPointerDown={!isExportMode && !isOverview && !isLabelMode ? handlePanelPointerDown : undefined}
+      onPointerUp={!isExportMode && isArrangeMode ? handlePanelPointerRelease : undefined}
+      onPointerCancel={!isExportMode && isArrangeMode ? handlePanelPointerRelease : undefined}
       onMouseEnter={isExportMode ? undefined : handleMouseEnter}
       onMouseLeave={isExportMode ? undefined : handleMouseLeave}
       onClick={isExportMode ? undefined : handlePanelClick}
@@ -364,7 +435,11 @@ const Panel = React.memo(({
               : 'transparent',
         cursor: isLabelMode
           ? 'crosshair'
-          : (isOverview ? 'pointer' : (!isEmpty && !data.isText ? 'cursor-grab' : 'default')),
+          : (isOverview
+            ? 'pointer'
+            : (isArrangeMode
+              ? (resolvedImage ? 'grab' : 'crosshair')
+              : (!isEmpty && !data.isText ? 'grab' : 'default'))),
         gridColumn: `span ${data.colSpan || 1}`,
         gridRow: `span ${data.rowSpan || 1}`,
         borderColor: isSelected
@@ -384,18 +459,25 @@ const Panel = React.memo(({
           : shouldHighlightLabel
             ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
             : undefined,
-        touchAction: !isExportMode && !isEmpty && !isOverview && !isLabelMode ? 'none' : undefined,
+        touchAction: !isExportMode && !isOverview && !isLabelMode && (!isEmpty || isArrangeImage) ? 'none' : undefined,
       }}
     >
       {resolvedImage && (
-        <img
-          src={resolvedImage}
-          alt="content"
-          className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none"
-          loading={isExportMode ? 'eager' : 'lazy'}
-          decoding="async"
-          draggable={false}
-        />
+        <div
+          className={`absolute inset-0 z-0 pointer-events-none transition-[opacity,transform,filter] duration-200
+            ${isArrangeImage ? 'daiwari-panel-arrange-image' : ''}
+            ${isArrangeDragging ? 'daiwari-panel-arrange-image-active' : ''}
+          `}
+        >
+          <img
+            src={resolvedImage}
+            alt="content"
+            className="w-full h-full object-contain"
+            loading={isExportMode ? 'eager' : 'lazy'}
+            decoding="async"
+            draggable={false}
+          />
+        </div>
       )}
 
       {(() => {
@@ -411,7 +493,16 @@ const Panel = React.memo(({
             <div
               key={label.id}
               className="absolute z-[25] transform -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${label.x}%`, top: `${label.y}%`, minWidth: '80px', maxWidth: '90%' }}
+              style={{
+                left: `${label.x}%`,
+                top: `${label.y}%`,
+                minWidth: '80px',
+                maxWidth: '90%',
+                opacity: isArrangeImage ? (isArrangeDragging ? 1 : 0.45) : 1,
+                filter: isArrangeImage ? 'drop-shadow(0 8px 10px rgba(15, 23, 42, 0.18))' : undefined,
+                pointerEvents: isArrangeImage ? 'none' : undefined,
+                transition: 'opacity 180ms ease, filter 180ms ease'
+              }}
               onClick={(event) => event.stopPropagation()}
               onMouseDown={(event) => event.stopPropagation()}
             >
@@ -614,7 +705,7 @@ const Panel = React.memo(({
 
       {!isOverview && !isExportMode && (
         <>
-          {(resolvedImage || data.label || data.isText || data.code) && isHovered && !isSalesMode && (
+          {(resolvedImage || data.label || data.isText || data.code) && isHovered && !isSalesMode && !isArrangeMode && (
             <button
               onClick={(event) => {
                 event.stopPropagation();

@@ -5,6 +5,8 @@ const DAIWARI_DRAG_PAYLOAD_PREFIX = '__daiwari_drag__:';
 export const DAIWARI_DROPZONE_ATTR = 'data-daiwari-dropzone-id';
 export const DAIWARI_PANEL_DROPZONE_PREFIX = 'panel:';
 export const POINTER_DRAG_THRESHOLD_PX = 10;
+export const PANEL_ARRANGE_HOLD_MS = 3000;
+export const PANEL_ARRANGE_MOVE_TOLERANCE_PX = 4;
 const DAIWARI_DROP_HANDLED_FLAG = '__daiwariDropHandled';
 let activeNativeDragPayload = null;
 let activePanelMovePayload = null;
@@ -15,6 +17,8 @@ const DAIWARI_DRAG_FIELDS = [
   'sourceSheetId',
   'sourceIndex',
   'textData',
+  'arrangeMode',
+  'arrangeSheetId',
   'type',
   'src',
   'imageId',
@@ -146,6 +150,21 @@ export const parseNullableDragValue = (value) => {
   const normalized = String(value);
   if (!normalized || normalized === 'null' || normalized === 'undefined') return null;
   return normalized;
+};
+
+export const hasPanelArrangeHoldMoved = (
+  startX,
+  startY,
+  currentX,
+  currentY,
+  tolerance = PANEL_ARRANGE_MOVE_TOLERANCE_PX
+) => Math.hypot(currentX - startX, currentY - startY) >= tolerance;
+
+export const extractPanelArrangeDragPayload = (dragPayload = {}) => {
+  if (String(dragPayload.arrangeMode || '') !== 'true') return null;
+  const sheetId = parseNullableDragValue(dragPayload.arrangeSheetId);
+  if (!sheetId) return null;
+  return { sheetId };
 };
 
 export const extractPanelMoveDragPayload = (dragPayload = {}) => {

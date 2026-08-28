@@ -115,6 +115,13 @@ export const applyPanelTransferableContent = (targetPanel = {}, sourcePanel = {}
   ...getPanelTransferableContent(sourcePanel, movedText)
 });
 
+export const swapPanelTransferableContent = (sourcePanel = {}, targetPanel = {}, movedText) => ({
+  sourcePanel: hasPanelTransferableContent(targetPanel)
+    ? applyPanelTransferableContent(sourcePanel, targetPanel)
+    : clearPanelTransferableContent(sourcePanel),
+  targetPanel: applyPanelTransferableContent(targetPanel, sourcePanel, movedText)
+});
+
 export const sanitizePanelData = (panel = {}) => {
   const sanitized = {};
   Object.keys(panel || {}).forEach((key) => {
