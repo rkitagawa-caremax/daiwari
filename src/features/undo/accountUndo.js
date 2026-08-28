@@ -12,6 +12,7 @@ import {
   applyUndoDomainChanges,
   buildUndoDomainChanges,
   hasUndoEntryChanges,
+  invertUndoEntry,
   mergeUndoDomainChanges
 } from '../../domain/undoHistory';
 import {
@@ -19,7 +20,7 @@ import {
   isSameTransferItemList
 } from '../../domain/workspaceComparators';
 
-export { UNDO_WORKSPACE_DOMAINS };
+export { UNDO_WORKSPACE_DOMAINS, invertUndoEntry };
 
 const isSameUndoTransferItem = (left, right) => isSameTransferItemList(
   [{ ...(left || {}), createdAt: null }],
@@ -44,6 +45,7 @@ export const createAccountUndoStore = ({
   maxEntriesPerAccount = 30
 } = {}) => {
   const historyByAccount = new Map();
+  const redoByAccount = new Map();
   let activeAccountId = null;
   let pendingEntry = null;
   let flushTimer = null;
@@ -53,18 +55,24 @@ export const createAccountUndoStore = ({
     flushTimer = null;
   };
 
+  const pushCapped = (stackByAccount, accountId, entry) => {
+    const stack = stackByAccount.get(accountId) || [];
+    stack.push(entry);
+    if (stack.length > maxEntriesPerAccount) {
+      stack.splice(0, stack.length - maxEntriesPerAccount);
+    }
+    stackByAccount.set(accountId, stack);
+  };
+
   const flush = () => {
     clearTimer();
     const entry = pendingEntry;
     pendingEntry = null;
     if (!entry?.accountId || !hasUndoEntryChanges(entry)) return null;
 
-    const history = historyByAccount.get(entry.accountId) || [];
-    history.push(entry);
-    if (history.length > maxEntriesPerAccount) {
-      history.splice(0, history.length - maxEntriesPerAccount);
-    }
-    historyByAccount.set(entry.accountId, history);
+    pushCapped(historyByAccount, entry.accountId, entry);
+    // 新しい編集操作が確定したら、そのアカウントのやり直し履歴は無効になる
+    redoByAccount.delete(entry.accountId);
     return entry;
   };
 
@@ -113,6 +121,17 @@ export const createAccountUndoStore = ({
     historyByAccount.set(accountId, history.filter((entry) => entry.id !== entryId));
   };
 
+  const peekLatestRedo = (accountId = activeAccountId) => {
+    flush();
+    const redoStack = redoByAccount.get(accountId) || [];
+    return redoStack[redoStack.length - 1] || null;
+  };
+
+  const removeRedo = (accountId, entryId) => {
+    const redoStack = redoByAccount.get(accountId) || [];
+    redoByAccount.set(accountId, redoStack.filter((entry) => entry.id !== entryId));
+  };
+
   const dispose = () => {
     clearTimer();
     pendingEntry = null;
@@ -123,8 +142,12 @@ export const createAccountUndoStore = ({
     flush,
     hasPending: () => !!pendingEntry,
     peekLatest,
+    peekLatestRedo,
+    pushRedo: (accountId, entry) => pushCapped(redoByAccount, accountId, entry),
+    pushUndo: (accountId, entry) => pushCapped(historyByAccount, accountId, entry),
     record,
     remove,
+    removeRedo,
     setAccount
   };
 };

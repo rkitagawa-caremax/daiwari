@@ -52,6 +52,10 @@ export const useWorkspaceUndoState = ({ accountId }) => {
   const flushPendingUndo = useCallback(() => undoStoreRef.current.flush(), []);
   const getLatestUndoEntry = useCallback((targetAccountId) => undoStoreRef.current.peekLatest(targetAccountId), []);
   const removeUndoEntry = useCallback((targetAccountId, entryId) => undoStoreRef.current.remove(targetAccountId, entryId), []);
+  const pushUndoEntry = useCallback((targetAccountId, entry) => undoStoreRef.current.pushUndo(targetAccountId, entry), []);
+  const getLatestRedoEntry = useCallback((targetAccountId) => undoStoreRef.current.peekLatestRedo(targetAccountId), []);
+  const removeRedoEntry = useCallback((targetAccountId, entryId) => undoStoreRef.current.removeRedo(targetAccountId, entryId), []);
+  const pushRedoEntry = useCallback((targetAccountId, entry) => undoStoreRef.current.pushRedo(targetAccountId, entry), []);
 
   useEffect(() => {
     undoStoreRef.current.setAccount(accountId);
@@ -71,10 +75,14 @@ export const useWorkspaceUndoState = ({ accountId }) => {
   return {
     excludedItems,
     flushPendingUndo,
+    getLatestRedoEntry,
     getLatestUndoEntry,
     images,
     isUndoApplyingRef,
     isUndoBusyRef,
+    pushRedoEntry,
+    pushUndoEntry,
+    removeRedoEntry,
     removeUndoEntry,
     setExcludedItems,
     setImages,

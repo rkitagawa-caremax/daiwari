@@ -5,6 +5,7 @@ import {
   applyUndoDomainChanges,
   buildUndoDomainChanges,
   hasUndoEntryChanges,
+  invertUndoEntry,
   mergeUndoDomainChanges
 } from '../src/domain/undoHistory.js';
 
@@ -79,4 +80,29 @@ test('grouped undo removes an edit that returned to its original value', () => {
 test('undo entry reports whether any workspace domain changed', () => {
   assert.equal(hasUndoEntryChanges({ changes: { sheets: [] } }), false);
   assert.equal(hasUndoEntryChanges({ changes: { sheets: [{ id: 'a' }] } }), true);
+});
+
+test('inverting an undo entry swaps before/after so redo restores the undone state', () => {
+  const before = [
+    { id: 'a', value: 1 },
+    { id: 'b', value: 2 }
+  ];
+  const after = [
+    { id: 'a', value: 3 },
+    { id: 'c', value: 4 }
+  ];
+  const entry = {
+    id: 'entry-1',
+    changes: { sheets: buildUndoDomainChanges(before, after, isSameItem) }
+  };
+
+  // undo で after → before に戻した後、invert した entry を適用すると after に戻る
+  const undone = applyUndoDomainChanges(after, entry.changes.sheets);
+  assert.deepEqual(undone, before);
+  const inverted = invertUndoEntry(entry);
+  assert.equal(inverted.id, 'entry-1');
+  assert.deepEqual(applyUndoDomainChanges(undone, inverted.changes.sheets), after);
+
+  // 二重反転で元に戻る
+  assert.deepEqual(invertUndoEntry(inverted).changes.sheets, entry.changes.sheets);
 });

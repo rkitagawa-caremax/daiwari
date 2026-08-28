@@ -119,6 +119,20 @@ export const applyUndoDomainChanges = (currentItems = [], changes = []) => {
   return restored;
 };
 
+export const invertUndoEntry = (entry) => ({
+  ...entry,
+  changes: Object.fromEntries(UNDO_WORKSPACE_DOMAINS.map((domain) => [
+    domain,
+    (entry?.changes?.[domain] || []).map((change) => ({
+      id: change.id,
+      before: change.after,
+      after: change.before,
+      beforeIndex: change.afterIndex,
+      afterIndex: change.beforeIndex
+    }))
+  ]))
+});
+
 export const hasUndoEntryChanges = (entry) => (
   UNDO_WORKSPACE_DOMAINS.some((domain) => (entry?.changes?.[domain]?.length || 0) > 0)
 );

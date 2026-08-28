@@ -59,7 +59,9 @@ import {
   Tag,
   ChevronDown,
   ChevronUp,
-  MoreHorizontal
+  MoreHorizontal,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 
 import { idbHelper } from './idbHelper';
@@ -163,6 +165,7 @@ import WorkLogDashboard from './features/workLogs/WorkLogDashboard';
 import {
   applyUndoEntryToWorkspace,
   countUndoEntryChanges,
+  invertUndoEntry,
   restoreCloudUndoEntry,
   undoEntryHasClientConflict
 } from './features/undo/accountUndo';
@@ -268,10 +271,14 @@ export default function App() {
   const undoAccountId = USE_LOCAL_STORAGE ? 'local_user' : (firebaseUser?.uid || null);
   const {
     excludedItems,
+    getLatestRedoEntry,
     getLatestUndoEntry,
     images,
     isUndoApplyingRef,
     isUndoBusyRef,
+    pushRedoEntry,
+    pushUndoEntry,
+    removeRedoEntry,
     removeUndoEntry,
     setExcludedItems,
     setImages,
@@ -1112,33 +1119,40 @@ export default function App() {
     return runCloudWrite(() => runTransaction(db, transactionWork), options);
   }, [runCloudWrite]);
 
-  const handleUndoLatest = useCallback(async () => {
+  // direction: 'undo' は直前の操作を戻す、'redo' は戻した操作をやり直す。
+  // redo スタックには undo 向きのまま entry を保持し、適用時のみ invertUndoEntry で反転する。
+  const restoreTimelineEntry = useCallback(async (direction) => {
     const accountId = undoAccountId;
+    const isUndo = direction === 'undo';
+    const actionLabel = isUndo ? '戻す' : 'やり直す';
+    const actionLabelStem = isUndo ? '戻し' : 'やり直し';
     if (!accountId || isUndoBusyRef.current) return;
     if (isLockedRef.current) {
-      showUndoNotice('ロック中は操作を戻せません。', 'warning');
+      showUndoNotice(`ロック中は操作を${actionLabel}ことはできません。`, 'warning');
       return;
     }
     if (isProcessing || panelArrangeSession) {
-      showUndoNotice('処理またはホバリングを完了してから操作を戻してください。', 'warning');
+      showUndoNotice(`処理またはホバリングを完了してから操作を${actionLabelStem}てください。`, 'warning');
       return;
     }
 
-    const entry = getLatestUndoEntry(accountId);
+    const entry = isUndo ? getLatestUndoEntry(accountId) : getLatestRedoEntry(accountId);
+    const removeEntry = isUndo ? removeUndoEntry : removeRedoEntry;
     if (!entry) {
-      showUndoNotice('このアカウントで戻せる操作はありません。', 'neutral');
+      showUndoNotice(isUndo ? 'このアカウントで戻せる操作はありません。' : 'このアカウントでやり直せる操作はありません。', 'neutral');
+      return;
+    }
+    const effectiveEntry = isUndo ? entry : invertUndoEntry(entry);
+
+    if (undoEntryHasClientConflict(effectiveEntry, workspaceStateRef.current)) {
+      removeEntry(accountId, entry.id);
+      showUndoNotice(`別の更新が重なったため、安全のためこの操作は${actionLabelStem}ませんでした。`, 'warning');
       return;
     }
 
-    if (undoEntryHasClientConflict(entry, workspaceStateRef.current)) {
-      removeUndoEntry(accountId, entry.id);
-      showUndoNotice('別の更新が重なったため、安全のためこの操作は戻しませんでした。', 'warning');
-      return;
-    }
-
-    if (countUndoEntryChanges(entry) > 450) {
-      removeUndoEntry(accountId, entry.id);
-      showUndoNotice('一度に戻すデータ量が大きいため、この操作は戻せません。', 'warning');
+    if (countUndoEntryChanges(effectiveEntry) > 450) {
+      removeEntry(accountId, entry.id);
+      showUndoNotice(`一度に${actionLabel}データ量が大きいため、この操作は${actionLabel}ことができません。`, 'warning');
       return;
     }
 
@@ -1154,30 +1168,36 @@ export default function App() {
             tempItems: tempShelfCollection,
             excludedItems: excludedItemsCollection
           },
-          entry,
+          entry: effectiveEntry,
           ownerUid: tempShelfUserId,
           runCloudTransaction,
           useLegacyTempShelf
         });
       }
 
-      const restoredWorkspace = applyUndoEntryToWorkspace(entry, workspaceStateRef.current);
+      const restoredWorkspace = applyUndoEntryToWorkspace(effectiveEntry, workspaceStateRef.current);
       syncSheets(restoredWorkspace.sheets);
       syncImages(restoredWorkspace.images);
       syncTempItems(restoredWorkspace.tempItems);
       syncExcludedItems(restoredWorkspace.excludedItems);
-      removeUndoEntry(accountId, entry.id);
+      removeEntry(accountId, entry.id);
+      // 適用済み entry を反対側のスタックへ移し、undo ⇔ redo を往復可能にする
+      if (isUndo) {
+        pushRedoEntry(accountId, entry);
+      } else {
+        pushUndoEntry(accountId, entry);
+      }
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
       setIsLabelSelectionMode(false);
-      showUndoNotice('直前の編集操作を戻しました。');
+      showUndoNotice(isUndo ? '直前の編集操作を戻しました。' : '操作をやり直しました。');
     } catch (error) {
-      console.error('Undo failed:', error);
+      console.error(`${direction} failed:`, error);
       if (error?.code === 'undo-conflict') {
-        removeUndoEntry(accountId, entry.id);
-        showUndoNotice('別のアカウントによる更新を検出したため、操作は戻しませんでした。', 'warning');
+        removeEntry(accountId, entry.id);
+        showUndoNotice(`別のアカウントによる更新を検出したため、操作は${actionLabelStem}ませんでした。`, 'warning');
       } else {
-        showUndoNotice('操作を戻せませんでした。通信状態を確認して再度お試しください。', 'warning');
+        showUndoNotice(`操作を${actionLabel}ことができませんでした。通信状態を確認して再度お試しください。`, 'warning');
       }
     } finally {
       isUndoApplyingRef.current = false;
@@ -1185,12 +1205,16 @@ export default function App() {
     }
   }, [
     excludedItemsCollection,
+    getLatestRedoEntry,
     getLatestUndoEntry,
     imagesCollection,
     isProcessing,
     isUndoApplyingRef,
     isUndoBusyRef,
     panelArrangeSession,
+    pushRedoEntry,
+    pushUndoEntry,
+    removeRedoEntry,
     removeUndoEntry,
     runCloudTransaction,
     sheetsCollection,
@@ -1206,10 +1230,16 @@ export default function App() {
     workspaceStateRef
   ]);
 
+  const handleUndoLatest = useCallback(() => restoreTimelineEntry('undo'), [restoreTimelineEntry]);
+  const handleRedoLatest = useCallback(() => restoreTimelineEntry('redo'), [restoreTimelineEntry]);
+
   useEffect(() => {
     const handleUndoShortcut = (event) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-      if (String(event.key || '').toLowerCase() !== 'z') return;
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = String(event.key || '').toLowerCase();
+      const isUndoKey = key === 'z' && !event.shiftKey;
+      const isRedoKey = (key === 'z' && event.shiftKey) || (key === 'y' && !event.shiftKey);
+      if (!isUndoKey && !isRedoKey) return;
       const target = event.target;
       const isEditable = target instanceof HTMLInputElement
         || target instanceof HTMLTextAreaElement
@@ -1218,12 +1248,12 @@ export default function App() {
       if (isEditable) return;
 
       event.preventDefault();
-      void handleUndoLatest();
+      void (isUndoKey ? handleUndoLatest() : handleRedoLatest());
     };
 
     window.addEventListener('keydown', handleUndoShortcut);
     return () => window.removeEventListener('keydown', handleUndoShortcut);
-  }, [handleUndoLatest]);
+  }, [handleRedoLatest, handleUndoLatest]);
 
   const flushWorkLogDelta = useCallback(async (delta) => {
     if (!delta?.user?.uid || !delta.dateKey) return;
@@ -4180,6 +4210,32 @@ export default function App() {
           >
             {isLocked ? <Lock size={18} /> : <Unlock size={18} />}
           </button>
+
+          {/* 戻る / 進む (アカウント単位の undo / redo) */}
+          <div className="flex items-center gap-1 mr-1">
+            <button
+              type="button"
+              onClick={() => { void handleUndoLatest(); }}
+              onMouseEnter={(e) => showQuickHelp(e, '戻る', '直前の編集操作を取り消します (Ctrl+Z)。')}
+              onMouseLeave={hideQuickHelp}
+              title="戻る (Ctrl+Z)"
+              aria-label="直前の編集操作を戻す"
+              className="flex items-center justify-center w-10 h-10 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              <Undo2 size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => { void handleRedoLatest(); }}
+              onMouseEnter={(e) => showQuickHelp(e, '進む', '戻した操作をやり直します (Ctrl+Y / Ctrl+Shift+Z)。')}
+              onMouseLeave={hideQuickHelp}
+              title="進む (Ctrl+Y)"
+              aria-label="戻した編集操作をやり直す"
+              className="flex items-center justify-center w-10 h-10 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              <Redo2 size={18} />
+            </button>
+          </div>
 
           <div className="flex p-1 rounded-full transition-all" style={{ border: '1px solid var(--m3-outline)', background: 'var(--m3-surface)' }}>
             <button
