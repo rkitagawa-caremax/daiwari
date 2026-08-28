@@ -5,7 +5,11 @@ import {
   hasPanelTransferableContent
 } from './panels.js';
 
-export const hasPanelImageContent = (panel = {}) => !!(panel.image || panel.imageId);
+export const hasPanelImageContent = (panel = {}) => (
+  !!(panel.image || panel.imageId)
+  && !panel.label
+  && !panel.isText
+);
 
 const getArrangeContent = (panel = {}) => ({
   ...getPanelTransferableContent(panel),

@@ -99,3 +99,23 @@ test('non-image dummy content is protected from arrange-mode overwrite', () => {
   assert.equal(result.status, 'blocked-content');
   assert.equal(result.session, session);
 });
+
+test('dummy panel remains a dummy even when legacy image data is still present', () => {
+  const panels = buildDefaultPanels();
+  panels[0] = buildImagePanel(panels[0], 'image-a', 'E1001', 'Aラベル');
+  panels[1] = {
+    ...panels[1],
+    image: 'data:image/png;base64,legacy',
+    label: '埋草',
+    code: 'ダミーコマ'
+  };
+
+  const session = createPanelArrangeSession('sheet-1', panels);
+  const result = stagePanelArrangeDrop(session, session.tokens[0].id, 1, panels);
+  const view = buildPanelArrangeView(panels, session);
+
+  assert.equal(session.tokens.length, 1);
+  assert.equal(result.status, 'blocked-content');
+  assert.equal(view.panels[1].label, '埋草');
+  assert.equal(view.panels[1].image, 'data:image/png;base64,legacy');
+});

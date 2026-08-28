@@ -258,6 +258,7 @@ const Panel = React.memo(({
   const resolvedImage = data.image || (data.imageId ? imageDataById?.[data.imageId] : null);
   const hasTransferableContent = hasPanelTransferableContent(data);
   const isEmpty = !hasTransferableContent;
+  const isDummyPanel = !!data.label && !data.isText;
   const freeLabelsCount = data.freeLabels?.length || 0;
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
@@ -420,7 +421,9 @@ const Panel = React.memo(({
       return;
     }
 
-    onStartArrangeHold?.(event, { sheetId, panelIndex: index });
+    if (resolvedImage && !isDummyPanel) {
+      onStartArrangeHold?.(event, { sheetId, panelIndex: index });
+    }
     if (!isEmpty && !data.isText) {
       handlePointerDragStart(event);
     }
@@ -518,7 +521,7 @@ const Panel = React.memo(({
         touchAction: !isExportMode && !isOverview && !isLabelMode && (!isEmpty || isArrangeImage) ? 'none' : undefined,
       }}
     >
-      {resolvedImage && (
+      {resolvedImage && !isDummyPanel && (isArrangeImage ? (
         <div
           className={`absolute inset-0 z-0 pointer-events-none transition-[opacity,transform,filter] duration-200
             ${isArrangeImage ? 'daiwari-panel-arrange-image' : ''}
@@ -535,7 +538,16 @@ const Panel = React.memo(({
             draggable={false}
           />
         </div>
-      )}
+      ) : (
+        <img
+          src={resolvedImage}
+          alt="content"
+          className="w-full h-full object-contain absolute inset-0 z-0 pointer-events-none"
+          loading={isExportMode ? 'eager' : 'lazy'}
+          decoding="async"
+          draggable={false}
+        />
+      ))}
 
       {(() => {
         const labels = data.freeLabels || (data.freeText
@@ -555,10 +567,12 @@ const Panel = React.memo(({
                 top: `${label.y}%`,
                 minWidth: '80px',
                 maxWidth: '90%',
-                opacity: isArrangeImage ? (isArrangeDragging ? 1 : (isArrangePlaced ? 0.9 : 0.45)) : 1,
-                filter: isArrangeImage ? 'drop-shadow(0 8px 10px rgba(15, 23, 42, 0.18))' : undefined,
-                pointerEvents: isArrangeImage ? 'none' : undefined,
-                transition: 'opacity 180ms ease, filter 180ms ease'
+                ...(isArrangeImage ? {
+                  opacity: isArrangeDragging ? 1 : (isArrangePlaced ? 0.9 : 0.45),
+                  filter: 'drop-shadow(0 8px 10px rgba(15, 23, 42, 0.18))',
+                  pointerEvents: 'none',
+                  transition: 'opacity 180ms ease, filter 180ms ease'
+                } : {})
               }}
               onClick={(event) => event.stopPropagation()}
               onMouseDown={(event) => event.stopPropagation()}
@@ -717,7 +731,8 @@ const Panel = React.memo(({
 
       {data.label && !data.isText && (
         <div
-          className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-90 z-10"
+          data-dummy-panel-label={data.label}
+          className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"
           style={{ background: labelStyle.bg, color: labelStyle.text }}
         >
           <span className="font-bold text-sm">{data.label}</span>

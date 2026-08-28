@@ -97,6 +97,7 @@ import {
   buildPanelArrangeView,
   createPanelArrangeSession,
   getUnresolvedPanelArrangeTokens,
+  hasPanelImageContent,
   reconcilePanelArrangeSession,
   stagePanelArrangeDrop
 } from './domain/panelArrange';
@@ -420,6 +421,8 @@ export default function App() {
       clearPanelArrangeHold();
       const targetSheet = sheets.find((sheet) => sheet.id === target.sheetId);
       if (!targetSheet) return;
+      const targetPanel = targetSheet.panels?.[target.panelIndex];
+      if (!hasPanelImageContent(targetPanel)) return;
       const arrangeSession = createPanelArrangeSession(target.sheetId, targetSheet.panels || []);
       if (arrangeSession.tokens.length === 0) return;
       suppressNextClickRef.current = true;
