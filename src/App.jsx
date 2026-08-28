@@ -90,9 +90,16 @@ import {
   getPanelTransferableContent,
   hasPanelTransferableContent,
   sanitizePanelData,
-  swapPanelTransferableContent,
   toPanelsMap
 } from './domain/panels';
+import {
+  buildPanelArrangeFinalPanels,
+  buildPanelArrangeView,
+  createPanelArrangeSession,
+  getUnresolvedPanelArrangeTokens,
+  reconcilePanelArrangeSession,
+  stagePanelArrangeDrop
+} from './domain/panelArrange';
 import {
   isSameStockImageList,
   normalizeStockImages
@@ -290,8 +297,10 @@ export default function App() {
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
   const [pointerDragPreview, setPointerDragPreview] = useState(null);
-  const [panelArrangeModeSheetId, setPanelArrangeModeSheetId] = useState(null);
-  const [arrangeDraggingPanelKey, setArrangeDraggingPanelKey] = useState(null);
+  const [panelArrangeSession, setPanelArrangeSession] = useState(null);
+  const [arrangeDraggingTokenId, setArrangeDraggingTokenId] = useState(null);
+  const [isPanelArrangeFinalizing, setIsPanelArrangeFinalizing] = useState(false);
+  const panelArrangeModeSheetId = panelArrangeSession?.sheetId || null;
   const [assignedImagePreview, setAssignedImagePreview] = useState(null);
   const salesModeLongPressTimerRef = useRef(null);
   const salesModeLongPressTriggeredRef = useRef(false);
@@ -320,6 +329,7 @@ export default function App() {
   const LOCK_HOLD_MS = 2000;
 
   const startLockHold = useCallback(() => {
+    if (panelArrangeModeSheetId) return;
     if (lockHoldTimerRef.current) clearTimeout(lockHoldTimerRef.current);
     lockHoldFiredRef.current = false;
     lockHoldTimerRef.current = setTimeout(() => {
@@ -327,7 +337,7 @@ export default function App() {
       setIsLocked((prev) => !prev);
       lockHoldTimerRef.current = null;
     }, LOCK_HOLD_MS);
-  }, []);
+  }, [panelArrangeModeSheetId]);
 
   const cancelLockHold = useCallback(() => {
     if (lockHoldTimerRef.current) {
@@ -357,10 +367,11 @@ export default function App() {
     panelArrangeHoldRef.current = null;
   }, []);
 
-  const exitPanelArrangeMode = useCallback(() => {
+  const clearPanelArrangeModeState = useCallback(() => {
     clearPanelArrangeHold();
-    setArrangeDraggingPanelKey(null);
-    setPanelArrangeModeSheetId(null);
+    setArrangeDraggingTokenId(null);
+    setPanelArrangeSession(null);
+    setIsPanelArrangeFinalizing(false);
   }, [clearPanelArrangeHold]);
 
   const startPanelArrangeHold = useCallback((event, target = {}) => {
@@ -373,7 +384,6 @@ export default function App() {
       || target.sheetId !== activeSheetId
       || panelArrangeModeSheetId
       || isLocked
-      || isMergeMode
       || isPageSelectionMode
       || isLabelSelectionMode
       || isSalesMode
@@ -408,9 +418,15 @@ export default function App() {
     session.timerId = setTimeout(() => {
       if (panelArrangeHoldRef.current !== session) return;
       clearPanelArrangeHold();
+      const targetSheet = sheets.find((sheet) => sheet.id === target.sheetId);
+      if (!targetSheet) return;
+      const arrangeSession = createPanelArrangeSession(target.sheetId, targetSheet.panels || []);
+      if (arrangeSession.tokens.length === 0) return;
       suppressNextClickRef.current = true;
-      setArrangeDraggingPanelKey(null);
-      setPanelArrangeModeSheetId(target.sheetId);
+      setArrangeDraggingTokenId(null);
+      setIsLabelSelectionMode(false);
+      setIsSalesMode(false);
+      setPanelArrangeSession(arrangeSession);
       try {
         navigator.vibrate?.(35);
       } catch (error) {
@@ -429,20 +445,19 @@ export default function App() {
     clearPanelArrangeHold,
     isLabelSelectionMode,
     isLocked,
-    isMergeMode,
     isPageSelectionMode,
     isSalesMode,
     panelArrangeModeSheetId,
+    sheets,
     viewMode
   ]);
 
-  const handleArrangeDragStateChange = useCallback((sheetId, panelIndex, isDragging) => {
-    const panelKey = `${sheetId}:${panelIndex}`;
-    setArrangeDraggingPanelKey((current) => {
-      if (!isDragging) return current === panelKey ? null : current;
-      return panelArrangeModeSheetId === sheetId ? panelKey : current;
+  const handleArrangeDragStateChange = useCallback((tokenId, isDragging) => {
+    setArrangeDraggingTokenId((current) => {
+      if (!isDragging) return current === tokenId ? null : current;
+      return panelArrangeSession?.tokens?.some((token) => token.id === tokenId) ? tokenId : current;
     });
-  }, [panelArrangeModeSheetId]);
+  }, [panelArrangeSession]);
 
   useEffect(() => () => {
     clearPanelArrangeHold();
@@ -450,36 +465,19 @@ export default function App() {
 
   useEffect(() => {
     if (!panelArrangeModeSheetId) return;
-    const shouldExit = (
-      viewMode !== 'single'
-      || activeSheetId !== panelArrangeModeSheetId
-      || isLocked
-      || isMergeMode
-      || isPageSelectionMode
-      || isLabelSelectionMode
-      || isSalesMode
-    );
-    if (shouldExit) exitPanelArrangeMode();
+    if (viewMode !== 'single') setViewMode('single');
+    if (activeSheetId !== panelArrangeModeSheetId) setActiveSheetId(panelArrangeModeSheetId);
+    if (isPageSelectionMode) setIsPageSelectionMode(false);
+    if (isLabelSelectionMode) setIsLabelSelectionMode(false);
+    if (isSalesMode) setIsSalesMode(false);
   }, [
     activeSheetId,
-    exitPanelArrangeMode,
     isLabelSelectionMode,
-    isLocked,
-    isMergeMode,
     isPageSelectionMode,
     isSalesMode,
     panelArrangeModeSheetId,
     viewMode
   ]);
-
-  useEffect(() => {
-    if (!panelArrangeModeSheetId) return undefined;
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') exitPanelArrangeMode();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [exitPanelArrangeMode, panelArrangeModeSheetId]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressValue, setProgressValue] = useState(0);
@@ -1285,6 +1283,7 @@ export default function App() {
   }, []);
 
   const startSalesModeLongPress = useCallback((event) => {
+    if (panelArrangeSession) return;
     if (event?.button !== undefined && event.button !== 0) return;
     clearSalesModeLongPressTimer();
     salesModeLongPressTriggeredRef.current = false;
@@ -1292,19 +1291,20 @@ export default function App() {
       salesModeLongPressTriggeredRef.current = true;
       setIsSalesLookupOpen(true);
     }, 2000);
-  }, [clearSalesModeLongPressTimer]);
+  }, [clearSalesModeLongPressTimer, panelArrangeSession]);
 
   const endSalesModeLongPress = useCallback(() => {
     clearSalesModeLongPressTimer();
   }, [clearSalesModeLongPressTimer]);
 
   const handleSalesModeButtonClick = useCallback(() => {
+    if (panelArrangeSession) return;
     if (salesModeLongPressTriggeredRef.current) {
       salesModeLongPressTriggeredRef.current = false;
       return;
     }
     setIsSalesMode((prev) => !prev);
-  }, []);
+  }, [panelArrangeSession]);
 
   useEffect(() => {
     return () => {
@@ -1398,6 +1398,7 @@ export default function App() {
     const colSpan = maxCol - minCol + 1;
     const primaryIndex = minRow * 4 + minCol;
     const sizeType = getSizeType(rowSpan, colSpan);
+    const isArrangingSheet = panelArrangeSession?.sheetId === sheetId;
 
     if (USE_LOCAL_STORAGE) {
       const sheet = sheets.find(s => s.id === sheetId);
@@ -1406,7 +1407,9 @@ export default function App() {
       newPanels[primaryIndex] = { ...newPanels[primaryIndex], rowSpan, colSpan, hidden: false, sizeType };
       indices.forEach(idx => {
         if (idx !== primaryIndex) {
-          newPanels[idx] = { ...newPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
+          newPanels[idx] = isArrangingSheet
+            ? { ...newPanels[idx], hidden: true, rowSpan: 1, colSpan: 1 }
+            : { ...newPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
         }
       });
 
@@ -1414,6 +1417,9 @@ export default function App() {
         s.id === sheetId ? { ...s, panels: newPanels } : s
       );
       setSheets(newSheets);
+      if (isArrangingSheet) {
+        setPanelArrangeSession((previous) => reconcilePanelArrangeSession(previous, newPanels));
+      }
       // localStorageHelper.setItem('sheets', newSheets); // Auto-save handles this
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
@@ -1422,6 +1428,7 @@ export default function App() {
 
     try {
       const sheetRef = doc(sheetsCollection, sheetId);
+      let arrangedPanelsAfterMerge = null;
       await runCloudTransaction(async (transaction) => {
         const snap = await transaction.get(sheetRef);
         if (!snap.exists()) return;
@@ -1437,15 +1444,21 @@ export default function App() {
         nextPanels[primaryIndex] = { ...nextPanels[primaryIndex], rowSpan, colSpan, hidden: false, sizeType };
         indices.forEach(idx => {
           if (idx !== primaryIndex) {
-            nextPanels[idx] = { ...nextPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
+            nextPanels[idx] = isArrangingSheet
+              ? { ...nextPanels[idx], hidden: true, rowSpan: 1, colSpan: 1 }
+              : { ...nextPanels[idx], hidden: true, image: null, text: '', rowSpan: 1, colSpan: 1 };
           }
         });
+        arrangedPanelsAfterMerge = nextPanels;
 
         const panelUpdates = buildPanelMapUpdates(serverPanels, nextPanels);
         if (Object.keys(panelUpdates).length > 0) {
           transaction.update(sheetRef, panelUpdates);
         }
       }, { key: `sheet:${sheetId}` });
+      if (isArrangingSheet && arrangedPanelsAfterMerge) {
+        setPanelArrangeSession((previous) => reconcilePanelArrangeSession(previous, arrangedPanelsAfterMerge));
+      }
     } catch (error) {
       console.error("Merge error:", error);
       showAlert(buildFirestoreActionErrorMessage("結合に失敗しました。しばらく待って再試行してください。", error));
@@ -1453,7 +1466,7 @@ export default function App() {
       setSelection({ sheetId: null, indices: [] });
       setIsMergeMode(false);
     }
-  }, [canMerge, selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
+  }, [canMerge, panelArrangeSession, selection, sheets, sheetsCollection, runCloudTransaction, showAlert]);
 
   const handleSplit = useCallback(async () => {
     if (isLockedRef.current) return;
@@ -2121,7 +2134,7 @@ export default function App() {
     }
   };
 
-  const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText, options = {}) => {
+  const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
     if (isLockedRef.current) return;
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
 
@@ -2137,14 +2150,8 @@ export default function App() {
         const newPanels = [...fromSheet.panels];
         const dataToMove = { ...newPanels[fromIndex] };
 
-        if (options.swapTargetContent) {
-          const swapped = swapPanelTransferableContent(dataToMove, newPanels[toIndex], movedText);
-          newPanels[fromIndex] = swapped.sourcePanel;
-          newPanels[toIndex] = swapped.targetPanel;
-        } else {
-          newPanels[fromIndex] = clearPanelTransferableContent(newPanels[fromIndex]);
-          newPanels[toIndex] = applyPanelTransferableContent(newPanels[toIndex], dataToMove, movedText);
-        }
+        newPanels[fromIndex] = clearPanelTransferableContent(newPanels[fromIndex]);
+        newPanels[toIndex] = applyPanelTransferableContent(newPanels[toIndex], dataToMove, movedText);
 
         const newSheets = sheets.map(s => s.id === fromSheetId ? { ...s, panels: newPanels } : s);
         setSheets(newSheets);
@@ -2184,14 +2191,8 @@ export default function App() {
         if (fromSheetId === toSheetId) {
           const nextPanels = [...fromPanels];
           const targetPanel = nextPanels[toIndex] || {};
-          if (options.swapTargetContent) {
-            const swapped = swapPanelTransferableContent(dataToMove, targetPanel, movedText);
-            nextPanels[fromIndex] = swapped.sourcePanel;
-            nextPanels[toIndex] = swapped.targetPanel;
-          } else {
-            nextPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
-            nextPanels[toIndex] = applyPanelTransferableContent(targetPanel, dataToMove, movedText);
-          }
+          nextPanels[fromIndex] = clearPanelTransferableContent(dataToMove);
+          nextPanels[toIndex] = applyPanelTransferableContent(targetPanel, dataToMove, movedText);
           const panelUpdates = buildPanelMapUpdates(fromPanels, nextPanels);
           if (Object.keys(panelUpdates).length > 0) {
             transaction.update(fromSheetRef, panelUpdates);
@@ -2228,22 +2229,41 @@ export default function App() {
     if (!targetSheetId || Number.isNaN(targetIndex)) return false;
 
     const arrangePayload = extractPanelArrangeDragPayload(dragPayload);
+    if (arrangePayload) {
+      if (
+        !panelArrangeSession
+        || arrangePayload.sheetId !== panelArrangeSession.sheetId
+        || targetSheetId !== panelArrangeSession.sheetId
+      ) return false;
+
+      const targetSheet = sheets.find((sheet) => sheet.id === targetSheetId);
+      if (!targetSheet?.panels) return false;
+      const staged = stagePanelArrangeDrop(
+        panelArrangeSession,
+        arrangePayload.tokenId,
+        targetIndex,
+        targetSheet.panels
+      );
+      if (staged.status === 'blocked-content') {
+        showAlert('ダミーまたはテキストがあるコマには画像を重ねられません。空きコマを指定してください。');
+        return false;
+      }
+      if (staged.status !== 'placed') return false;
+      setPanelArrangeSession(staged.session);
+      return true;
+    }
+
+    if (panelArrangeSession) return false;
+
     const movePayload = extractPanelMoveDragPayload(dragPayload) || getActivePanelMoveDragPayload();
     if (movePayload) {
-      if (arrangePayload && (
-        arrangePayload.sheetId !== movePayload.sourceSheetId
-        || arrangePayload.sheetId !== targetSheetId
-      )) return false;
-
       void handleMovePanel(
         movePayload.sourceSheetId,
         movePayload.sourceIndex,
         targetSheetId,
         targetIndex,
-        movePayload.movedText,
-        { swapTargetContent: !!arrangePayload }
+        movePayload.movedText
       );
-      if (arrangePayload) exitPanelArrangeMode();
       return true;
     }
 
@@ -2262,7 +2282,7 @@ export default function App() {
       ...assignment
     });
     return true;
-  }, [exitPanelArrangeMode, handleMovePanel, handlePanelUpdateWithCheck, sheets]);
+  }, [handleMovePanel, handlePanelUpdateWithCheck, panelArrangeSession, sheets, showAlert]);
 
   const applyDragPayloadToTempShelf = useCallback((dragPayload = {}) => {
     if (extractPanelArrangeDragPayload(dragPayload)) return false;
@@ -2307,6 +2327,83 @@ export default function App() {
     );
     return true;
   }, [handleMoveToExcluded]);
+
+  const finalizePanelArrangeMode = useCallback(async () => {
+    if (!panelArrangeSession || isPanelArrangeFinalizing) return;
+    if (isLockedRef.current) {
+      showAlert('画面ロックを解除してからホバリングを解除してください。');
+      return;
+    }
+
+    const currentSheet = sheets.find((sheet) => sheet.id === panelArrangeSession.sheetId);
+    if (!currentSheet?.panels) {
+      showAlert('対象ページを確認できないため、ホバリングを解除できません。');
+      return;
+    }
+
+    const reconciled = reconcilePanelArrangeSession(panelArrangeSession, currentSheet.panels);
+    const unresolvedCount = getUnresolvedPanelArrangeTokens(reconciled).length;
+    if (unresolvedCount > 0) {
+      setPanelArrangeSession(reconciled);
+      showAlert(`浮遊した画像が ${unresolvedCount} 件残っています。すべての画像をコマへ割り付けてください。`);
+      return;
+    }
+
+    setIsPanelArrangeFinalizing(true);
+    try {
+      if (USE_LOCAL_STORAGE) {
+        const finalPanels = buildPanelArrangeFinalPanels(currentSheet.panels, reconciled);
+        if (!finalPanels) throw new Error('panel-arrange-incomplete');
+        setSheets((previous) => previous.map((sheet) => (
+          sheet.id === reconciled.sheetId ? { ...sheet, panels: finalPanels } : sheet
+        )));
+        clearPanelArrangeModeState();
+        return;
+      }
+
+      if (!sheetsCollection) return;
+      let transactionUnresolvedCount = 0;
+      await runCloudTransaction(async (transaction) => {
+        const sheetRef = doc(sheetsCollection, reconciled.sheetId);
+        const snapshot = await transaction.get(sheetRef);
+        if (!snapshot.exists()) throw new Error('panel-arrange-sheet-missing');
+
+        const serverPanels = getPanelsFromDocData(snapshot.data() || {});
+        const serverSession = reconcilePanelArrangeSession(reconciled, serverPanels);
+        transactionUnresolvedCount = getUnresolvedPanelArrangeTokens(serverSession).length;
+        if (transactionUnresolvedCount > 0) return;
+
+        const finalPanels = buildPanelArrangeFinalPanels(serverPanels, serverSession);
+        if (!finalPanels) {
+          transactionUnresolvedCount = 1;
+          return;
+        }
+        const panelUpdates = buildPanelMapUpdates(serverPanels, finalPanels);
+        if (Object.keys(panelUpdates).length > 0) {
+          transaction.update(sheetRef, panelUpdates);
+        }
+      }, { key: `sheet:${reconciled.sheetId}` });
+
+      if (transactionUnresolvedCount > 0) {
+        showAlert(`ページ構成の変更により浮遊画像が ${transactionUnresolvedCount} 件残っています。割り付けを完了してください。`);
+        return;
+      }
+      clearPanelArrangeModeState();
+    } catch (error) {
+      console.error('Panel arrange finalize failed:', error);
+      showAlert(buildFirestoreActionErrorMessage('ホバリング中の画像配置を保存できませんでした。配置状態は保持されています。', error));
+    } finally {
+      setIsPanelArrangeFinalizing(false);
+    }
+  }, [
+    clearPanelArrangeModeState,
+    isPanelArrangeFinalizing,
+    panelArrangeSession,
+    runCloudTransaction,
+    sheets,
+    sheetsCollection,
+    showAlert
+  ]);
 
   const dispatchPointerDropToZone = useCallback((zoneId, dragPayload = {}) => {
     if (!zoneId) return false;
@@ -2703,6 +2800,10 @@ export default function App() {
   // --- Page Actions ---
 
   const handleNavigatePage = (direction) => {
+    if (panelArrangeSession) {
+      showAlert('ホバリングを解除してから前後のページへ移動してください。');
+      return;
+    }
     const navigationList = sheets;
     if (!navigationList || navigationList.length === 0) return;
 
@@ -3563,6 +3664,17 @@ export default function App() {
     return result;
   }, [sheets, genreFilter, viewMode, activeSheetId]);
 
+  const panelArrangeView = useMemo(() => {
+    if (!panelArrangeSession) return null;
+    const targetSheet = sheets.find((sheet) => sheet.id === panelArrangeSession.sheetId);
+    if (!targetSheet?.panels) return null;
+    return buildPanelArrangeView(targetSheet.panels, panelArrangeSession);
+  }, [panelArrangeSession, sheets]);
+
+  const unresolvedPanelArrangeCount = useMemo(() => (
+    getUnresolvedPanelArrangeTokens(panelArrangeView?.session || panelArrangeSession).length
+  ), [panelArrangeSession, panelArrangeView]);
+
   const imageDataById = useMemo(() => {
     const map = {};
     images.forEach((img) => {
@@ -3583,6 +3695,10 @@ export default function App() {
   }, [images]);
 
   const handleOpenAssignedImage = useCallback((sheetId) => {
+    if (panelArrangeSession) {
+      showAlert('ホバリングを解除してから別のページへ移動してください。');
+      return;
+    }
     if (!sheetId || !sheets.some((sheet) => sheet.id === sheetId)) return;
     setGenreFilter('all');
     setActiveSheetId(sheetId);
@@ -3592,7 +3708,7 @@ export default function App() {
     setIsLabelSelectionMode(false);
     setIsMergeMode(false);
     setSelection({ sheetId: null, indices: [] });
-  }, [sheets]);
+  }, [panelArrangeSession, sheets, showAlert]);
 
   const currentList = useMemo(() => {
     if (viewMode === 'single') return sheets;
@@ -3885,7 +4001,16 @@ export default function App() {
 
           <div className="flex p-1 rounded-full transition-all" style={{ border: '1px solid var(--m3-outline)', background: 'var(--m3-surface)' }}>
             <button
-              onClick={() => { setViewMode('list'); setActiveSheetId(null); setIsPageSelectionMode(false); setIsLabelSelectionMode(false); }}
+              onClick={() => {
+                if (panelArrangeSession) {
+                  showAlert('ホバリングを解除してから表示を切り替えてください。');
+                  return;
+                }
+                setViewMode('list');
+                setActiveSheetId(null);
+                setIsPageSelectionMode(false);
+                setIsLabelSelectionMode(false);
+              }}
               onMouseEnter={(e) => showQuickHelp(e, '詳細', 'ページ単位で編集する表示に切り替えます。')}
               onMouseLeave={hideQuickHelp}
               className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
@@ -3894,7 +4019,16 @@ export default function App() {
               <List size={18} /> <span className="hidden sm:inline">詳細</span>
             </button>
             <button
-              onClick={() => { setViewMode('overview'); setActiveSheetId(null); setIsPageSelectionMode(false); setIsLabelSelectionMode(false); }}
+              onClick={() => {
+                if (panelArrangeSession) {
+                  showAlert('ホバリングを解除してから表示を切り替えてください。');
+                  return;
+                }
+                setViewMode('overview');
+                setActiveSheetId(null);
+                setIsPageSelectionMode(false);
+                setIsLabelSelectionMode(false);
+              }}
               onMouseEnter={(e) => showQuickHelp(e, '全体', '全ページを一覧で表示します。コマの全体把握に使います。')}
               onMouseLeave={hideQuickHelp}
               className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
@@ -4226,7 +4360,13 @@ export default function App() {
                     </button>
 
                     <button
-                      onClick={() => setIsLabelSelectionMode(!isLabelSelectionMode)}
+                      onClick={() => {
+                        if (panelArrangeSession) {
+                          showAlert('ホバリング中はラベル追加モードへ切り替えできません。');
+                          return;
+                        }
+                        setIsLabelSelectionMode(!isLabelSelectionMode);
+                      }}
                       onMouseEnter={(e) => showQuickHelp(e, 'ラベル追加', '自由ラベル配置モードをON/OFFします。ON中はコマ内クリックでラベルを配置できます。')}
                       onMouseLeave={hideQuickHelp}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 font-bold text-[11px] whitespace-nowrap ${isLabelSelectionMode
@@ -4264,6 +4404,8 @@ export default function App() {
             >
               {displaySheets.map((sheet) => {
                 const isPageSelected = selectedSheetIds.has(sheet.id);
+                const isArrangeSheet = panelArrangeModeSheetId === sheet.id && !!panelArrangeView;
+                const renderedPanels = isArrangeSheet ? panelArrangeView.panels : sheet.panels;
                 return (
                   <div
                     key={sheet.id}
@@ -4350,7 +4492,7 @@ export default function App() {
                           sheet={sheet}
                           index={sheets.findIndex(s => s.id === sheet.id)}
                           pageNumber={sheets.findIndex(s => s.id === sheet.id) + 1}
-                          panels={sheet.panels}
+                          panels={renderedPanels}
                           updatePanel={handlePanelUpdateWithCheck}
                           isOverview={viewMode === 'overview'}
                           zoomScale={zoomScale}
@@ -4369,8 +4511,11 @@ export default function App() {
                           isLabelMode={isLabelSelectionMode}
                           onChangeGenre={(genreId) => handleChangeGenre(sheet.id, genreId)}
                           onPreviewImage={handlePreviewAssignedImage}
-                          isArrangeMode={panelArrangeModeSheetId === sheet.id}
-                          arrangeDraggingPanelKey={arrangeDraggingPanelKey}
+                          isArrangeMode={isArrangeSheet}
+                          arrangeDraggingTokenId={arrangeDraggingTokenId}
+                          arrangeAssignedTokenIdsByPanel={isArrangeSheet ? panelArrangeView.assignedTokenIdsByPanel : {}}
+                          arrangePlacedPanelIndices={isArrangeSheet ? panelArrangeView.placedPanelIndices : new Set()}
+                          arrangeFloatingTokensByPanel={isArrangeSheet ? panelArrangeView.floatingTokensByPanel : {}}
                           onStartArrangeHold={startPanelArrangeHold}
                           onCancelArrangeHold={clearPanelArrangeHold}
                           onArrangeDragStateChange={handleArrangeDragStateChange}
@@ -4414,22 +4559,31 @@ export default function App() {
       )}
 
       {panelArrangeModeSheetId && (
-        <div className="fixed bottom-20 left-1/2 z-[155] flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-sky-200 bg-white/95 px-4 py-2.5 shadow-xl backdrop-blur-md">
-          <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
-            <ArrowLeftRight size={17} />
+        <div className="fixed right-4 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
+              <ArrowLeftRight size={17} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-extrabold text-slate-800">画像ホバリング中</p>
+              <p className={`text-[10px] font-bold ${unresolvedPanelArrangeCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                {unresolvedPanelArrangeCount > 0 ? `未配置 ${unresolvedPanelArrangeCount}件` : '解除できます'}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="whitespace-nowrap text-xs font-extrabold text-slate-800">画像の配置変更中</p>
-            <p className="whitespace-nowrap text-[10px] text-slate-500">画像を押したまま移動・ドロップ</p>
-          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">画像を押したままコマへ移動できます。黄緑の枠は今回割り付けた画像です。</p>
           <button
             type="button"
-            onClick={exitPanelArrangeMode}
-            className="ml-1 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
-            title="配置変更を終了（Esc）"
-            aria-label="配置変更を終了"
+            onClick={finalizePanelArrangeMode}
+            disabled={isPanelArrangeFinalizing}
+            className={`mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-extrabold shadow-sm transition-all ${unresolvedPanelArrangeCount > 0
+              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              } disabled:cursor-wait disabled:opacity-60`}
+            title={unresolvedPanelArrangeCount > 0 ? '未配置画像をすべて割り付けてください' : '配置を保存してホバリングを解除'}
           >
-            <X size={15} />
+            {isPanelArrangeFinalizing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            ホバリングを解除
           </button>
         </div>
       )}

@@ -42,7 +42,11 @@ const Panel = React.memo(({
   isLabelMode,
   onPreviewImage,
   isArrangeMode = false,
+  arrangeTokenId = null,
   isArrangeDragging = false,
+  isArrangePlaced = false,
+  arrangeFloatingTokens = [],
+  arrangeDraggingTokenId = null,
   onStartArrangeHold,
   onCancelArrangeHold,
   onArrangeDragStateChange
@@ -126,7 +130,7 @@ const Panel = React.memo(({
 
   const handleDragStart = (event) => {
     onCancelArrangeHold?.();
-    if (!hasTransferableContent) {
+    if (!hasTransferableContent || (isArrangeMode && !arrangeTokenId)) {
       event.preventDefault();
       return;
     }
@@ -138,19 +142,20 @@ const Panel = React.memo(({
       sourceIndex: index,
       textData: currentText || '',
       arrangeMode: isArrangeMode && !!resolvedImage,
-      arrangeSheetId: isArrangeMode ? sheetId : ''
+      arrangeSheetId: isArrangeMode ? sheetId : '',
+      arrangeTokenId: isArrangeMode ? arrangeTokenId : ''
     });
     event.dataTransfer.effectAllowed = 'move';
-    if (isArrangeMode && resolvedImage) {
-      onArrangeDragStateChange?.(sheetId, index, true);
+    if (isArrangeMode && arrangeTokenId) {
+      onArrangeDragStateChange?.(arrangeTokenId, true);
     }
   };
 
   const handleDragEnd = () => {
     setIsArrangeDragOver(false);
     clearActiveNativeDragPayload();
-    if (isArrangeMode) {
-      onArrangeDragStateChange?.(sheetId, index, false);
+    if (isArrangeMode && arrangeTokenId) {
+      onArrangeDragStateChange?.(arrangeTokenId, false);
     }
   };
 
@@ -164,7 +169,8 @@ const Panel = React.memo(({
         sourceIndex: index,
         textData: currentText || '',
         arrangeMode: isArrangeMode && !!resolvedImage,
-        arrangeSheetId: isArrangeMode ? sheetId : ''
+        arrangeSheetId: isArrangeMode ? sheetId : '',
+        arrangeTokenId: isArrangeMode ? arrangeTokenId : ''
       },
       preview: {
         image: resolvedImage || null,
@@ -173,11 +179,61 @@ const Panel = React.memo(({
         text: data.isText ? (currentText || data.text || '') : ''
       },
       onFinish: () => {
-        if (isArrangeMode) {
-          onArrangeDragStateChange?.(sheetId, index, false);
+        if (isArrangeMode && arrangeTokenId) {
+          onArrangeDragStateChange?.(arrangeTokenId, false);
         }
       }
     });
+  };
+
+  const resolveArrangeTokenImage = (token) => (
+    token?.content?.image
+    || (token?.content?.imageId ? imageDataById?.[token.content.imageId] : null)
+    || null
+  );
+
+  const buildArrangeTokenDragConfig = (token) => ({
+    payload: {
+      moveSourceType: 'panel',
+      sourceSheetId: sheetId,
+      sourceIndex: index,
+      textData: token?.content?.text || '',
+      arrangeMode: true,
+      arrangeSheetId: sheetId,
+      arrangeTokenId: token.id
+    },
+    preview: {
+      image: resolveArrangeTokenImage(token),
+      label: token?.content?.label || null,
+      code: token?.content?.code || null,
+      text: token?.content?.text || ''
+    },
+    onFinish: () => onArrangeDragStateChange?.(token.id, false)
+  });
+
+  const handleFloatingTokenDragStart = (event, token) => {
+    event.stopPropagation();
+    onCancelArrangeHold?.();
+    setDragPayload(event.dataTransfer, buildArrangeTokenDragConfig(token).payload);
+    event.dataTransfer.effectAllowed = 'move';
+    onArrangeDragStateChange?.(token.id, true);
+  };
+
+  const handleFloatingTokenDragEnd = (event, token) => {
+    event.stopPropagation();
+    clearActiveNativeDragPayload();
+    onArrangeDragStateChange?.(token.id, false);
+  };
+
+  const handleFloatingTokenPointerDown = (event, token) => {
+    event.stopPropagation();
+    onArrangeDragStateChange?.(token.id, true);
+    onStartPointerDrag?.(event, buildArrangeTokenDragConfig(token));
+  };
+
+  const handleFloatingTokenPointerRelease = (event, token) => {
+    event.stopPropagation();
+    onArrangeDragStateChange?.(token.id, false);
   };
 
   const handleDragOver = (event) => {
@@ -206,7 +262,7 @@ const Panel = React.memo(({
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
   const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
-  const isArrangeImage = isArrangeMode && !!resolvedImage;
+  const isArrangeImage = isArrangeMode && !!resolvedImage && !!arrangeTokenId;
   const textLength = Array.from(localText || '').length;
   const textSizeClass = textLength > 180
     ? 'text-[9px]'
@@ -358,8 +414,8 @@ const Panel = React.memo(({
     if (event.target.closest?.('textarea, input, button, select, [contenteditable="true"]')) return;
 
     if (isArrangeMode) {
-      if (!resolvedImage) return;
-      onArrangeDragStateChange?.(sheetId, index, true);
+      if (!resolvedImage || !arrangeTokenId) return;
+      onArrangeDragStateChange?.(arrangeTokenId, true);
       handlePointerDragStart(event);
       return;
     }
@@ -371,8 +427,8 @@ const Panel = React.memo(({
   };
 
   const handlePanelPointerRelease = () => {
-    if (isArrangeMode) {
-      onArrangeDragStateChange?.(sheetId, index, false);
+    if (isArrangeMode && arrangeTokenId) {
+      onArrangeDragStateChange?.(arrangeTokenId, false);
     }
   };
 
@@ -466,6 +522,7 @@ const Panel = React.memo(({
         <div
           className={`absolute inset-0 z-0 pointer-events-none transition-[opacity,transform,filter] duration-200
             ${isArrangeImage ? 'daiwari-panel-arrange-image' : ''}
+            ${isArrangePlaced ? 'daiwari-panel-arrange-image-placed' : ''}
             ${isArrangeDragging ? 'daiwari-panel-arrange-image-active' : ''}
           `}
         >
@@ -498,7 +555,7 @@ const Panel = React.memo(({
                 top: `${label.y}%`,
                 minWidth: '80px',
                 maxWidth: '90%',
-                opacity: isArrangeImage ? (isArrangeDragging ? 1 : 0.45) : 1,
+                opacity: isArrangeImage ? (isArrangeDragging ? 1 : (isArrangePlaced ? 0.9 : 0.45)) : 1,
                 filter: isArrangeImage ? 'drop-shadow(0 8px 10px rgba(15, 23, 42, 0.18))' : undefined,
                 pointerEvents: isArrangeImage ? 'none' : undefined,
                 transition: 'opacity 180ms ease, filter 180ms ease'
@@ -559,6 +616,70 @@ const Panel = React.memo(({
           );
         });
       })()}
+
+      {isArrangeMode && arrangeFloatingTokens.map((token, tokenIndex) => {
+        const floatingImage = resolveArrangeTokenImage(token);
+        const isDraggingToken = arrangeDraggingTokenId === token.id;
+        const offset = Math.min(tokenIndex, 3) * 6;
+        const tokenLabels = token.content?.freeLabels || [];
+        return (
+          <div
+            key={token.id}
+            data-arrange-floating-token-id={token.id}
+            className={`absolute z-[40] overflow-hidden rounded-xl border-2 border-dashed border-sky-300 bg-white/90 shadow-2xl backdrop-blur-sm cursor-grab active:cursor-grabbing transition-[opacity,filter] duration-150 ${isDraggingToken ? 'opacity-100' : 'opacity-[0.65]'}`}
+            style={{
+              left: `${7 + offset}%`,
+              top: `${7 + offset}%`,
+              right: `${7 - Math.min(tokenIndex, 2) * 2}%`,
+              bottom: `${7 - Math.min(tokenIndex, 2) * 2}%`,
+              touchAction: 'none',
+              filter: isDraggingToken
+                ? 'drop-shadow(0 16px 16px rgba(15, 23, 42, 0.35))'
+                : 'drop-shadow(0 10px 12px rgba(15, 23, 42, 0.24))'
+            }}
+            draggable
+            onDragStart={(event) => handleFloatingTokenDragStart(event, token)}
+            onDragEnd={(event) => handleFloatingTokenDragEnd(event, token)}
+            onPointerDown={(event) => handleFloatingTokenPointerDown(event, token)}
+            onPointerUp={(event) => handleFloatingTokenPointerRelease(event, token)}
+            onPointerCancel={(event) => handleFloatingTokenPointerRelease(event, token)}
+            title="未配置の浮遊画像：押したまま空きコマへ移動"
+          >
+            {floatingImage ? (
+              <img
+                src={floatingImage}
+                alt="未配置の浮遊画像"
+                className="h-full w-full object-contain pointer-events-none"
+                draggable={false}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center px-2 text-center text-xs font-bold text-slate-600">
+                {token.content?.code || '未配置画像'}
+              </div>
+            )}
+            {token.content?.code && (
+              <span className="absolute left-1.5 top-1.5 rounded bg-white/90 px-1.5 py-0.5 font-mono text-[9px] font-black text-slate-700 shadow">
+                {token.content.code}
+              </span>
+            )}
+            {tokenLabels.map((label) => {
+              const color = FREE_LABEL_COLORS[label.colorIndex % FREE_LABEL_COLORS.length];
+              return (
+                <span
+                  key={label.id}
+                  className="absolute max-w-[88%] -translate-x-1/2 -translate-y-1/2 rounded bg-white/90 px-1 py-0.5 text-center text-[9px] font-bold text-slate-700 shadow"
+                  style={{ left: `${label.x}%`, top: `${label.y}%`, border: `1px solid ${color.border}` }}
+                >
+                  {label.text || 'ラベル'}
+                </span>
+              );
+            })}
+            <span className="absolute bottom-1.5 right-1.5 rounded-full bg-sky-600 px-2 py-0.5 text-[9px] font-bold text-white shadow">
+              未配置
+            </span>
+          </div>
+        );
+      })}
 
       {isSalesMode && matchedSales && (
         <div className="absolute inset-0 z-30 bg-black/60 flex flex-col p-2 text-white pointer-events-none">

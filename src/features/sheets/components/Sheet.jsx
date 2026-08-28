@@ -26,7 +26,10 @@ const Sheet = React.memo(({
   onChangeGenre,
   onPreviewImage,
   isArrangeMode = false,
-  arrangeDraggingPanelKey = null,
+  arrangeDraggingTokenId = null,
+  arrangeAssignedTokenIdsByPanel = {},
+  arrangePlacedPanelIndices = new Set(),
+  arrangeFloatingTokensByPanel = {},
   onStartArrangeHold,
   onCancelArrangeHold,
   onArrangeDragStateChange
@@ -95,6 +98,7 @@ const Sheet = React.memo(({
           if (panelData.hidden) return null;
 
           const panelNumber = displayNumbers[panelIndex];
+          const arrangeTokenId = arrangeAssignedTokenIdsByPanel[panelIndex] || null;
           const isSelected = !isOverview
             && selection?.sheetId === sheet.id
             && selection.indices.includes(panelIndex);
@@ -125,7 +129,11 @@ const Sheet = React.memo(({
               isLabelMode={isLabelMode}
               onPreviewImage={onPreviewImage}
               isArrangeMode={isArrangeMode}
-              isArrangeDragging={arrangeDraggingPanelKey === `${sheet.id}:${panelIndex}`}
+              arrangeTokenId={arrangeTokenId}
+              isArrangeDragging={arrangeDraggingTokenId === arrangeTokenId}
+              isArrangePlaced={arrangePlacedPanelIndices.has(panelIndex)}
+              arrangeFloatingTokens={arrangeFloatingTokensByPanel[panelIndex] || []}
+              arrangeDraggingTokenId={arrangeDraggingTokenId}
               onStartArrangeHold={onStartArrangeHold}
               onCancelArrangeHold={onCancelArrangeHold}
               onArrangeDragStateChange={onArrangeDragStateChange}

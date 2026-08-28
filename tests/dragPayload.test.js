@@ -84,8 +84,12 @@ test('panel arrange payload requires its explicit mode and owning sheet', () => 
   assert.equal(extractPanelArrangeDragPayload({ arrangeMode: true }), null);
   assert.equal(extractPanelArrangeDragPayload({ arrangeSheetId: 'sheet-1' }), null);
   assert.deepEqual(
-    extractPanelArrangeDragPayload({ arrangeMode: 'true', arrangeSheetId: 'sheet-1' }),
-    { sheetId: 'sheet-1' }
+    extractPanelArrangeDragPayload({
+      arrangeMode: 'true',
+      arrangeSheetId: 'sheet-1',
+      arrangeTokenId: 'token-1'
+    }),
+    { sheetId: 'sheet-1', tokenId: 'token-1' }
   );
 });
 

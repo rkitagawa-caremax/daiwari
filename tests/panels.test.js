@@ -16,7 +16,6 @@ import {
   hasPanelTransferableContent,
   isPanelDataEqual,
   sanitizePanelData,
-  swapPanelTransferableContent,
   toPanelsMap
 } from '../src/domain/panels.js';
 
@@ -80,43 +79,6 @@ test('panel transfer content carries free labels while preserving target layout'
 
   const assignmentWithoutLabels = applyPanelTransferableContent(target, { image: 'replacement' });
   assert.deepEqual(assignmentWithoutLabels.freeLabels, []);
-});
-
-test('arrange-mode swap preserves both panel layouts and both transferable payloads', () => {
-  const source = {
-    imageId: 'image-source',
-    code: 'E1001',
-    rowSpan: 2,
-    colSpan: 1,
-    freeLabels: [{ id: 'source-label', text: '移動元', x: 40, y: 60, colorIndex: 1 }]
-  };
-  const target = {
-    imageId: 'image-target',
-    code: 'E1002',
-    rowSpan: 1,
-    colSpan: 2,
-    freeLabels: [{ id: 'target-label', text: '移動先', x: 55, y: 45, colorIndex: 2 }]
-  };
-
-  const swapped = swapPanelTransferableContent(source, target);
-
-  assert.equal(swapped.sourcePanel.rowSpan, 2);
-  assert.equal(swapped.sourcePanel.colSpan, 1);
-  assert.equal(swapped.sourcePanel.imageId, 'image-target');
-  assert.deepEqual(swapped.sourcePanel.freeLabels, target.freeLabels);
-  assert.equal(swapped.targetPanel.rowSpan, 1);
-  assert.equal(swapped.targetPanel.colSpan, 2);
-  assert.equal(swapped.targetPanel.imageId, 'image-source');
-  assert.deepEqual(swapped.targetPanel.freeLabels, source.freeLabels);
-
-  const movedToEmpty = swapPanelTransferableContent(source, {
-    rowSpan: 1,
-    colSpan: 1,
-    text: 'stale non-content text'
-  });
-  assert.equal(movedToEmpty.sourcePanel.imageId, null);
-  assert.equal(movedToEmpty.sourcePanel.text, '');
-  assert.equal(movedToEmpty.targetPanel.imageId, 'image-source');
 });
 
 test('CSV code keeps text dummy codes while retaining legacy dummy markers', () => {

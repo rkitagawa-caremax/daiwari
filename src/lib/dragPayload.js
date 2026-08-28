@@ -19,6 +19,7 @@ const DAIWARI_DRAG_FIELDS = [
   'textData',
   'arrangeMode',
   'arrangeSheetId',
+  'arrangeTokenId',
   'type',
   'src',
   'imageId',
@@ -163,8 +164,9 @@ export const hasPanelArrangeHoldMoved = (
 export const extractPanelArrangeDragPayload = (dragPayload = {}) => {
   if (String(dragPayload.arrangeMode || '') !== 'true') return null;
   const sheetId = parseNullableDragValue(dragPayload.arrangeSheetId);
-  if (!sheetId) return null;
-  return { sheetId };
+  const tokenId = parseNullableDragValue(dragPayload.arrangeTokenId);
+  if (!sheetId || !tokenId) return null;
+  return { sheetId, tokenId };
 };
 
 export const extractPanelMoveDragPayload = (dragPayload = {}) => {
