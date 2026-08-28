@@ -61,7 +61,8 @@ import {
   ChevronUp,
   MoreHorizontal,
   Undo2,
-  Redo2
+  Redo2,
+  Wrench
 } from 'lucide-react';
 
 import { idbHelper } from './idbHelper';
@@ -301,6 +302,7 @@ export default function App() {
   const [activeSheetId, setActiveSheetId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTopBarsVisible, setIsTopBarsVisible] = useState(true);
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [searchQuery, setSearchQuery] = useState("");
   const [genreFilter, setGenreFilter] = useState('all');
@@ -4184,33 +4186,6 @@ export default function App() {
             </div>
           )}
 
-          {/* 画面ロックボタン: 2秒長押しでトグル。ロック中は編集系を一律 no-op、閲覧・画面切替・ページ移動は可能。 */}
-          <button
-            type="button"
-            onPointerDown={startLockHold}
-            onPointerUp={cancelLockHold}
-            onPointerLeave={cancelLockHold}
-            onPointerCancel={cancelLockHold}
-            onClick={(e) => {
-              // 長押し未満の単発クリックでは何もしない (誤発動防止)。
-              if (!lockHoldFiredRef.current) {
-                e.preventDefault();
-              }
-              lockHoldFiredRef.current = false;
-            }}
-            onMouseEnter={(e) => showQuickHelp(e, isLocked ? '画面ロック中' : '画面ロック', isLocked ? '2秒長押しで解除します。閲覧・画面切替・ページ移動は引き続き使えます。' : '鍵を2秒長押しで編集を一時停止します。閲覧・画面切替・ページ移動は引き続き可能です。')}
-            onMouseLeave={hideQuickHelp}
-            title={isLocked ? '画面ロック中 (2秒長押しで解除)' : '画面をロック (2秒長押し)'}
-            className={`flex items-center justify-center w-10 h-10 rounded-full mr-1 transition-colors ${
-              isLocked
-                ? 'bg-rose-100 text-rose-600 border-2 border-rose-300 shadow-inner'
-                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-            }`}
-            style={{ touchAction: 'none' }}
-          >
-            {isLocked ? <Lock size={18} /> : <Unlock size={18} />}
-          </button>
-
           {/* 戻る / 進む (アカウント単位の undo / redo) */}
           <div className="flex items-center gap-1 mr-1">
             <button
@@ -4275,29 +4250,6 @@ export default function App() {
               <Grid size={18} /> <span className="hidden sm:inline">全体</span>
             </button>
           </div>
-
-          {/* Page Selection Mode Toggle */}
-          {viewMode === 'overview' && (
-            <button
-              onClick={togglePageSelectionMode}
-              onMouseEnter={(e) => showQuickHelp(e, '選択モード', '複数ページを選択して、入れ替え・画像解除・削除を行います。')}
-              onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border ml-3 whitespace-nowrap ${isPageSelectionMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-              title="複数ページを選択して削除"
-            >
-              <CheckSquare size={14} strokeWidth={2.5} /> <span className="hidden sm:inline">選択モード</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setIsQuickHelpMode((prev) => !prev)}
-            className={`ml-1 w-9 h-9 rounded-full border text-[14px] font-extrabold leading-none transition-all ${isQuickHelpMode
-              ? 'bg-sky-600 text-white border-sky-500 ring-4 ring-sky-300/50 shadow-[0_0_20px_rgba(56,189,248,0.55)]'
-              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-            title="クイックヘルプ"
-          >
-            Q
-          </button>
 
           {isPageSelectionMode && (
             <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-4 duration-300 bg-white/50 backdrop-blur-sm px-2 py-1 rounded-xl border border-slate-200/50">
@@ -4372,39 +4324,119 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-          {!isPageSelectionMode && viewMode === 'overview' && (
-            <button
-              onClick={() => setHighlightLabels(!highlightLabels)}
-              onMouseEnter={(e) => showQuickHelp(e, 'ラベル強調', 'ラベルが1つ以上あるコマを緑色で強調表示します。もう一度押すと解除します。')}
-              onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${highlightLabels ? 'bg-emerald-500 text-white border-emerald-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-              title="自由ラベルがあるコマを緑色で強調表示"
-            >
-              <Tag size={14} strokeWidth={2.5} /> <span>ラベル強調</span>
-            </button>
-          )}
-
+          {/* ツールメニュー: 画面ロック / 選択モード / Q / ラベル強調 / 空き強調 / 出力 をまとめる */}
           <button
-            onClick={() => setHighlightEmpty(!highlightEmpty)}
-            onMouseEnter={(e) => showQuickHelp(e, '空き強調', '空きコマを赤色で強調表示します。全体表示時の確認に使います。')}
+            type="button"
+            onClick={() => setIsToolsMenuOpen((prev) => !prev)}
+            onMouseEnter={(e) => showQuickHelp(e, 'ツール', '画面ロック・選択モード・強調表示・CSV出力などの機能をまとめています。')}
             onMouseLeave={hideQuickHelp}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${highlightEmpty ? 'bg-rose-500 text-white border-rose-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-            title="空きコマを赤色で強調表示"
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${isToolsMenuOpen ? 'bg-slate-700 text-white border-slate-700 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            title="ツール"
+            aria-expanded={isToolsMenuOpen}
+            aria-haspopup="true"
           >
-            <AlertCircle size={14} strokeWidth={2.5} /> <span>空き強調</span>
+            <Wrench size={14} strokeWidth={2.5} /> <span>ツール</span>
+            <ChevronDown size={13} className={`transition-transform duration-200 ${isToolsMenuOpen ? 'rotate-180' : ''}`} />
           </button>
-
-          <button
-            onClick={handleExportCSV}
-            onMouseEnter={(e) => showQuickHelp(e, '出力', '現在のページ情報をCSVで出力します。外部共有やバックアップに使えます。')}
-            onMouseLeave={hideQuickHelp}
-            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-full transition-all duration-300 border-2 border-emerald-500 bg-white text-emerald-600 hover:bg-emerald-50 shadow-sm hover:shadow whitespace-nowrap"
-            title="ページ情報をCSVでダウンロード"
-          >
-            <FileSpreadsheet size={16} strokeWidth={2.5} /> <span>出力</span>
-          </button>
-
         </div>
+
+        {isToolsMenuOpen && (
+          <>
+            <div className="fixed inset-0 z-[94]" onClick={() => setIsToolsMenuOpen(false)} aria-hidden="true" />
+            <div
+              className="absolute right-6 top-full z-[95] mt-2 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200"
+              role="menu"
+              aria-label="ツールメニュー"
+            >
+              {/* 画面ロックボタン: 2秒長押しでトグル。ロック中は編集系を一律 no-op、閲覧・画面切替・ページ移動は可能。 */}
+              <button
+                type="button"
+                onPointerDown={startLockHold}
+                onPointerUp={cancelLockHold}
+                onPointerLeave={cancelLockHold}
+                onPointerCancel={cancelLockHold}
+                onClick={(e) => {
+                  // 長押し未満の単発クリックでは何もしない (誤発動防止)。
+                  if (!lockHoldFiredRef.current) {
+                    e.preventDefault();
+                  }
+                  lockHoldFiredRef.current = false;
+                }}
+                onMouseEnter={(e) => showQuickHelp(e, isLocked ? '画面ロック中' : '画面ロック', isLocked ? '2秒長押しで解除します。閲覧・画面切替・ページ移動は引き続き使えます。' : '鍵を2秒長押しで編集を一時停止します。閲覧・画面切替・ページ移動は引き続き可能です。')}
+                onMouseLeave={hideQuickHelp}
+                title={isLocked ? '画面ロック中 (2秒長押しで解除)' : '画面をロック (2秒長押し)'}
+                className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
+                  isLocked
+                    ? 'bg-rose-100 text-rose-600 border-2 border-rose-300 shadow-inner'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                }`}
+                style={{ touchAction: 'none' }}
+              >
+                {isLocked ? <Lock size={18} /> : <Unlock size={18} />}
+              </button>
+
+              {viewMode === 'overview' && (
+                <button
+                  onClick={() => {
+                    togglePageSelectionMode();
+                    setIsToolsMenuOpen(false);
+                  }}
+                  onMouseEnter={(e) => showQuickHelp(e, '選択モード', '複数ページを選択して、入れ替え・画像解除・削除を行います。')}
+                  onMouseLeave={hideQuickHelp}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${isPageSelectionMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                  title="複数ページを選択して削除"
+                >
+                  <CheckSquare size={14} strokeWidth={2.5} /> <span>選択モード</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsQuickHelpMode((prev) => !prev)}
+                className={`w-9 h-9 flex-shrink-0 rounded-full border text-[14px] font-extrabold leading-none transition-all ${isQuickHelpMode
+                  ? 'bg-sky-600 text-white border-sky-500 ring-4 ring-sky-300/50 shadow-[0_0_20px_rgba(56,189,248,0.55)]'
+                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                title="クイックヘルプ"
+              >
+                Q
+              </button>
+
+              {!isPageSelectionMode && viewMode === 'overview' && (
+                <button
+                  onClick={() => setHighlightLabels(!highlightLabels)}
+                  onMouseEnter={(e) => showQuickHelp(e, 'ラベル強調', 'ラベルが1つ以上あるコマを緑色で強調表示します。もう一度押すと解除します。')}
+                  onMouseLeave={hideQuickHelp}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${highlightLabels ? 'bg-emerald-500 text-white border-emerald-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                  title="自由ラベルがあるコマを緑色で強調表示"
+                >
+                  <Tag size={14} strokeWidth={2.5} /> <span>ラベル強調</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setHighlightEmpty(!highlightEmpty)}
+                onMouseEnter={(e) => showQuickHelp(e, '空き強調', '空きコマを赤色で強調表示します。全体表示時の確認に使います。')}
+                onMouseLeave={hideQuickHelp}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-full transition-all duration-300 border whitespace-nowrap ${highlightEmpty ? 'bg-rose-500 text-white border-rose-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                title="空きコマを赤色で強調表示"
+              >
+                <AlertCircle size={14} strokeWidth={2.5} /> <span>空き強調</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsToolsMenuOpen(false);
+                  handleExportCSV();
+                }}
+                onMouseEnter={(e) => showQuickHelp(e, '出力', '現在のページ情報をCSVで出力します。外部共有やバックアップに使えます。')}
+                onMouseLeave={hideQuickHelp}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-full transition-all duration-300 border-2 border-emerald-500 bg-white text-emerald-600 hover:bg-emerald-50 shadow-sm hover:shadow whitespace-nowrap"
+                title="ページ情報をCSVでダウンロード"
+              >
+                <FileSpreadsheet size={16} strokeWidth={2.5} /> <span>出力</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
       )}
 
@@ -4412,6 +4444,7 @@ export default function App() {
         type="button"
         onClick={() => {
           setIsTopBarsVisible((current) => !current);
+          setIsToolsMenuOpen(false);
           hideQuickHelp();
         }}
         className={`fixed right-3 z-[90] flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-500 shadow-md backdrop-blur transition-all duration-300 hover:bg-white hover:text-slate-700 hover:shadow-lg ${isTopBarsVisible ? 'top-[9.5rem]' : 'top-2'}`}
@@ -4588,7 +4621,7 @@ export default function App() {
             )}
 
             <div
-              className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}
+              className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}
               style={{
                 transform: `scale(${zoomScale})`,
                 transformOrigin: 'top center',
