@@ -85,7 +85,6 @@ import {
   buildDefaultPanels,
   buildPanelMapUpdates,
   clearPanelTransferableContent,
-  getPanelCsvCode,
   getPanelDataPatch,
   getPanelFreeLabels,
   getPanelsFromDocData,
@@ -142,6 +141,12 @@ import {
   parseNullableDragValue
 } from './lib/dragPayload';
 import { parseCSVLine, readFileAutoEncoding } from './lib/csv';
+import { downloadTextFile } from './lib/download';
+import {
+  buildDatedCsvFilename,
+  buildExcludedItemsCsvContent,
+  buildPageCsvContent
+} from './domain/pageCsv';
 import { createPdfRenderer, waitForPdfExportSurface } from './lib/pdfExport';
 import { useWorkActivityTracker } from './hooks/useWorkActivityTracker';
 import { useWorkspaceUndoState } from './hooks/useWorkspaceUndoState';
@@ -2188,29 +2193,8 @@ export default function App() {
   };
 
   const handleExportExcludedCSV = () => {
-    const headers = ['介援隊コード', '画像名', 'ラベル', '登録日時'];
-    const rows = excludedItems.map(item => {
-      const date = item.createdAt?.toDate
-        ? item.createdAt.toDate().toLocaleString()
-        : (item.createdAt?.seconds ? new Date(item.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString());
-
-      return [
-        item.code || '',
-        item.originalName || '',
-        item.label || '',
-        date
-      ].join(',');
-    });
-
-    const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `excluded_items_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = buildExcludedItemsCsvContent(excludedItems);
+    downloadTextFile(csvContent, buildDatedCsvFilename('excluded_items'));
   };
 
   const removeMatchingTempItemsForImage = useCallback((assignedImage, assignedImageId) => {
@@ -3407,72 +3391,8 @@ export default function App() {
   // --- CSV Export Logic (for Pages) ---
   const handleExportCSV = () => {
     try {
-      // K列「X_POS」と L列「Y_POS」を追加: I列「座標」(X{n}Y{m}) を分解した数値。
-      // 例: 座標 X3Y2 → X_POS=3, Y_POS=2 (1始まり、4×4 グリッド内)
-      const headers = ['ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報', '座標', 'コマID', 'X_POS', 'Y_POS'];
-      const rows = [];
-
-      sheets.forEach((sheet, sheetIndex) => {
-        const genreLabel = GENRES.find(g => g.id === sheet.genre)?.label || '未設定';
-        const pageNum = sheetIndex + 1;
-        let visibleCounter = 0;
-        let frameCounter = 0;
-
-        sheet.panels.forEach((panel, panelIndex) => {
-          if (panel.hidden) return;
-          frameCounter++;
-          const isSpecialDummy = panel.label === '埋草' || panel.label === 'タイトル';
-          let panelNum = '';
-          if (!isSpecialDummy) {
-            visibleCounter++;
-            panelNum = visibleCounter;
-          }
-          const codeVal = getPanelCsvCode(panel);
-          let sizeVal = panel.sizeType || getSizeType(panel.rowSpan || 1, panel.colSpan || 1);
-          let textVal = panel.text || '';
-          if (/[,"\n]/.test(textVal)) {
-            textVal = `"${textVal.replace(/"/g, '""')}"`;
-          }
-
-          // I列: グリッド座標 (X1Y1 〜 X4Y4)
-          const gridRow = Math.floor(panelIndex / 4) + 1; // 1始まり
-          const gridCol = (panelIndex % 4) + 1;           // 1始まり
-          const coordVal = `X${gridCol}Y${gridRow}`;
-
-          // J列: コマID（パネルデータに保持している値を出力）
-          const panelIdVal = panel.panelId || '';
-
-          // K列: X_POS (座標の X の直後の数字)
-          // L列: Y_POS (座標の Y の直後の数字)
-          const xPos = gridCol;
-          const yPos = gridRow;
-
-          rows.push([
-            genreLabel,
-            pageNum,
-            panelNum,
-            frameCounter,
-            codeVal,
-            sizeVal,
-            '',
-            textVal,
-            coordVal,
-            panelIdVal,
-            xPos,
-            yPos
-          ].join(','));
-        });
-      });
-
-      const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `daiwari_export_${new Date().toISOString().slice(0, 10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const csvContent = buildPageCsvContent({ sheets, genres: GENRES });
+      downloadTextFile(csvContent, buildDatedCsvFilename('daiwari_export'));
     } catch (err) {
       console.error("Export failed", err);
       showAlert("CSV出力に失敗しました: " + err.message);
