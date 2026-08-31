@@ -158,7 +158,7 @@ import UndoNoticeToast from './features/layout/UndoNoticeToast';
 import PointerDragPreview from './features/layout/PointerDragPreview';
 import PanelArrangeBanner from './features/layout/PanelArrangeBanner';
 import TopBarsToggleButton from './features/layout/TopBarsToggleButton';
-import ZoomControls from './features/layout/ZoomControls';
+import ZoomControls, { DEFAULT_ZOOM_SCALE } from './features/layout/ZoomControls';
 import PageSelectionToolbar from './features/layout/PageSelectionToolbar';
 import HeaderToolsMenu from './features/layout/HeaderToolsMenu';
 import ContentHeaderControls from './features/layout/ContentHeaderControls';
@@ -250,7 +250,7 @@ export default function App() {
 
   // UI State
   const [viewMode, setViewMode] = useState('overview');
-  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomScale, setZoomScale] = useState(DEFAULT_ZOOM_SCALE);
   const [activeSheetId, setActiveSheetId] = useState(null);
   const [secondarySheetId, setSecondarySheetId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);

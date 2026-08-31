@@ -3,7 +3,8 @@ import { ZoomIn, ZoomOut } from 'lucide-react';
 
 export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 1.5;
-export const ZOOM_STEP = 0.1;
+export const ZOOM_STEP = 0.05;
+export const DEFAULT_ZOOM_SCALE = 0.85;
 
 // 右下に固定表示する表示倍率コントロール (詳細表示のみ)。
 const ZoomControls = ({ zoomScale, setZoomScale }) => (
