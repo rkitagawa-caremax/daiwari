@@ -35,6 +35,7 @@ const Sheet = React.memo(({
   onArrangeDragStateChange
 }) => {
   const genre = GENRES.find((candidate) => candidate.id === sheet.genre) || GENRES[0];
+  const showScreenHeader = !isExportMode;
 
   let visibleCounter = 0;
   const displayNumbers = {};
@@ -71,11 +72,11 @@ const Sheet = React.memo(({
       }}
     >
       <div
-        className={`${isOverview ? 'h-6 px-2' : 'h-3'} w-full flex-shrink-0 flex items-center justify-between`}
+        className={`${showScreenHeader ? 'h-6 px-2' : 'h-3'} w-full flex-shrink-0 flex items-center justify-between`}
         style={{ backgroundColor: genre.color }}
         title={genre.label}
       >
-        {isOverview && (
+        {showScreenHeader && (
           <>
             <span className="text-[11px] font-extrabold leading-none text-slate-700/90">
               P.{pageNumber}

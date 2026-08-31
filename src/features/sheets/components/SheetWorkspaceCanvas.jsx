@@ -1,6 +1,5 @@
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 
-import { GENRES } from '../../../constants/layout';
 import Sheet from './Sheet';
 
 const SheetWorkspaceCanvas = ({
@@ -59,29 +58,7 @@ const SheetWorkspaceCanvas = ({
             </div>
           )}
 
-          <div className={`flex flex-col ${viewMode === 'overview' ? 'gap-0' : 'gap-3'}`}>
-            {viewMode !== 'overview' && (
-              <div className="flex items-center justify-between px-2">
-                <span className="flex items-center gap-2 text-sm font-bold text-slate-500">
-                  <span className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs shadow-sm">
-                    P.{pageIndex + 1}
-                  </span>
-                </span>
-
-                <div className="z-10 flex items-center gap-2">
-                  <select
-                    value={sheet.genre}
-                    onChange={(event) => editing.onChangeGenre(sheet.id, event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
-                    disabled={pageSelection.isEnabled}
-                    className="cursor-pointer rounded-lg border-none bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
-                  >
-                    {GENRES.map((genre) => <option key={genre.id} value={genre.id}>{genre.label}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
-
+          <div className="flex flex-col gap-0">
             <div className={`relative ${pageSelection.isEnabled ? 'pointer-events-none' : ''}`}>
               {viewMode === 'single' && sheet.id === navigation.activeSheetId && (
                 <>

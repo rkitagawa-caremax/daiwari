@@ -3616,7 +3616,7 @@ export default function App() {
           storageKey="daiwari:floating:tempShelfPanel"
           getDefaultPosition={getTempShelfPanelDefaultPosition}
           className="z-[92] flex w-40 flex-col"
-          style={{ maxHeight: '92vh' }}
+          verticalResize={{ minHeight: 180, defaultHeight: 260 }}
         >
         <TempShelfPanel
           tempItems={tempItems}

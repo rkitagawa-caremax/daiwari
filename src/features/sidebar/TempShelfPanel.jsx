@@ -43,7 +43,7 @@ const TempShelfPanel = React.memo(({
 
   return (
     <div
-      className="flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 shadow-lg shadow-slate-300/25 backdrop-blur-md"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 shadow-lg shadow-slate-300/25 backdrop-blur-md"
       data-daiwari-dropzone-id="temp"
       onDragOverCapture={(e) => e.preventDefault()}
       onDropCapture={handleDropToTemp}
@@ -54,7 +54,7 @@ const TempShelfPanel = React.memo(({
         data-drag-handle="true"
         className="flex cursor-grab select-none items-center justify-between border-b border-slate-200/70 px-2.5 py-1.5 transition-colors hover:bg-slate-50 active:cursor-grabbing"
         title="ドラッグで移動 / ダブルクリックで初期位置に戻す"
-        onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ログイン中のGoogleアカウント専用の仮置き場です。ヘッダーをドラッグすると好きな位置に移動できます。')}
+        onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ヘッダーで移動でき、下端のハンドルを上下にドラッグすると高さを変更できます。')}
         onMouseLeave={() => onHideQuickHelp?.()}
       >
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold text-slate-700">
@@ -70,9 +70,9 @@ const TempShelfPanel = React.memo(({
         </div>
       </div>
 
-      <div className="max-h-96 min-h-40 flex-1 overflow-y-auto p-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5 pb-4">
         {items.length === 0 ? (
-          <div className="flex h-36 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-400">
+          <div className="flex h-full min-h-28 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-400">
             <p className="text-[10px] font-medium">ここにドロップ</p>
           </div>
         ) : (
