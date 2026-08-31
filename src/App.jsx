@@ -97,6 +97,11 @@ import {
   isSameTransferItemList,
   toComparableSeconds
 } from './domain/workspaceComparators';
+import {
+  getAdjacentPageOptions,
+  getPageNavigationSelection,
+  getTwoPageDisplaySheets
+} from './domain/twoPageWorkspace';
 import { normalizeCode } from './domain/productCodes';
 import {
   getCoords,
@@ -170,7 +175,7 @@ import AppHeader from './features/layout/AppHeader';
 // フローティングパネルの初期位置 (右端寄せ)。従来の「右端・縦中央付近に縦積み」を再現する。
 const FLOATING_PANEL_RIGHT_MARGIN = 12;
 const FLOATING_PANEL_GAP = 8;
-const SHEET_CONTROL_PANEL_ESTIMATED_HEIGHT = 168;
+const SHEET_CONTROL_PANEL_ESTIMATED_HEIGHT = 208;
 const getFloatingPanelStackTop = (viewportHeight) => Math.max(72, Math.round(viewportHeight * 0.5) - 240);
 const getSheetControlPanelDefaultPosition = ({ viewportWidth, viewportHeight, width }) => ({
   x: viewportWidth - width - FLOATING_PANEL_RIGHT_MARGIN,
@@ -255,6 +260,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState('overview');
   const [zoomScale, setZoomScale] = useState(1);
   const [activeSheetId, setActiveSheetId] = useState(null);
+  const [secondarySheetId, setSecondarySheetId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTopBarsVisible, setIsTopBarsVisible] = useState(true);
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
@@ -842,6 +848,19 @@ export default function App() {
       setIsLabelSelectionMode(false);
     }
   }, [viewMode, sheets, activeSheetId]);
+
+  useEffect(() => {
+    if (viewMode !== 'single') {
+      setSecondarySheetId((current) => (current ? null : current));
+      return;
+    }
+
+    const secondaryExists = sheets.some((sheet) => sheet.id === secondarySheetId);
+    if (secondarySheetId === activeSheetId || (secondarySheetId && !secondaryExists)) {
+      setSecondarySheetId(null);
+      setSelection({ sheetId: null, indices: [] });
+    }
+  }, [viewMode, sheets, activeSheetId, secondarySheetId]);
 
 
   useEffect(() => {
@@ -2966,16 +2985,17 @@ export default function App() {
     const navigationList = sheets;
     if (!navigationList || navigationList.length === 0) return;
 
-    const foundIndex = navigationList.findIndex(s => s.id === activeSheetId);
-    const currentIndex = foundIndex === -1 ? 0 : foundIndex;
+    const nextSelection = getPageNavigationSelection(
+      navigationList,
+      activeSheetId,
+      secondarySheetId,
+      direction
+    );
+    if (!nextSelection) return;
 
-    if (direction === 'prev' && currentIndex > 0) {
-      setActiveSheetId(navigationList[currentIndex - 1].id);
-      setIsLabelSelectionMode(false);
-    } else if (direction === 'next' && currentIndex < navigationList.length - 1) {
-      setActiveSheetId(navigationList[currentIndex + 1].id);
-      setIsLabelSelectionMode(false);
-    }
+    setSecondarySheetId(nextSelection.secondarySheetId);
+    setActiveSheetId(nextSelection.activeSheetId);
+    setIsLabelSelectionMode(false);
   };
 
   const handleChangeGenre = async (sheetId, newGenre) => {
@@ -3459,10 +3479,33 @@ export default function App() {
   };
 
   const displaySheets = useMemo(() => {
+    if (viewMode === 'single') {
+      return getTwoPageDisplaySheets(sheets, activeSheetId, secondarySheetId);
+    }
     let result = genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
-    if (viewMode === 'single' && activeSheetId) result = result.filter(s => s.id === activeSheetId);
     return result;
-  }, [sheets, genreFilter, viewMode, activeSheetId]);
+  }, [sheets, genreFilter, viewMode, activeSheetId, secondarySheetId]);
+
+  const adjacentPageOptions = useMemo(
+    () => viewMode === 'single' ? getAdjacentPageOptions(sheets, activeSheetId) : [],
+    [viewMode, sheets, activeSheetId]
+  );
+
+  const isTwoPageMode = viewMode === 'single'
+    && !!secondarySheetId
+    && displaySheets.some((sheet) => sheet.id === secondarySheetId);
+
+  const handleSelectSecondPage = useCallback((sheetId) => {
+    if (panelArrangeSession) return;
+    if (!adjacentPageOptions.some((option) => option.id === sheetId)) return;
+    setSecondarySheetId(sheetId);
+    setSelection({ sheetId: null, indices: [] });
+  }, [adjacentPageOptions, panelArrangeSession]);
+
+  const handleDisableTwoPageMode = useCallback(() => {
+    setSecondarySheetId(null);
+    setSelection({ sheetId: null, indices: [] });
+  }, []);
 
   const panelArrangeView = useMemo(() => {
     if (!panelArrangeSession) return null;
@@ -3502,6 +3545,7 @@ export default function App() {
     if (!sheetId || !sheets.some((sheet) => sheet.id === sheetId)) return;
     setGenreFilter('all');
     setActiveSheetId(sheetId);
+    setSecondarySheetId(null);
     setViewMode('single');
     setIsPageSelectionMode(false);
     setSelectedSheetIds(new Set());
@@ -3741,6 +3785,7 @@ export default function App() {
     }
     setViewMode(mode);
     setActiveSheetId(null);
+    setSecondarySheetId(null);
     setIsPageSelectionMode(false);
     setIsLabelSelectionMode(false);
   };
@@ -3832,6 +3877,8 @@ export default function App() {
           isLabelSelectionMode={isLabelSelectionMode}
           activeSheetLabelCount={activeSheetLabelCount}
           isPanelArrangeMode={!!panelArrangeSession}
+          isTwoPageMode={isTwoPageMode}
+          adjacentPageOptions={adjacentPageOptions}
           onToggleMergeMode={toggleMergeMode}
           onMerge={handleMerge}
           onSplit={handleSplit}
@@ -3843,6 +3890,8 @@ export default function App() {
             setIsLabelSelectionMode((current) => !current);
           }}
           onDeleteLabels={handleBulkDeletePageLabels}
+          onSelectSecondPage={handleSelectSecondPage}
+          onDisableTwoPageMode={handleDisableTwoPageMode}
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
         />
@@ -3926,7 +3975,12 @@ export default function App() {
             )}
 
             <div
-              className={`relative z-10 ${viewMode === 'overview' ? 'grid grid-cols-2 md:grid-cols-3 gap-8' : 'flex flex-col gap-12 items-center pb-32'}`}
+              data-two-page-workspace={isTwoPageMode ? 'true' : undefined}
+              className={`relative z-10 ${viewMode === 'overview'
+                ? 'grid grid-cols-2 gap-8 md:grid-cols-3'
+                : isTwoPageMode
+                  ? 'flex min-w-max flex-row items-start justify-center gap-6 pb-32'
+                  : 'flex flex-col items-center gap-12 pb-32'}`}
               style={{
                 transform: `scale(${zoomScale})`,
                 transformOrigin: 'top center',
@@ -3940,6 +3994,7 @@ export default function App() {
                 return (
                   <div
                     key={sheet.id}
+                    data-two-page-role={isTwoPageMode ? (sheet.id === activeSheetId ? 'primary' : 'secondary') : undefined}
                     className={`relative group transition-transform duration-300 ${isPageSelectionMode ? 'cursor-pointer' : ''} ${isPageSelected ? 'scale-[1.02]' : ''}`}
                     onClick={() => {
                       if (isPageSelectionMode) {
@@ -3981,7 +4036,7 @@ export default function App() {
                       )}
 
                       <div className={`relative ${isPageSelectionMode ? 'pointer-events-none' : ''}`}>
-                        {viewMode === 'single' && (
+                        {viewMode === 'single' && sheet.id === activeSheetId && (
                           <>
                             <button
                               type="button"

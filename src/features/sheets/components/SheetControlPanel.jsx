@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Columns2,
   Link as LinkIcon,
   GripVertical,
   Merge,
@@ -21,14 +22,19 @@ const SheetControlPanel = React.memo(({
   isLabelSelectionMode,
   activeSheetLabelCount,
   isPanelArrangeMode,
+  isTwoPageMode,
+  adjacentPageOptions = [],
   onToggleMergeMode,
   onMerge,
   onSplit,
   onToggleLabelMode,
   onDeleteLabels,
+  onSelectSecondPage,
+  onDisableTwoPageMode,
   onShowQuickHelp,
   onHideQuickHelp
 }) => {
+  const [isPagePickerOpen, setIsPagePickerOpen] = React.useState(false);
   const isDetailView = viewMode === 'list' || viewMode === 'single';
   const isSinglePage = viewMode === 'single';
   const canUseMergeMode = isDetailView && !isPageSelectionMode && !isLocked;
@@ -37,6 +43,22 @@ const SheetControlPanel = React.memo(({
     && !isLocked
     && !isPanelArrangeMode;
   const canDeleteLabels = canUseLabelTools && activeSheetLabelCount > 0;
+  const canUseTwoPageMode = isSinglePage
+    && !isPageSelectionMode
+    && !isPanelArrangeMode
+    && (isTwoPageMode || adjacentPageOptions.length > 0);
+
+  React.useEffect(() => {
+    if (!canUseTwoPageMode || isTwoPageMode) setIsPagePickerOpen(false);
+  }, [canUseTwoPageMode, isTwoPageMode]);
+
+  const handleTwoPageButtonClick = () => {
+    if (isTwoPageMode) {
+      onDisableTwoPageMode?.();
+      return;
+    }
+    setIsPagePickerOpen((current) => !current);
+  };
 
   return (
     <aside
@@ -53,6 +75,59 @@ const SheetControlPanel = React.memo(({
         <span className="flex-1">コントロール</span>
         <GripVertical size={12} className="text-slate-300" />
       </div>
+
+      <div className="relative">
+        <button
+          type="button"
+          onClick={handleTwoPageButtonClick}
+          disabled={!canUseTwoPageMode}
+          onMouseEnter={(event) => onShowQuickHelp?.(
+            event,
+            '2P同時作業',
+            isTwoPageMode
+              ? '2ページ表示を解除して1ページ表示に戻します。'
+              : '前後のページを横に並べ、2ページをまたいで編集します。'
+          )}
+          onMouseLeave={onHideQuickHelp}
+          className={`${primaryButtonClass} ${isTwoPageMode
+            ? 'bg-sky-50 text-sky-700'
+            : 'text-slate-600 hover:bg-slate-100'}`}
+          title={canUseTwoPageMode ? '2ページを並べて作業' : '前後に表示できるページがありません'}
+          aria-expanded={isPagePickerOpen}
+          aria-pressed={isTwoPageMode}
+        >
+          <Columns2 size={15} />
+          <span>2P同時作業</span>
+        </button>
+
+        {isPagePickerOpen && (
+          <div
+            className="absolute right-full top-0 z-50 mr-2 w-36 rounded-xl border border-slate-200 bg-white p-2 shadow-xl"
+            role="dialog"
+            aria-label="同時表示するページを選択"
+          >
+            <p className="px-1 pb-1.5 text-[10px] font-bold text-slate-400">追加するページ</p>
+            <div className="space-y-1">
+              {adjacentPageOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectSecondPage?.(option.id);
+                    setIsPagePickerOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-sky-50 hover:text-sky-700"
+                >
+                  <span>P.{option.pageNumber}</span>
+                  <span className="text-[9px] font-medium text-slate-400">{option.directionLabel}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="my-1 h-px bg-slate-200/70" />
 
       <button
         type="button"
