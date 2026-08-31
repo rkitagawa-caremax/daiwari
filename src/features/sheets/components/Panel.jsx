@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GripVertical, X } from 'lucide-react';
 
 import {
@@ -7,6 +7,11 @@ import {
   FREE_LABEL_HALF_WIDTH_PX
 } from '../../../constants/layout';
 import { hasPanelTransferableContent } from '../../../domain/panels';
+import {
+  constrainFreeLabelText,
+  formatFreeLabelText,
+  getFreeLabelTextLayout
+} from '../../../domain/freeLabels';
 import { normalizeCode } from '../../../domain/productCodes';
 import {
   DAIWARI_PANEL_DROPZONE_PREFIX,
@@ -60,6 +65,7 @@ const Panel = React.memo(({
   const isFocusedRef = useRef(false);
   const editingLabelIdRef = useRef(null);
   const panelRef = useRef(null);
+  const freeLabelDragSessionRef = useRef(null);
 
   const matchedSales = useMemo(() => {
     if (!isSalesMode || !data.code || !salesData) return null;
@@ -89,12 +95,108 @@ const Panel = React.memo(({
         if (editingLabelIdRef.current === label.id && previous[label.id] !== undefined) {
           next[label.id] = previous[label.id];
         } else {
-          next[label.id] = label.text || '';
+          next[label.id] = formatFreeLabelText(label.text || '');
         }
       });
       return next;
     });
   }, [data.freeLabels, data.freeText]);
+
+  const clearFreeLabelDragSession = useCallback(() => {
+    const session = freeLabelDragSessionRef.current;
+    if (!session || typeof document === 'undefined') {
+      freeLabelDragSessionRef.current = null;
+      return;
+    }
+
+    document.removeEventListener('pointermove', session.handleMove);
+    document.removeEventListener('pointerup', session.handleUp);
+    document.removeEventListener('pointercancel', session.handleCancel);
+    freeLabelDragSessionRef.current = null;
+  }, []);
+
+  useEffect(() => () => clearFreeLabelDragSession(), [clearFreeLabelDragSession]);
+
+  const startFreeLabelDrag = (event, label, labelIndex, labels) => {
+    if (!event || event.isPrimary === false || (event.button !== undefined && event.button !== 0)) return;
+    if (isOverview || isExportMode || isArrangeMode || !panelRef.current) return;
+
+    const labelElement = event.currentTarget.closest?.('[data-free-label-id]');
+    if (!labelElement) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    clearFreeLabelDragSession();
+
+    const panelRect = panelRef.current.getBoundingClientRect();
+    const labelRect = labelElement.getBoundingClientRect();
+    if (panelRect.width <= 0 || panelRect.height <= 0) return;
+
+    const session = {
+      pointerId: event.pointerId,
+      labelElement,
+      originalX: Number(label.x) || 50,
+      originalY: Number(label.y) || 50,
+      x: Number(label.x) || 50,
+      y: Number(label.y) || 50,
+      offsetX: event.clientX - (labelRect.left + labelRect.width / 2),
+      offsetY: event.clientY - (labelRect.top + labelRect.height / 2),
+      panelRect,
+      labelWidth: labelRect.width,
+      labelHeight: labelRect.height,
+      handleMove: null,
+      handleUp: null,
+      handleCancel: null
+    };
+
+    const updatePosition = (pointerEvent) => {
+      const centerX = pointerEvent.clientX - session.offsetX - session.panelRect.left;
+      const centerY = pointerEvent.clientY - session.offsetY - session.panelRect.top;
+      const clampedCenterX = session.labelWidth >= session.panelRect.width
+        ? session.panelRect.width / 2
+        : clamp(centerX, session.labelWidth / 2, session.panelRect.width - session.labelWidth / 2);
+      const clampedCenterY = session.labelHeight >= session.panelRect.height
+        ? session.panelRect.height / 2
+        : clamp(centerY, session.labelHeight / 2, session.panelRect.height - session.labelHeight / 2);
+
+      session.x = (clampedCenterX / session.panelRect.width) * 100;
+      session.y = (clampedCenterY / session.panelRect.height) * 100;
+      session.labelElement.style.left = `${session.x}%`;
+      session.labelElement.style.top = `${session.y}%`;
+    };
+
+    const finishDrag = (pointerEvent, shouldCommit) => {
+      if (pointerEvent?.pointerId !== undefined && pointerEvent.pointerId !== session.pointerId) return;
+      clearFreeLabelDragSession();
+
+      if (!shouldCommit) {
+        session.labelElement.style.left = `${session.originalX}%`;
+        session.labelElement.style.top = `${session.originalY}%`;
+        return;
+      }
+
+      const hasMoved = Math.abs(session.x - session.originalX) > 0.01
+        || Math.abs(session.y - session.originalY) > 0.01;
+      if (!hasMoved) return;
+
+      const nextLabels = [...labels];
+      nextLabels[labelIndex] = { ...label, x: session.x, y: session.y };
+      onUpdate({ ...data, freeLabels: nextLabels, freeText: null });
+    };
+
+    session.handleMove = (pointerEvent) => {
+      if (pointerEvent.pointerId !== session.pointerId) return;
+      pointerEvent.preventDefault();
+      updatePosition(pointerEvent);
+    };
+    session.handleUp = (pointerEvent) => finishDrag(pointerEvent, true);
+    session.handleCancel = (pointerEvent) => finishDrag(pointerEvent, false);
+
+    freeLabelDragSessionRef.current = session;
+    document.addEventListener('pointermove', session.handleMove, { passive: false });
+    document.addEventListener('pointerup', session.handleUp);
+    document.addEventListener('pointercancel', session.handleCancel);
+  };
 
   const handleMouseEnter = (event) => {
     setIsHovered(true);
@@ -567,14 +669,18 @@ const Panel = React.memo(({
         return labels.map((label, labelIndex) => {
           const color = FREE_LABEL_COLORS[label.colorIndex % FREE_LABEL_COLORS.length];
           const draftText = labelDrafts[label.id] ?? label.text ?? '';
+          const labelLayout = getFreeLabelTextLayout(draftText);
+          const labelColumns = Math.max(2, labelLayout.columns);
           return (
             <div
               key={label.id}
+              data-free-label-id={label.id}
               className="absolute z-[25] transform -translate-x-1/2 -translate-y-1/2"
               style={{
                 left: `${label.x}%`,
                 top: `${label.y}%`,
-                minWidth: '80px',
+                width: `min(90%, calc(${labelColumns}em + 20px))`,
+                minWidth: '44px',
                 maxWidth: '90%',
                 ...(isArrangeImage ? {
                   opacity: isArrangeDragging ? 1 : (isArrangePlaced ? 0.9 : 0.45),
@@ -590,7 +696,12 @@ const Panel = React.memo(({
                 {isExportMode ? (
                   <div
                     className="w-full min-h-[2.5em] whitespace-pre-wrap break-words rounded-lg bg-white/95 p-1.5 text-center text-xs font-bold leading-tight shadow-lg"
-                    style={{ border: `2px solid ${color.border}`, color: '#334155' }}
+                    style={{
+                      border: `2px solid ${color.border}`,
+                      color: '#334155',
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-all'
+                    }}
                   >
                     {draftText || 'ラベル'}
                   </div>
@@ -600,39 +711,62 @@ const Panel = React.memo(({
                   style={{
                     border: `2px solid ${color.border}`,
                     color: '#334155',
-                    '--tw-ring-color': color.border
+                    '--tw-ring-color': color.border,
+                    lineHeight: 1.25,
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-all'
                   }}
                   value={draftText}
                   onChange={(event) => {
-                    const nextText = event.target.value;
+                    const nextText = constrainFreeLabelText(event.target.value);
                     setLabelDrafts((previous) => ({ ...previous, [label.id]: nextText }));
                   }}
                   onFocus={() => { editingLabelIdRef.current = label.id; }}
                   onBlur={(event) => {
-                    const committedText = (event.target.value || '').toString();
+                    const committedText = formatFreeLabelText(event.target.value);
                     editingLabelIdRef.current = null;
+                    setLabelDrafts((previous) => ({ ...previous, [label.id]: committedText }));
                     if (committedText === (label.text || '')) return;
                     const newLabels = [...labels];
                     newLabels[labelIndex] = { ...label, text: committedText };
                     onUpdate({ ...data, freeLabels: newLabels, freeText: null });
                   }}
                   placeholder="入力"
-                  rows={Math.max(1, draftText.split('\n').length)}
+                  rows={labelLayout.rows}
+                  wrap="soft"
+                  aria-label="自由ラベル"
                   />
                 )}
                 {!isOverview && !isExportMode && (
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      const newLabels = labels.filter((_, indexToKeep) => indexToKeep !== labelIndex);
-                      onUpdate({ ...data, freeLabels: newLabels, freeText: null });
-                    }}
-                    className="absolute -top-2 -right-2 text-white rounded-full p-1 shadow-md transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 z-10"
-                    style={{ backgroundColor: color.border }}
-                    title="ラベルを削除"
-                  >
-                    <X size={12} strokeWidth={3} />
-                  </button>
+                  <>
+                    {!isArrangeMode && (
+                      <button
+                        type="button"
+                        onPointerDown={(event) => startFreeLabelDrag(event, label, labelIndex, labels)}
+                        onClick={(event) => event.stopPropagation()}
+                        className="absolute -left-2 -top-2 z-10 rounded-full border border-white p-1 text-white opacity-70 shadow-md transition-all hover:scale-110 hover:opacity-100 active:cursor-grabbing"
+                        style={{ backgroundColor: color.border, touchAction: 'none', cursor: 'move' }}
+                        title="ドラッグしてラベルを移動"
+                        aria-label="ラベルを移動"
+                      >
+                        <GripVertical size={11} strokeWidth={3} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const newLabels = labels.filter((_, indexToKeep) => indexToKeep !== labelIndex);
+                        onUpdate({ ...data, freeLabels: newLabels, freeText: null });
+                      }}
+                      className="absolute -top-2 -right-2 text-white rounded-full p-1 shadow-md transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 z-10"
+                      style={{ backgroundColor: color.border }}
+                      title="ラベルを削除"
+                      aria-label="ラベルを削除"
+                    >
+                      <X size={12} strokeWidth={3} />
+                    </button>
+                  </>
                 )}
               </div>
             </div>
