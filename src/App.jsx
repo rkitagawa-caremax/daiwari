@@ -28,8 +28,6 @@ import {
   arrayUnion
 } from 'firebase/firestore';
 import {
-  Grid,
-  List,
   ChevronLeft,
   ChevronRight,
   Layout,
@@ -39,12 +37,8 @@ import {
   Loader2,
   ArrowLeft,
   ArrowRight,
-  BarChart2,
   CheckCircle2,
-  MoreHorizontal,
-  Undo2,
-  Redo2,
-  LogOut
+  MoreHorizontal
 } from 'lucide-react';
 
 import { idbHelper } from './idbHelper';
@@ -171,6 +165,7 @@ import ZoomControls from './features/layout/ZoomControls';
 import PageSelectionToolbar from './features/layout/PageSelectionToolbar';
 import HeaderToolsMenu from './features/layout/HeaderToolsMenu';
 import ContentHeaderControls from './features/layout/ContentHeaderControls';
+import AppHeader from './features/layout/AppHeader';
 
 // フローティングパネルの初期位置 (右端寄せ)。従来の「右端・縦中央付近に縦積み」を再現する。
 const FLOATING_PANEL_RIGHT_MARGIN = 12;
@@ -3739,112 +3734,40 @@ export default function App() {
     );
   }
 
+  const handleSelectViewMode = (mode) => {
+    if (panelArrangeSession) {
+      showAlert('ホバリングを解除してから表示を切り替えてください。');
+      return;
+    }
+    setViewMode(mode);
+    setActiveSheetId(null);
+    setIsPageSelectionMode(false);
+    setIsLabelSelectionMode(false);
+  };
+
   return (
     <div className={`flex flex-col h-screen overflow-hidden transition-all duration-700 ease-in-out`} style={{ background: 'var(--app-bg)', color: 'var(--m3-on-surface)' }}>
 
       {/* Top Navigation Bar - M3 Expressive Style */}
       {isTopBarsVisible && (
-      <div className="h-14 flex items-center justify-between px-4 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
-        <div className="flex items-center gap-5 flex-shrink-0">
-          <div className="flex items-center">
-            <div
-              className="p-0.5 bg-white shadow-sm cursor-pointer select-none"
-              style={{ borderRadius: 'var(--m3-shape-corner-md)' }}
-              onClick={handleLogoSecretTap}
-              title="台"
-            >
-              <img
-                src="/logo.jpg"
-                alt="台割君"
-                className="h-10 w-10 object-contain transition-transform hover:scale-105"
-                style={{ borderRadius: 'calc(var(--m3-shape-corner-md) - 2px)' }}
-              />
-            </div>
-          </div>
-
-          <div className="h-6 w-px mx-1 opacity-50" style={{ background: 'var(--m3-outline-variant)' }}></div>
-
-          {!USE_LOCAL_STORAGE && signedInUserName && (
-            <div className="flex items-center gap-1 text-slate-400">
-              <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-500" title={signedInUserName}>{signedInUserName}</span>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-                title="ログアウト"
-                aria-label="ログアウト"
-              >
-                <LogOut size={13} />
-              </button>
-            </div>
-          )}
-
-          {/* 戻る / 進む (アカウント単位の undo / redo) */}
-          <div className="flex items-center gap-1 mr-1">
-            <button
-              type="button"
-              onClick={() => { void handleUndoLatest(); }}
-              onMouseEnter={(e) => showQuickHelp(e, '戻る', '直前の編集操作を取り消します (Ctrl+Z)。')}
-              onMouseLeave={hideQuickHelp}
-              title="戻る (Ctrl+Z)"
-              aria-label="直前の編集操作を戻す"
-              className="flex items-center justify-center w-8 h-8 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
-            >
-              <Undo2 size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => { void handleRedoLatest(); }}
-              onMouseEnter={(e) => showQuickHelp(e, '進む', '戻した操作をやり直します (Ctrl+Y / Ctrl+Shift+Z)。')}
-              onMouseLeave={hideQuickHelp}
-              title="進む (Ctrl+Y)"
-              aria-label="戻した編集操作をやり直す"
-              className="flex items-center justify-center w-8 h-8 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
-            >
-              <Redo2 size={16} />
-            </button>
-          </div>
-
-          <div className="flex p-1 rounded-full transition-all" style={{ border: '1px solid var(--m3-outline)', background: 'var(--m3-surface)' }}>
-            <button
-              onClick={() => {
-                if (panelArrangeSession) {
-                  showAlert('ホバリングを解除してから表示を切り替えてください。');
-                  return;
-                }
-                setViewMode('list');
-                setActiveSheetId(null);
-                setIsPageSelectionMode(false);
-                setIsLabelSelectionMode(false);
-              }}
-              onMouseEnter={(e) => showQuickHelp(e, '詳細', 'ページ単位で編集する表示に切り替えます。')}
-              onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
-              style={viewMode === 'list' || viewMode === 'single' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
-            >
-              <List size={16} /> <span className="hidden sm:inline">詳細</span>
-            </button>
-            <button
-              onClick={() => {
-                if (panelArrangeSession) {
-                  showAlert('ホバリングを解除してから表示を切り替えてください。');
-                  return;
-                }
-                setViewMode('overview');
-                setActiveSheetId(null);
-                setIsPageSelectionMode(false);
-                setIsLabelSelectionMode(false);
-              }}
-              onMouseEnter={(e) => showQuickHelp(e, '全体', '全ページを一覧で表示します。コマの全体把握に使います。')}
-              onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
-              style={viewMode === 'overview' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
-            >
-              <Grid size={16} /> <span className="hidden sm:inline">全体</span>
-            </button>
-          </div>
-
-          {isPageSelectionMode && (
+        <AppHeader
+          isLocalMode={USE_LOCAL_STORAGE}
+          signedInUserName={signedInUserName}
+          onLogoTap={handleLogoSecretTap}
+          onLogout={handleLogout}
+          onUndo={() => { void handleUndoLatest(); }}
+          onRedo={() => { void handleRedoLatest(); }}
+          viewMode={viewMode}
+          onSelectViewMode={handleSelectViewMode}
+          isPageSelectionMode={isPageSelectionMode}
+          isSalesMode={isSalesMode}
+          isSalesLookupOpen={isSalesLookupOpen}
+          onSalesModeClick={handleSalesModeButtonClick}
+          onSalesModeLongPressStart={startSalesModeLongPress}
+          onSalesModeLongPressEnd={endSalesModeLongPress}
+          onShowQuickHelp={showQuickHelp}
+          onHideQuickHelp={hideQuickHelp}
+          selectionToolbar={isPageSelectionMode ? (
             <PageSelectionToolbar
               selectedCount={selectedSheetIds.size}
               totalCount={displaySheets.length}
@@ -3855,56 +3778,32 @@ export default function App() {
               onClearImages={handleBulkClearImages}
               onDelete={handleBulkDelete}
             />
+          ) : null}
+          toolsMenu={(
+            <HeaderToolsMenu
+              isOpen={isToolsMenuOpen}
+              onToggle={() => setIsToolsMenuOpen((prev) => !prev)}
+              onClose={() => setIsToolsMenuOpen(false)}
+              viewMode={viewMode}
+              isLocked={isLocked}
+              isPageSelectionMode={isPageSelectionMode}
+              isQuickHelpMode={isQuickHelpMode}
+              highlightLabels={highlightLabels}
+              highlightEmpty={highlightEmpty}
+              lockHoldFiredRef={lockHoldFiredRef}
+              onStartLockHold={startLockHold}
+              onCancelLockHold={cancelLockHold}
+              onTogglePageSelectionMode={togglePageSelectionMode}
+              onToggleQuickHelpMode={() => setIsQuickHelpMode((prev) => !prev)}
+              onToggleHighlightLabels={() => setHighlightLabels(!highlightLabels)}
+              onToggleHighlightEmpty={() => setHighlightEmpty(!highlightEmpty)}
+              onAddSheet={handleAddSheet}
+              onExportCSV={handleExportCSV}
+              onShowQuickHelp={showQuickHelp}
+              onHideQuickHelp={hideQuickHelp}
+            />
           )}
-
-          {/* 実績モード Toggle - 詳細表示時のみ */}
-          {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
-            <button
-              onClick={handleSalesModeButtonClick}
-              onMouseDown={startSalesModeLongPress}
-              onMouseUp={endSalesModeLongPress}
-              onMouseLeave={() => { endSalesModeLongPress(); hideQuickHelp(); }}
-              onTouchStart={startSalesModeLongPress}
-              onTouchEnd={endSalesModeLongPress}
-              onTouchCancel={endSalesModeLongPress}
-              onMouseEnter={(e) => showQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-bold transition-all duration-300 ml-2 whitespace-nowrap
-                 ${isSalesLookupOpen
-                  ? 'bg-violet-500/15 border-violet-500 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)] animate-pulse'
-                  : isSalesMode
-                  ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-              title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
-            >
-              <BarChart2 size={18} />
-              <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
-            </button>
-          )}
-        </div>
-
-        <HeaderToolsMenu
-          isOpen={isToolsMenuOpen}
-          onToggle={() => setIsToolsMenuOpen((prev) => !prev)}
-          onClose={() => setIsToolsMenuOpen(false)}
-          viewMode={viewMode}
-          isLocked={isLocked}
-          isPageSelectionMode={isPageSelectionMode}
-          isQuickHelpMode={isQuickHelpMode}
-          highlightLabels={highlightLabels}
-          highlightEmpty={highlightEmpty}
-          lockHoldFiredRef={lockHoldFiredRef}
-          onStartLockHold={startLockHold}
-          onCancelLockHold={cancelLockHold}
-          onTogglePageSelectionMode={togglePageSelectionMode}
-          onToggleQuickHelpMode={() => setIsQuickHelpMode((prev) => !prev)}
-          onToggleHighlightLabels={() => setHighlightLabels(!highlightLabels)}
-          onToggleHighlightEmpty={() => setHighlightEmpty(!highlightEmpty)}
-          onAddSheet={handleAddSheet}
-          onExportCSV={handleExportCSV}
-          onShowQuickHelp={showQuickHelp}
-          onHideQuickHelp={hideQuickHelp}
         />
-      </div>
       )}
 
       <TopBarsToggleButton
