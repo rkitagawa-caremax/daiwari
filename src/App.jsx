@@ -98,7 +98,11 @@ import {
 import {
   getPageNavigationSelection
 } from './domain/twoPageWorkspace';
-import { normalizeCode } from './domain/productCodes';
+import {
+  mergeSerializedSalesChunks,
+  parseSalesCsvContent,
+  splitSalesDataIntoChunks
+} from './domain/salesData';
 import {
   getCoords,
   getSizeType
@@ -911,18 +915,10 @@ export default function App() {
       try {
         const snapshot = await getDocs(salesChunksCollection);
         if (isCancelled) return;
-        const fullSalesMap = {};
-        snapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (data.items) {
-            try {
-              const chunkMap = JSON.parse(data.items);
-              Object.assign(fullSalesMap, chunkMap);
-            } catch (e) {
-              console.error("Failed to parse sales chunk", e);
-            }
-          }
-        });
+        const fullSalesMap = mergeSerializedSalesChunks(
+          snapshot.docs.map((snapshotDoc) => snapshotDoc.data()?.items),
+          { onParseError: (error) => console.error("Failed to parse sales chunk", error) }
+        );
         setSalesData(fullSalesMap);
         await idbHelper.setItem(CLOUD_SALES_CACHE_KEY, {
           data: fullSalesMap,
@@ -1293,32 +1289,7 @@ export default function App() {
     setProgressMessage("売上データを解析中...");
     try {
       const text = await readFileAutoEncoding(file);
-      const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      const rows = normalizedText.split('\n');
-
-      const salesMap = {};
-      const startIndex = 2; // ヘッダー2行スキップ
-
-      rows.slice(startIndex).forEach((row) => {
-        if (!row.trim()) return;
-        const cols = parseCSVLine(row);
-
-        if (cols.length <= 17) return;
-
-        const rawCode = cols[3];
-        if (!rawCode) return;
-        const code = normalizeCode(rawCode);
-
-        const name = cols[1] || '';
-        const spec = cols[2] || '';
-        const countStr = cols[17].replace(/,/g, '');
-        const count = parseInt(countStr) || 0;
-
-        if (!salesMap[code]) {
-          salesMap[code] = [];
-        }
-        salesMap[code].push({ name, spec, count });
-      });
+      const salesMap = parseSalesCsvContent(text);
 
       if (USE_LOCAL_STORAGE) {
         try {
@@ -1341,14 +1312,7 @@ export default function App() {
       // Chunking logic
       setProgressMessage("データを保存中...");
       const entries = Object.entries(salesMap);
-      const CHUNK_SIZE = 1000;
-      const chunks = [];
-
-      for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
-        const chunkEntries = entries.slice(i, i + CHUNK_SIZE);
-        const chunkData = Object.fromEntries(chunkEntries);
-        chunks.push(chunkData);
-      }
+      const chunks = splitSalesDataIntoChunks(salesMap);
 
       const batch = writeBatch(db);
 
