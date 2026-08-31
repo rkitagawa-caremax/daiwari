@@ -63,7 +63,8 @@ import {
   MoreHorizontal,
   Undo2,
   Redo2,
-  Wrench
+  Wrench,
+  LogOut
 } from 'lucide-react';
 
 import { idbHelper } from './idbHelper';
@@ -4184,7 +4185,7 @@ export default function App() {
       {/* Top Navigation Bar - M3 Expressive Style */}
       {isTopBarsVisible && (
       <div className="h-14 flex items-center justify-between px-4 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-5 flex-shrink-0">
           <div className="flex items-center">
             <div
               className="p-0.5 bg-white shadow-sm cursor-pointer select-none"
@@ -4204,14 +4205,16 @@ export default function App() {
           <div className="h-6 w-px mx-1 opacity-50" style={{ background: 'var(--m3-outline-variant)' }}></div>
 
           {!USE_LOCAL_STORAGE && signedInUserName && (
-            <div className="flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm">
-              <span className="text-[12px] font-semibold text-slate-700">{signedInUserName}</span>
+            <div className="flex items-center gap-1 text-slate-400">
+              <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-500" title={signedInUserName}>{signedInUserName}</span>
               <button
+                type="button"
                 onClick={handleLogout}
-                className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
                 title="ログアウト"
+                aria-label="ログアウト"
               >
-                ログアウト
+                <LogOut size={13} />
               </button>
             </div>
           )}
