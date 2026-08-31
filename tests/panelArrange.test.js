@@ -2,12 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildPanelArrangeFinalPanelsForSheets,
   buildPanelArrangeFinalPanels,
   buildPanelArrangeView,
+  buildPanelArrangeViews,
   createPanelArrangeSession,
+  createPanelArrangeSessionForSheets,
   getUnresolvedPanelArrangeTokens,
   isPanelArrangeSessionComplete,
   reconcilePanelArrangeSession,
+  stagePanelArrangeDropAcrossSheets,
   stagePanelArrangeDrop
 } from '../src/domain/panelArrange.js';
 import { buildDefaultPanels } from '../src/domain/panels.js';
@@ -118,4 +122,70 @@ test('dummy panel remains a dummy even when legacy image data is still present',
   assert.equal(result.status, 'blocked-content');
   assert.equal(view.panels[1].label, '埋草');
   assert.equal(view.panels[1].image, 'data:image/png;base64,legacy');
+});
+
+test('two-page arrange session moves an image across pages and displaces the target image', () => {
+  const firstPanels = buildDefaultPanels();
+  const secondPanels = buildDefaultPanels();
+  firstPanels[0] = buildImagePanel(firstPanels[0], 'image-a', 'E1001', 'Aラベル');
+  secondPanels[1] = buildImagePanel(secondPanels[1], 'image-b', 'E1002', 'Bラベル');
+  const panelsBySheetId = {
+    'sheet-1': firstPanels,
+    'sheet-2': secondPanels
+  };
+  const initial = createPanelArrangeSessionForSheets([
+    { sheetId: 'sheet-1', panels: firstPanels },
+    { sheetId: 'sheet-2', panels: secondPanels }
+  ]);
+
+  const moved = stagePanelArrangeDropAcrossSheets(
+    initial,
+    initial.tokens[0].id,
+    'sheet-2',
+    1,
+    panelsBySheetId
+  );
+  const view = buildPanelArrangeViews(panelsBySheetId, moved.session);
+
+  assert.equal(moved.status, 'placed');
+  assert.equal(view.viewsBySheetId['sheet-1'].panels[0].imageId, null);
+  assert.equal(view.viewsBySheetId['sheet-2'].panels[1].imageId, 'image-a');
+  assert.equal(view.viewsBySheetId['sheet-2'].floatingTokensByPanel[1][0].content.imageId, 'image-b');
+  assert.equal(getUnresolvedPanelArrangeTokens(view.session).length, 1);
+});
+
+test('two-page arrange session finalizes both page layouts together', () => {
+  const firstPanels = buildDefaultPanels();
+  const secondPanels = buildDefaultPanels();
+  firstPanels[0] = buildImagePanel(firstPanels[0], 'image-a', 'E1001', 'Aラベル');
+  secondPanels[1] = buildImagePanel(secondPanels[1], 'image-b', 'E1002', 'Bラベル');
+  const panelsBySheetId = {
+    'sheet-1': firstPanels,
+    'sheet-2': secondPanels
+  };
+  const initial = createPanelArrangeSessionForSheets([
+    { sheetId: 'sheet-1', panels: firstPanels },
+    { sheetId: 'sheet-2', panels: secondPanels }
+  ]);
+  const firstMove = stagePanelArrangeDropAcrossSheets(
+    initial,
+    initial.tokens[0].id,
+    'sheet-2',
+    1,
+    panelsBySheetId
+  ).session;
+  const displaced = getUnresolvedPanelArrangeTokens(firstMove)[0];
+  const completed = stagePanelArrangeDropAcrossSheets(
+    firstMove,
+    displaced.id,
+    'sheet-1',
+    0,
+    panelsBySheetId
+  ).session;
+  const finalPanels = buildPanelArrangeFinalPanelsForSheets(panelsBySheetId, completed);
+
+  assert.equal(finalPanels['sheet-1'][0].imageId, 'image-b');
+  assert.equal(finalPanels['sheet-2'][1].imageId, 'image-a');
+  assert.equal(finalPanels['sheet-1'][0].freeLabels[0].text, 'Bラベル');
+  assert.equal(finalPanels['sheet-2'][1].freeLabels[0].text, 'Aラベル');
 });

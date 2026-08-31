@@ -28,10 +28,7 @@ import {
   arrayUnion
 } from 'firebase/firestore';
 import {
-  ChevronLeft,
-  ChevronRight,
   Layout,
-  Check,
   Maximize,
   Copy,
   Loader2,
@@ -78,13 +75,15 @@ import {
   toPanelsMap
 } from './domain/panels';
 import {
-  buildPanelArrangeFinalPanels,
-  buildPanelArrangeView,
-  createPanelArrangeSession,
+  buildPanelArrangeFinalPanelsForSheets,
+  buildPanelArrangeViews,
+  createPanelArrangeSessionForSheets,
+  getPanelArrangeSessionSheetIds,
   getUnresolvedPanelArrangeTokens,
   hasPanelImageContent,
   reconcilePanelArrangeSession,
-  stagePanelArrangeDrop
+  reconcilePanelArrangeSessionForSheets,
+  stagePanelArrangeDropAcrossSheets
 } from './domain/panelArrange';
 import {
   isSameStockImageList,
@@ -140,6 +139,9 @@ import {
 import { createPdfRenderer, waitForPdfExportSurface } from './lib/pdfExport';
 import { useWorkActivityTracker } from './hooks/useWorkActivityTracker';
 import { useWorkspaceUndoState } from './hooks/useWorkspaceUndoState';
+import { useQuickHelp } from './hooks/useQuickHelp';
+import { useScreenLock } from './hooks/useScreenLock';
+import { useAppDialogs } from './hooks/useAppDialogs';
 import {
   buildFirestoreActionErrorMessage,
   getFirestoreErrorCode,
@@ -155,8 +157,8 @@ import SettingsModal from './components/dialogs/SettingsModal';
 import AuthGate from './features/auth/AuthGate';
 import SalesCodeLookupModal from './features/sales/SalesCodeLookupModal';
 import SalesPopup from './features/sales/SalesPopup';
-import Sheet from './features/sheets/components/Sheet';
 import SheetControlPanel from './features/sheets/components/SheetControlPanel';
+import SheetWorkspaceCanvas from './features/sheets/components/SheetWorkspaceCanvas';
 import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
 import TempShelfPanel from './features/sidebar/TempShelfPanel';
@@ -271,8 +273,14 @@ export default function App() {
   const [isMergeMode, setIsMergeMode] = useState(false);
   const [highlightEmpty, setHighlightEmpty] = useState(false);
   const [highlightLabels, setHighlightLabels] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
-  const [alertDialog, setAlertDialog] = useState({ isOpen: false, message: '', title: '通知', closeOnBackdrop: false });
+  const {
+    confirmDialog,
+    alertDialog,
+    requestConfirm,
+    showAlert,
+    closeConfirm,
+    closeAlert
+  } = useAppDialogs();
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
@@ -280,11 +288,8 @@ export default function App() {
   const [workLogRecords, setWorkLogRecords] = useState([]);
   const [isWorkLogLoading, setIsWorkLogLoading] = useState(false);
   const [workLogErrorMessage, setWorkLogErrorMessage] = useState('');
-  const [isQuickHelpMode, setIsQuickHelpMode] = useState(false);
-  const [quickHelpPopup, setQuickHelpPopup] = useState(null);
   const logoTapCountRef = useRef(0);
   const logoTapTimeoutRef = useRef(null);
-  const quickHelpHighlightRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
@@ -293,6 +298,7 @@ export default function App() {
   const [arrangeDraggingTokenId, setArrangeDraggingTokenId] = useState(null);
   const [isPanelArrangeFinalizing, setIsPanelArrangeFinalizing] = useState(false);
   const panelArrangeModeSheetId = panelArrangeSession?.sheetId || null;
+  const panelArrangeModeSheetIds = getPanelArrangeSessionSheetIds(panelArrangeSession);
   const [assignedImagePreview, setAssignedImagePreview] = useState(null);
   const [undoNotice, setUndoNotice] = useState(null);
   const undoNoticeTimerRef = useRef(null);
@@ -314,38 +320,25 @@ export default function App() {
   // === 画面ロック (鍵ボタン 2秒長押しでトグル) ===
   // ロック中: 編集系 (panel 更新 / DnD 配置 / シート追加削除 / 画像管理 / CSV 取り込み / 結合・分離 / 仮置き場 / 除外 等) を一律 no-op
   // ロック中も可能: viewMode 切替 / 実績モード / ページ移動 / 検索 / Sidebar 閲覧 / プレビュー
-  const [isLocked, setIsLocked] = useState(false);
+  const {
+    isLocked,
+    lockHoldFiredRef,
+    startLockHold,
+    cancelLockHold
+  } = useScreenLock({ isToggleDisabled: !!panelArrangeModeSheetId });
   const isLockedRef = useRef(false);
   useEffect(() => { isLockedRef.current = isLocked; }, [isLocked]);
 
+  const {
+    isQuickHelpMode,
+    quickHelpPopup,
+    showQuickHelp,
+    hideQuickHelp,
+    toggleQuickHelpMode
+  } = useQuickHelp();
+
   useEffect(() => () => {
     if (undoNoticeTimerRef.current) clearTimeout(undoNoticeTimerRef.current);
-  }, []);
-
-  const lockHoldTimerRef = useRef(null);
-  const lockHoldFiredRef = useRef(false);
-  const LOCK_HOLD_MS = 2000;
-
-  const startLockHold = useCallback(() => {
-    if (panelArrangeModeSheetId) return;
-    if (lockHoldTimerRef.current) clearTimeout(lockHoldTimerRef.current);
-    lockHoldFiredRef.current = false;
-    lockHoldTimerRef.current = setTimeout(() => {
-      lockHoldFiredRef.current = true;
-      setIsLocked((prev) => !prev);
-      lockHoldTimerRef.current = null;
-    }, LOCK_HOLD_MS);
-  }, [panelArrangeModeSheetId]);
-
-  const cancelLockHold = useCallback(() => {
-    if (lockHoldTimerRef.current) {
-      clearTimeout(lockHoldTimerRef.current);
-      lockHoldTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => {
-    if (lockHoldTimerRef.current) clearTimeout(lockHoldTimerRef.current);
   }, []);
 
   const clearPanelArrangeHold = useCallback(() => {
@@ -379,7 +372,7 @@ export default function App() {
       || (event.button !== undefined && event.button !== 0)
       || viewMode !== 'single'
       || !activeSheetId
-      || target.sheetId !== activeSheetId
+      || ![activeSheetId, secondarySheetId].filter(Boolean).includes(target.sheetId)
       || panelArrangeModeSheetId
       || isLocked
       || isPageSelectionMode
@@ -420,7 +413,11 @@ export default function App() {
       if (!targetSheet) return;
       const targetPanel = targetSheet.panels?.[target.panelIndex];
       if (!hasPanelImageContent(targetPanel)) return;
-      const arrangeSession = createPanelArrangeSession(target.sheetId, targetSheet.panels || []);
+      const workspaceSheets = [activeSheetId, secondarySheetId]
+        .filter((sheetId, index, ids) => sheetId && ids.indexOf(sheetId) === index)
+        .map((sheetId) => sheets.find((sheet) => sheet.id === sheetId))
+        .filter(Boolean);
+      const arrangeSession = createPanelArrangeSessionForSheets(workspaceSheets);
       if (arrangeSession.tokens.length === 0) return;
       suppressNextClickRef.current = true;
       setArrangeDraggingTokenId(null);
@@ -448,6 +445,7 @@ export default function App() {
     isPageSelectionMode,
     isSalesMode,
     panelArrangeModeSheetId,
+    secondarySheetId,
     sheets,
     viewMode
   ]);
@@ -466,12 +464,10 @@ export default function App() {
   useEffect(() => {
     if (!panelArrangeModeSheetId) return;
     if (viewMode !== 'single') setViewMode('single');
-    if (activeSheetId !== panelArrangeModeSheetId) setActiveSheetId(panelArrangeModeSheetId);
     if (isPageSelectionMode) setIsPageSelectionMode(false);
     if (isLabelSelectionMode) setIsLabelSelectionMode(false);
     if (isSalesMode) setIsSalesMode(false);
   }, [
-    activeSheetId,
     isLabelSelectionMode,
     isPageSelectionMode,
     isSalesMode,
@@ -488,18 +484,18 @@ export default function App() {
   const [pdfExportPage, setPdfExportPage] = useState(null);
 
   // コレクション参照を appId に依存させる
-  const sheetsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'sheets'), [appId, db]);
-  const imagesCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'images'), [appId, db]);
+  const sheetsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'sheets'), [appId]);
+  const imagesCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'images'), [appId]);
   const tempShelfUserId = useMemo(() => USE_LOCAL_STORAGE ? 'local' : (firebaseUser?.uid || null), [firebaseUser]);
   const userTempShelfCollection = useMemo(() => {
     if (USE_LOCAL_STORAGE) return null;
     if (!tempShelfUserId) return null;
     return collection(db, 'artifacts', appId, 'users', tempShelfUserId, 'tempShelf');
-  }, [appId, db, tempShelfUserId]);
+  }, [appId, tempShelfUserId]);
   const legacyTempShelfCollection = useMemo(() => {
     if (USE_LOCAL_STORAGE) return null;
     return collection(db, 'artifacts', appId, 'public', 'data', 'tempShelf');
-  }, [appId, db]);
+  }, [appId]);
   const tempShelfCollection = useMemo(() => {
     if (USE_LOCAL_STORAGE) return null;
     return useLegacyTempShelf ? legacyTempShelfCollection : userTempShelfCollection;
@@ -511,9 +507,9 @@ export default function App() {
     }
     return tempShelfCollection;
   }, [tempShelfCollection, useLegacyTempShelf, tempShelfUserId]);
-  const excludedItemsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'excludedItems'), [appId, db]);
-  const settingsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'settings'), [appId, db]);
-  const salesChunksCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'salesDataChunks'), [appId, db]);
+  const excludedItemsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'excludedItems'), [appId]);
+  const settingsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'settings'), [appId]);
+  const salesChunksCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'salesDataChunks'), [appId]);
   const workLogsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'activityLogs'), [appId]);
   const signedInUserName = useMemo(() => {
     const signedInEmail = normalizeEmail(firebaseUser?.email);
@@ -1045,21 +1041,6 @@ export default function App() {
     useLegacyTempShelf
   ]);
 
-  const requestConfirm = (message, action) => {
-    setConfirmDialog({
-      isOpen: true,
-      message,
-      onConfirm: async () => {
-        await action();
-        setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
-      }
-    });
-  };
-
-  const showAlert = (message, title = "通知", closeOnBackdrop = false) => {
-    setAlertDialog({ isOpen: true, message, title, closeOnBackdrop });
-  };
-
   const showUndoNotice = useCallback((message, tone = 'success') => {
     if (undoNoticeTimerRef.current) clearTimeout(undoNoticeTimerRef.current);
     setUndoNotice({ message, tone });
@@ -1585,7 +1566,7 @@ export default function App() {
     const colSpan = maxCol - minCol + 1;
     const primaryIndex = minRow * 4 + minCol;
     const sizeType = getSizeType(rowSpan, colSpan);
-    const isArrangingSheet = panelArrangeSession?.sheetId === sheetId;
+    const isArrangingSheet = getPanelArrangeSessionSheetIds(panelArrangeSession).includes(sheetId);
 
     if (USE_LOCAL_STORAGE) {
       const sheet = sheets.find(s => s.id === sheetId);
@@ -1605,7 +1586,7 @@ export default function App() {
       );
       setSheets(newSheets);
       if (isArrangingSheet) {
-        setPanelArrangeSession((previous) => reconcilePanelArrangeSession(previous, newPanels));
+        setPanelArrangeSession((previous) => reconcilePanelArrangeSession(previous, newPanels, sheetId));
       }
       // localStorageHelper.setItem('sheets', newSheets); // Auto-save handles this
       setSelection({ sheetId: null, indices: [] });
@@ -1644,7 +1625,7 @@ export default function App() {
         }
       }, { key: `sheet:${sheetId}` });
       if (isArrangingSheet && arrangedPanelsAfterMerge) {
-        setPanelArrangeSession((previous) => reconcilePanelArrangeSession(previous, arrangedPanelsAfterMerge));
+        setPanelArrangeSession((previous) => reconcilePanelArrangeSession(previous, arrangedPanelsAfterMerge, sheetId));
       }
     } catch (error) {
       console.error("Merge error:", error);
@@ -1778,7 +1759,7 @@ export default function App() {
       console.error("Error adding sheet: ", e);
       showAlert("ページの追加に失敗しました。");
     }
-  }, [isAuthenticated, setSheets, sheets, sheetsCollection]);
+  }, [isAuthenticated, setSheets, sheets, sheetsCollection, showAlert]);
 
   const handleUpdatePanel = useCallback(async (sheetId, panelIndex, newData) => {
     if (isLockedRef.current) return;
@@ -2405,19 +2386,26 @@ export default function App() {
 
     const arrangePayload = extractPanelArrangeDragPayload(dragPayload);
     if (arrangePayload) {
+      const arrangeSheetIds = getPanelArrangeSessionSheetIds(panelArrangeSession);
       if (
         !panelArrangeSession
-        || arrangePayload.sheetId !== panelArrangeSession.sheetId
-        || targetSheetId !== panelArrangeSession.sheetId
+        || !arrangeSheetIds.includes(arrangePayload.sheetId)
+        || !arrangeSheetIds.includes(targetSheetId)
+        || !panelArrangeSession.tokens.some((token) => token.id === arrangePayload.tokenId)
       ) return false;
 
       const targetSheet = sheets.find((sheet) => sheet.id === targetSheetId);
       if (!targetSheet?.panels) return false;
-      const staged = stagePanelArrangeDrop(
+      const panelsBySheetId = Object.fromEntries(arrangeSheetIds.map((sheetId) => {
+        const sheet = sheets.find((candidate) => candidate.id === sheetId);
+        return [sheetId, sheet?.panels || []];
+      }));
+      const staged = stagePanelArrangeDropAcrossSheets(
         panelArrangeSession,
         arrangePayload.tokenId,
+        targetSheetId,
         targetIndex,
-        targetSheet.panels
+        panelsBySheetId
       );
       if (staged.status === 'blocked-content') {
         showAlert('ダミーまたはテキストがあるコマには画像を重ねられません。空きコマを指定してください。');
@@ -2510,13 +2498,19 @@ export default function App() {
       return;
     }
 
-    const currentSheet = sheets.find((sheet) => sheet.id === panelArrangeSession.sheetId);
-    if (!currentSheet?.panels) {
+    const arrangeSheetIds = getPanelArrangeSessionSheetIds(panelArrangeSession);
+    const currentSheets = arrangeSheetIds
+      .map((sheetId) => sheets.find((sheet) => sheet.id === sheetId))
+      .filter(Boolean);
+    if (currentSheets.length !== arrangeSheetIds.length) {
       showAlert('対象ページを確認できないため、ホバリングを解除できません。');
       return;
     }
 
-    const reconciled = reconcilePanelArrangeSession(panelArrangeSession, currentSheet.panels);
+    const panelsBySheetId = Object.fromEntries(
+      currentSheets.map((sheet) => [sheet.id, sheet.panels || []])
+    );
+    const reconciled = reconcilePanelArrangeSessionForSheets(panelArrangeSession, panelsBySheetId);
     const unresolvedCount = getUnresolvedPanelArrangeTokens(reconciled).length;
     if (unresolvedCount > 0) {
       setPanelArrangeSession(reconciled);
@@ -2527,10 +2521,12 @@ export default function App() {
     setIsPanelArrangeFinalizing(true);
     try {
       if (USE_LOCAL_STORAGE) {
-        const finalPanels = buildPanelArrangeFinalPanels(currentSheet.panels, reconciled);
-        if (!finalPanels) throw new Error('panel-arrange-incomplete');
+        const finalPanelsBySheetId = buildPanelArrangeFinalPanelsForSheets(panelsBySheetId, reconciled);
+        if (!finalPanelsBySheetId) throw new Error('panel-arrange-incomplete');
         setSheets((previous) => previous.map((sheet) => (
-          sheet.id === reconciled.sheetId ? { ...sheet, panels: finalPanels } : sheet
+          finalPanelsBySheetId[sheet.id]
+            ? { ...sheet, panels: finalPanelsBySheetId[sheet.id] }
+            : sheet
         )));
         clearPanelArrangeModeState();
         return;
@@ -2539,25 +2535,39 @@ export default function App() {
       if (!sheetsCollection) return;
       let transactionUnresolvedCount = 0;
       await runCloudTransaction(async (transaction) => {
-        const sheetRef = doc(sheetsCollection, reconciled.sheetId);
-        const snapshot = await transaction.get(sheetRef);
-        if (!snapshot.exists()) throw new Error('panel-arrange-sheet-missing');
+        const sheetRefs = arrangeSheetIds.map((sheetId) => doc(sheetsCollection, sheetId));
+        const snapshots = await Promise.all(sheetRefs.map((sheetRef) => transaction.get(sheetRef)));
+        if (snapshots.some((snapshot) => !snapshot.exists())) {
+          throw new Error('panel-arrange-sheet-missing');
+        }
 
-        const serverPanels = getPanelsFromDocData(snapshot.data() || {});
-        const serverSession = reconcilePanelArrangeSession(reconciled, serverPanels);
+        const serverPanelsBySheetId = Object.fromEntries(snapshots.map((snapshot, index) => [
+          arrangeSheetIds[index],
+          getPanelsFromDocData(snapshot.data() || {})
+        ]));
+        const serverSession = reconcilePanelArrangeSessionForSheets(reconciled, serverPanelsBySheetId);
         transactionUnresolvedCount = getUnresolvedPanelArrangeTokens(serverSession).length;
         if (transactionUnresolvedCount > 0) return;
 
-        const finalPanels = buildPanelArrangeFinalPanels(serverPanels, serverSession);
-        if (!finalPanels) {
+        const finalPanelsBySheetId = buildPanelArrangeFinalPanelsForSheets(
+          serverPanelsBySheetId,
+          serverSession
+        );
+        if (!finalPanelsBySheetId) {
           transactionUnresolvedCount = 1;
           return;
         }
-        const panelUpdates = buildPanelMapUpdates(serverPanels, finalPanels);
-        if (Object.keys(panelUpdates).length > 0) {
-          transaction.update(sheetRef, panelUpdates);
-        }
-      }, { key: `sheet:${reconciled.sheetId}` });
+        sheetRefs.forEach((sheetRef, index) => {
+          const sheetId = arrangeSheetIds[index];
+          const panelUpdates = buildPanelMapUpdates(
+            serverPanelsBySheetId[sheetId],
+            finalPanelsBySheetId[sheetId]
+          );
+          if (Object.keys(panelUpdates).length > 0) {
+            transaction.update(sheetRef, panelUpdates);
+          }
+        });
+      }, { key: `sheet-pair:${[...arrangeSheetIds].sort().join('|')}` });
 
       if (transactionUnresolvedCount > 0) {
         showAlert(`ページ構成の変更により浮遊画像が ${transactionUnresolvedCount} 件残っています。割り付けを完了してください。`);
@@ -3507,16 +3517,20 @@ export default function App() {
     setSelection({ sheetId: null, indices: [] });
   }, []);
 
-  const panelArrangeView = useMemo(() => {
+  const panelArrangeWorkspaceView = useMemo(() => {
     if (!panelArrangeSession) return null;
-    const targetSheet = sheets.find((sheet) => sheet.id === panelArrangeSession.sheetId);
-    if (!targetSheet?.panels) return null;
-    return buildPanelArrangeView(targetSheet.panels, panelArrangeSession);
+    const panelsBySheetId = Object.fromEntries(
+      getPanelArrangeSessionSheetIds(panelArrangeSession).map((sheetId) => {
+        const targetSheet = sheets.find((sheet) => sheet.id === sheetId);
+        return [sheetId, targetSheet?.panels || []];
+      })
+    );
+    return buildPanelArrangeViews(panelsBySheetId, panelArrangeSession);
   }, [panelArrangeSession, sheets]);
 
   const unresolvedPanelArrangeCount = useMemo(() => (
-    getUnresolvedPanelArrangeTokens(panelArrangeView?.session || panelArrangeSession).length
-  ), [panelArrangeSession, panelArrangeView]);
+    getUnresolvedPanelArrangeTokens(panelArrangeWorkspaceView?.session || panelArrangeSession).length
+  ), [panelArrangeSession, panelArrangeWorkspaceView]);
 
   const imageDataById = useMemo(() => {
     const map = {};
@@ -3708,53 +3722,6 @@ export default function App() {
     void loadWorkLogDashboard();
   }, [loadWorkLogDashboard]);
 
-  const clearQuickHelpHighlight = useCallback(() => {
-    const target = quickHelpHighlightRef.current;
-    if (!target) return;
-
-    const prevBoxShadow = target.dataset.quickHelpPrevBoxShadow ?? '';
-    target.style.boxShadow = prevBoxShadow;
-    delete target.dataset.quickHelpPrevBoxShadow;
-    quickHelpHighlightRef.current = null;
-  }, []);
-
-  const showQuickHelp = useCallback((event, title, description) => {
-    if (!isQuickHelpMode) return;
-    const target = event.currentTarget;
-    if (target && quickHelpHighlightRef.current !== target) {
-      clearQuickHelpHighlight();
-      target.dataset.quickHelpPrevBoxShadow = target.style.boxShadow || '';
-      target.style.boxShadow = '0 0 0 2px rgba(56, 189, 248, 0.75), 0 0 18px rgba(56, 189, 248, 0.45)';
-      quickHelpHighlightRef.current = target;
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const popupHalfWidth = 230;
-    const x = Math.min(
-      Math.max(rect.left + rect.width / 2, popupHalfWidth),
-      window.innerWidth - popupHalfWidth
-    );
-
-    setQuickHelpPopup({
-      title,
-      description,
-      x,
-      y: rect.bottom + 8
-    });
-  }, [isQuickHelpMode, clearQuickHelpHighlight]);
-
-  const hideQuickHelp = useCallback(() => {
-    clearQuickHelpHighlight();
-    setQuickHelpPopup(null);
-  }, [clearQuickHelpHighlight]);
-
-  useEffect(() => {
-    if (!isQuickHelpMode) {
-      clearQuickHelpHighlight();
-      setQuickHelpPopup(null);
-    }
-  }, [isQuickHelpMode, clearQuickHelpHighlight]);
-
   // --- Render ---
   // --- Render ---
   if (!isAuthReady) {
@@ -3839,7 +3806,7 @@ export default function App() {
               onStartLockHold={startLockHold}
               onCancelLockHold={cancelLockHold}
               onTogglePageSelectionMode={togglePageSelectionMode}
-              onToggleQuickHelpMode={() => setIsQuickHelpMode((prev) => !prev)}
+              onToggleQuickHelpMode={toggleQuickHelpMode}
               onToggleHighlightLabels={() => setHighlightLabels(!highlightLabels)}
               onToggleHighlightEmpty={() => setHighlightEmpty(!highlightEmpty)}
               onAddSheet={handleAddSheet}
@@ -3974,145 +3941,58 @@ export default function App() {
               />
             )}
 
-            <div
-              data-two-page-workspace={isTwoPageMode ? 'true' : undefined}
-              className={`relative z-10 ${viewMode === 'overview'
-                ? 'grid grid-cols-2 gap-8 md:grid-cols-3'
-                : isTwoPageMode
-                  ? 'flex min-w-max flex-row items-start justify-center gap-6 pb-32'
-                  : 'flex flex-col items-center gap-12 pb-32'}`}
-              style={{
-                transform: `scale(${zoomScale})`,
-                transformOrigin: 'top center',
-                minHeight: zoomScale > 1 ? `${zoomScale * 100}%` : 'auto'
+            <SheetWorkspaceCanvas
+              viewMode={viewMode}
+              isTwoPageMode={isTwoPageMode}
+              zoomScale={zoomScale}
+              displaySheets={displaySheets}
+              sheets={sheets}
+              pageSelection={{
+                isEnabled: isPageSelectionMode,
+                selectedIds: selectedSheetIds,
+                onToggle: handleToggleSheetSelection
               }}
-            >
-              {displaySheets.map((sheet) => {
-                const isPageSelected = selectedSheetIds.has(sheet.id);
-                const isArrangeSheet = panelArrangeModeSheetId === sheet.id && !!panelArrangeView;
-                const renderedPanels = isArrangeSheet ? panelArrangeView.panels : sheet.panels;
-                return (
-                  <div
-                    key={sheet.id}
-                    data-two-page-role={isTwoPageMode ? (sheet.id === activeSheetId ? 'primary' : 'secondary') : undefined}
-                    className={`relative group transition-transform duration-300 ${isPageSelectionMode ? 'cursor-pointer' : ''} ${isPageSelected ? 'scale-[1.02]' : ''}`}
-                    onClick={() => {
-                      if (isPageSelectionMode) {
-                        handleToggleSheetSelection(sheet.id);
-                      } else if (viewMode === 'overview') {
-                        setActiveSheetId(sheet.id);
-                        setIsLabelSelectionMode(false);
-                        setViewMode('single');
-                      }
-                    }}
-                  >
-                    {isPageSelectionMode && (
-                      <div className={`absolute -inset-4 rounded-2xl border-4 z-50 pointer-events-none transition-all duration-200 ${isPageSelected ? 'border-indigo-500 bg-indigo-500/5 shadow-2xl' : 'border-transparent hover:border-slate-300'}`}>
-                        <div className={`absolute top-0 right-0 w-8 h-8 rounded-full border-2 bg-white flex items-center justify-center shadow-md transform translate-x-2 -translate-y-2 transition-all ${isPageSelected ? 'border-indigo-500 bg-indigo-500 text-white scale-110' : 'border-slate-300 text-slate-300'}`}>
-                          {isPageSelected && <Check size={18} strokeWidth={3} />}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className={`flex flex-col ${viewMode === 'overview' ? 'gap-0' : 'gap-3'}`}>
-                      {viewMode !== 'overview' && (
-                        <div className="flex items-center justify-between px-2">
-                          <span className="font-bold text-slate-500 text-sm flex items-center gap-2">
-                            <span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs shadow-sm">P.{sheets.findIndex(s => s.id === sheet.id) + 1}</span>
-                          </span>
-
-                          <div className="flex items-center gap-2 z-10">
-                            <select
-                              value={sheet.genre}
-                              onChange={(e) => handleChangeGenre(sheet.id, e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                              disabled={isPageSelectionMode}
-                              className="text-xs border-none bg-white rounded-lg px-2 py-1 shadow-sm text-slate-600 font-medium focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 hover:bg-slate-50 transition-colors cursor-pointer"
-                            >
-                              {GENRES.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className={`relative ${isPageSelectionMode ? 'pointer-events-none' : ''}`}>
-                        {viewMode === 'single' && sheet.id === activeSheetId && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleNavigatePage('prev');
-                              }}
-                              disabled={currentIndex <= 0}
-                              className={`absolute left-2 sm:-left-14 top-1/2 z-50 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border bg-white/95 shadow-lg backdrop-blur transition-all ${currentIndex > 0
-                                ? 'border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:scale-105'
-                                : 'border-slate-100 text-slate-300 opacity-40 cursor-not-allowed'
-                                }`}
-                              title="前のページ"
-                              aria-label="前のページ"
-                            >
-                              <ChevronLeft size={24} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleNavigatePage('next');
-                              }}
-                              disabled={currentIndex === -1 || currentIndex >= currentList.length - 1}
-                              className={`absolute right-2 sm:-right-14 top-1/2 z-50 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border bg-white/95 shadow-lg backdrop-blur transition-all ${currentIndex !== -1 && currentIndex < currentList.length - 1
-                                ? 'border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:scale-105'
-                                : 'border-slate-100 text-slate-300 opacity-40 cursor-not-allowed'
-                                }`}
-                              title="次のページ"
-                              aria-label="次のページ"
-                            >
-                              <ChevronRight size={24} />
-                            </button>
-                          </>
-                        )}
-
-                        <Sheet
-                          sheet={sheet}
-                          index={sheets.findIndex(s => s.id === sheet.id)}
-                          pageNumber={sheets.findIndex(s => s.id === sheet.id) + 1}
-                          panels={renderedPanels}
-                          updatePanel={handlePanelUpdateWithCheck}
-                          isOverview={viewMode === 'overview'}
-                          zoomScale={zoomScale}
-                          selection={selection}
-                          onSelectPanel={isMergeMode ? handleSelectPanel : undefined}
-                          onDeleteSheet={handleDeleteSheet}
-                          highlightEmpty={highlightEmpty}
-                          highlightLabels={highlightLabels}
-                          onApplyDragPayloadToPanel={applyDragPayloadToPanel}
-                          onStartPointerDrag={startPointerDrag}
-                          isSalesMode={isSalesMode}
-                          salesData={salesData}
-                          onHoverSales={handleHoverSales}
-                          onLeaveSales={handleLeaveSales}
-                          imageDataById={imageDataById}
-                          isLabelMode={isLabelSelectionMode}
-                          onChangeGenre={(genreId) => handleChangeGenre(sheet.id, genreId)}
-                          onPreviewImage={handlePreviewAssignedImage}
-                          isArrangeMode={isArrangeSheet}
-                          arrangeDraggingTokenId={arrangeDraggingTokenId}
-                          arrangeAssignedTokenIdsByPanel={isArrangeSheet ? panelArrangeView.assignedTokenIdsByPanel : {}}
-                          arrangePlacedPanelIndices={isArrangeSheet ? panelArrangeView.placedPanelIndices : new Set()}
-                          arrangeFloatingTokensByPanel={isArrangeSheet ? panelArrangeView.floatingTokensByPanel : {}}
-                          onStartArrangeHold={startPanelArrangeHold}
-                          onCancelArrangeHold={clearPanelArrangeHold}
-                          onArrangeDragStateChange={handleArrangeDragStateChange}
-                        />
-
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+              navigation={{
+                activeSheetId,
+                currentIndex,
+                totalCount: currentList.length,
+                onNavigate: handleNavigatePage,
+                onOpenSheet: (sheetId) => {
+                  setActiveSheetId(sheetId);
+                  setIsLabelSelectionMode(false);
+                  setViewMode('single');
+                }
+              }}
+              arrange={{
+                workspaceView: panelArrangeWorkspaceView,
+                sheetIds: panelArrangeModeSheetIds,
+                draggingTokenId: arrangeDraggingTokenId,
+                onStartHold: startPanelArrangeHold,
+                onCancelHold: clearPanelArrangeHold,
+                onDragStateChange: handleArrangeDragStateChange
+              }}
+              editing={{
+                updatePanel: handlePanelUpdateWithCheck,
+                selection,
+                isMergeMode,
+                onSelectPanel: handleSelectPanel,
+                onDeleteSheet: handleDeleteSheet,
+                highlightEmpty,
+                highlightLabels,
+                onApplyDragPayloadToPanel: applyDragPayloadToPanel,
+                onStartPointerDrag: startPointerDrag,
+                isLabelMode: isLabelSelectionMode,
+                onChangeGenre: handleChangeGenre,
+                onPreviewImage: handlePreviewAssignedImage
+              }}
+              sales={{
+                isMode: isSalesMode,
+                data: salesData,
+                onHover: handleHoverSales,
+                onLeave: handleLeaveSales
+              }}
+              imageDataById={imageDataById}
+            />
           </div>
         </div>
       </div>
@@ -4137,6 +4017,7 @@ export default function App() {
       {panelArrangeModeSheetId && (
         <PanelArrangeBanner
           unresolvedCount={unresolvedPanelArrangeCount}
+          pageCount={panelArrangeModeSheetIds.length}
           isFinalizing={isPanelArrangeFinalizing}
           onFinalize={finalizePanelArrangeMode}
         />
@@ -4188,7 +4069,7 @@ export default function App() {
         isOpen={confirmDialog.isOpen}
         message={confirmDialog.message}
         onConfirm={confirmDialog.onConfirm}
-        onCancel={() => setConfirmDialog({ isOpen: false, message: '', onConfirm: null })}
+        onCancel={closeConfirm}
       />
 
       <AlertModal
@@ -4196,7 +4077,7 @@ export default function App() {
         message={alertDialog.message}
         title={alertDialog.title}
         closeOnBackdrop={alertDialog.closeOnBackdrop}
-        onClose={() => setAlertDialog({ ...alertDialog, isOpen: false })}
+        onClose={closeAlert}
       />
 
       <ProcessingModal

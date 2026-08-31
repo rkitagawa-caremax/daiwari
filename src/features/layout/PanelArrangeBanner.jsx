@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowLeftRight, Check, Loader2 } from 'lucide-react';
 
 // 画像ホバリング (パネル配置モード) 中に右側へ出す案内 + 解除ボタン。
-const PanelArrangeBanner = ({ unresolvedCount, isFinalizing, onFinalize }) => (
+const PanelArrangeBanner = ({ unresolvedCount, pageCount = 1, isFinalizing, onFinalize }) => (
   <div className="fixed right-48 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
     <div className="flex items-center gap-2">
       <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
@@ -15,7 +15,11 @@ const PanelArrangeBanner = ({ unresolvedCount, isFinalizing, onFinalize }) => (
         </p>
       </div>
     </div>
-    <p className="mt-2 text-[10px] leading-relaxed text-slate-500">画像を押したままコマへ移動できます。黄緑の枠は今回割り付けた画像です。</p>
+    <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+      {pageCount > 1
+        ? '画像を押したまま2ページ間のコマへ移動できます。黄緑の枠は今回割り付けた画像です。'
+        : '画像を押したままコマへ移動できます。黄緑の枠は今回割り付けた画像です。'}
+    </p>
     <button
       type="button"
       onClick={onFinalize}
