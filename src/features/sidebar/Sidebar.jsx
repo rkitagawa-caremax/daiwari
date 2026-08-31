@@ -252,13 +252,15 @@ const Sidebar = React.memo(({
 
   if (!isOpen) {
     return (
-      <div className={`fixed left-0 ${isTopBarsVisible ? 'top-20' : 'top-0'} bottom-0 w-16 m3-surface border-r flex flex-col items-center py-6 z-20 transition-all duration-300`} style={{ borderColor: 'var(--m3-outline-variant)' }}>
+      <div className={`fixed left-2 ${isTopBarsVisible ? 'top-[4.5rem]' : 'top-4'} z-20 transition-all duration-300`}>
         <button
           onClick={toggleOpen}
-          className="m3-icon-btn-tonal p-3"
+          className="m3-icon-btn-tonal p-2.5 shadow-md"
           style={{ background: 'var(--m3-primary-container)', color: 'var(--m3-on-primary-container)' }}
+          title="サイドパネルを開く"
+          aria-label="サイドパネルを開く"
         >
-          <ChevronRight size={24} />
+          <ChevronRight size={22} />
         </button>
       </div>
     );
@@ -266,7 +268,7 @@ const Sidebar = React.memo(({
 
   return (
     <div
-      className={`fixed left-0 ${isTopBarsVisible ? 'top-20' : 'top-0'} bottom-0 m3-surface border-r flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out`}
+      className={`fixed left-0 ${isTopBarsVisible ? 'top-14' : 'top-0'} bottom-0 m3-surface border-r flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out`}
       style={{ width, borderColor: 'var(--m3-outline-variant)' }}
     >
       <div className="flex items-start gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>

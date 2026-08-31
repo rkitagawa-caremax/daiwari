@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ClipboardList, X } from 'lucide-react';
+import { ClipboardList, GripVertical, X } from 'lucide-react';
 
 import ImagePreviewModal from '../../components/dialogs/ImagePreviewModal';
 import {
@@ -51,8 +51,10 @@ const TempShelfPanel = React.memo(({
       onDrop={handleDropToTemp}
     >
       <div
-        className="flex items-center justify-between border-b border-slate-200/70 px-2.5 py-1.5"
-        onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ログイン中のGoogleアカウント専用の仮置き場です。')}
+        data-drag-handle="true"
+        className="flex cursor-grab select-none items-center justify-between border-b border-slate-200/70 px-2.5 py-1.5 transition-colors hover:bg-slate-50 active:cursor-grabbing"
+        title="ドラッグで移動 / ダブルクリックで初期位置に戻す"
+        onMouseEnter={(e) => onShowQuickHelp?.(e, '仮置き場', 'コマを一時退避する場所です。ログイン中のGoogleアカウント専用の仮置き場です。ヘッダーをドラッグすると好きな位置に移動できます。')}
         onMouseLeave={() => onHideQuickHelp?.()}
       >
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold text-slate-700">
@@ -62,7 +64,10 @@ const TempShelfPanel = React.memo(({
             {items.length}
           </span>
         </div>
-        <span className="text-[9px] font-medium text-slate-400">自分専用</span>
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] font-medium text-slate-400">自分専用</span>
+          <GripVertical size={12} className="text-slate-300" />
+        </div>
       </div>
 
       <div className="max-h-96 min-h-40 flex-1 overflow-y-auto p-1.5">

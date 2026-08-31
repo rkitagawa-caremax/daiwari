@@ -164,6 +164,21 @@ import SheetControlPanel from './features/sheets/components/SheetControlPanel';
 import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
 import TempShelfPanel from './features/sidebar/TempShelfPanel';
+import DraggableFloatingPanel from './components/DraggableFloatingPanel';
+
+// フローティングパネルの初期位置 (右端寄せ)。従来の「右端・縦中央付近に縦積み」を再現する。
+const FLOATING_PANEL_RIGHT_MARGIN = 12;
+const FLOATING_PANEL_GAP = 8;
+const SHEET_CONTROL_PANEL_ESTIMATED_HEIGHT = 168;
+const getFloatingPanelStackTop = (viewportHeight) => Math.max(72, Math.round(viewportHeight * 0.5) - 240);
+const getSheetControlPanelDefaultPosition = ({ viewportWidth, viewportHeight, width }) => ({
+  x: viewportWidth - width - FLOATING_PANEL_RIGHT_MARGIN,
+  y: getFloatingPanelStackTop(viewportHeight)
+});
+const getTempShelfPanelDefaultPosition = ({ viewportWidth, viewportHeight, width }) => ({
+  x: viewportWidth - width - FLOATING_PANEL_RIGHT_MARGIN,
+  y: getFloatingPanelStackTop(viewportHeight) + SHEET_CONTROL_PANEL_ESTIMATED_HEIGHT + FLOATING_PANEL_GAP
+});
 import WorkLogDashboard from './features/workLogs/WorkLogDashboard';
 import {
   applyUndoEntryToWorkspace,
@@ -4168,8 +4183,8 @@ export default function App() {
 
       {/* Top Navigation Bar - M3 Expressive Style */}
       {isTopBarsVisible && (
-      <div className="h-20 flex items-center justify-between px-6 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
-        <div className="flex items-center gap-4 flex-shrink-0">
+      <div className="h-14 flex items-center justify-between px-4 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
+        <div className="flex items-center gap-3 flex-shrink-0">
           <div className="flex items-center">
             <div
               className="p-0.5 bg-white shadow-sm cursor-pointer select-none"
@@ -4180,13 +4195,13 @@ export default function App() {
               <img
                 src="/logo.jpg"
                 alt="台割君"
-                className="h-16 w-16 object-contain transition-transform hover:scale-105"
+                className="h-10 w-10 object-contain transition-transform hover:scale-105"
                 style={{ borderRadius: 'calc(var(--m3-shape-corner-md) - 2px)' }}
               />
             </div>
           </div>
 
-          <div className="h-8 w-px mx-2 opacity-50" style={{ background: 'var(--m3-outline-variant)' }}></div>
+          <div className="h-6 w-px mx-1 opacity-50" style={{ background: 'var(--m3-outline-variant)' }}></div>
 
           {!USE_LOCAL_STORAGE && signedInUserName && (
             <div className="flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm">
@@ -4210,9 +4225,9 @@ export default function App() {
               onMouseLeave={hideQuickHelp}
               title="戻る (Ctrl+Z)"
               aria-label="直前の編集操作を戻す"
-              className="flex items-center justify-center w-10 h-10 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
+              className="flex items-center justify-center w-8 h-8 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
             >
-              <Undo2 size={18} />
+              <Undo2 size={16} />
             </button>
             <button
               type="button"
@@ -4221,9 +4236,9 @@ export default function App() {
               onMouseLeave={hideQuickHelp}
               title="進む (Ctrl+Y)"
               aria-label="戻した編集操作をやり直す"
-              className="flex items-center justify-center w-10 h-10 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
+              className="flex items-center justify-center w-8 h-8 rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
             >
-              <Redo2 size={18} />
+              <Redo2 size={16} />
             </button>
           </div>
 
@@ -4241,10 +4256,10 @@ export default function App() {
               }}
               onMouseEnter={(e) => showQuickHelp(e, '詳細', 'ページ単位で編集する表示に切り替えます。')}
               onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
+              className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
               style={viewMode === 'list' || viewMode === 'single' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
-              <List size={18} /> <span className="hidden sm:inline">詳細</span>
+              <List size={16} /> <span className="hidden sm:inline">詳細</span>
             </button>
             <button
               onClick={() => {
@@ -4259,10 +4274,10 @@ export default function App() {
               }}
               onMouseEnter={(e) => showQuickHelp(e, '全体', '全ページを一覧で表示します。コマの全体把握に使います。')}
               onMouseLeave={hideQuickHelp}
-              className={`flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
+              className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-full transition-all duration-300 whitespace-nowrap`}
               style={viewMode === 'overview' ? { background: 'var(--m3-secondary-container)', color: 'var(--m3-on-secondary-container)' } : { color: 'var(--m3-on-surface-variant)' }}
             >
-              <Grid size={18} /> <span className="hidden sm:inline">全体</span>
+              <Grid size={16} /> <span className="hidden sm:inline">全体</span>
             </button>
           </div>
 
@@ -4324,7 +4339,7 @@ export default function App() {
               onTouchEnd={endSalesModeLongPress}
               onTouchCancel={endSalesModeLongPress}
               onMouseEnter={(e) => showQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-bold transition-all duration-300 ml-2 whitespace-nowrap
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-bold transition-all duration-300 ml-2 whitespace-nowrap
                  ${isSalesLookupOpen
                   ? 'bg-violet-500/15 border-violet-500 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)] animate-pulse'
                   : isSalesMode
@@ -4332,7 +4347,7 @@ export default function App() {
                   : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
               title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
             >
-              <BarChart2 size={20} />
+              <BarChart2 size={18} />
               <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
             </button>
           )}
@@ -4472,7 +4487,7 @@ export default function App() {
           setIsToolsMenuOpen(false);
           hideQuickHelp();
         }}
-        className={`fixed right-3 z-[90] flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-500 shadow-md backdrop-blur transition-all duration-300 hover:bg-white hover:text-slate-700 hover:shadow-lg ${isTopBarsVisible ? 'top-[9.5rem]' : 'top-2'}`}
+        className={`fixed right-3 z-[90] flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-500 shadow-md backdrop-blur transition-all duration-300 hover:bg-white hover:text-slate-700 hover:shadow-lg ${isTopBarsVisible ? 'top-[8rem]' : 'top-2'}`}
         title={isTopBarsVisible ? '上部の操作バーを隠す' : '上部の操作バーを表示'}
         aria-label={isTopBarsVisible ? '上部の操作バーを隠す' : '上部の操作バーを表示'}
         aria-pressed={!isTopBarsVisible}
@@ -4481,7 +4496,12 @@ export default function App() {
       </button>
 
       {(viewMode === 'list' || viewMode === 'single') && (
-        <div className="fixed right-3 top-1/2 z-[92] flex max-h-[92vh] w-40 -translate-y-1/2 flex-col gap-2">
+        <>
+        <DraggableFloatingPanel
+          storageKey="daiwari:floating:sheetControlPanel"
+          getDefaultPosition={getSheetControlPanelDefaultPosition}
+          className="z-[92] w-40"
+        >
         <SheetControlPanel
           viewMode={viewMode}
           isLocked={isLocked}
@@ -4506,6 +4526,13 @@ export default function App() {
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
         />
+        </DraggableFloatingPanel>
+        <DraggableFloatingPanel
+          storageKey="daiwari:floating:tempShelfPanel"
+          getDefaultPosition={getTempShelfPanelDefaultPosition}
+          className="z-[92] flex w-40 flex-col"
+          style={{ maxHeight: '92vh' }}
+        >
         <TempShelfPanel
           tempItems={tempItems}
           imageDataById={imageDataById}
@@ -4515,7 +4542,8 @@ export default function App() {
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
         />
-        </div>
+        </DraggableFloatingPanel>
+        </>
       )}
 
       {(viewMode === 'list' || viewMode === 'single') && (

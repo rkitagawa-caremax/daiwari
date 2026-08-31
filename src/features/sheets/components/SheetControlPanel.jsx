@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Link as LinkIcon,
+  GripVertical,
   Merge,
   SlidersHorizontal,
   Split,
@@ -43,9 +44,14 @@ const SheetControlPanel = React.memo(({
       className="w-full flex-shrink-0 rounded-2xl border border-slate-200/80 bg-white/90 p-2 shadow-lg shadow-slate-300/25 backdrop-blur-md"
       aria-label="ページ編集コントロール"
     >
-      <div className="mb-1.5 flex items-center gap-2 px-1.5 py-1 text-[10px] font-bold tracking-wide text-slate-400">
+      <div
+        data-drag-handle="true"
+        className="mb-1.5 flex cursor-grab select-none items-center gap-2 rounded-lg px-1.5 py-1 text-[10px] font-bold tracking-wide text-slate-400 transition-colors hover:bg-slate-100 active:cursor-grabbing"
+        title="ドラッグで移動 / ダブルクリックで初期位置に戻す"
+      >
         <SlidersHorizontal size={13} />
-        コントロール
+        <span className="flex-1">コントロール</span>
+        <GripVertical size={12} className="text-slate-300" />
       </div>
 
       <button
