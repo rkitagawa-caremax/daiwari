@@ -39,8 +39,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
-  ZoomIn,
-  ZoomOut,
   Layout,
   Check,
   FileSpreadsheet,
@@ -59,7 +57,6 @@ import {
   CheckCircle2,
   Tag,
   ChevronDown,
-  ChevronUp,
   MoreHorizontal,
   Undo2,
   Redo2,
@@ -172,6 +169,12 @@ import PdfExportSurface from './features/sheets/components/PdfExportSurface';
 import Sidebar from './features/sidebar/Sidebar';
 import TempShelfPanel from './features/sidebar/TempShelfPanel';
 import DraggableFloatingPanel from './components/DraggableFloatingPanel';
+import QuickHelpPopup from './features/layout/QuickHelpPopup';
+import UndoNoticeToast from './features/layout/UndoNoticeToast';
+import PointerDragPreview from './features/layout/PointerDragPreview';
+import PanelArrangeBanner from './features/layout/PanelArrangeBanner';
+import TopBarsToggleButton from './features/layout/TopBarsToggleButton';
+import ZoomControls from './features/layout/ZoomControls';
 
 // フローティングパネルの初期位置 (右端寄せ)。従来の「右端・縦中央付近に縦積み」を再現する。
 const FLOATING_PANEL_RIGHT_MARGIN = 12;
@@ -4107,20 +4110,14 @@ export default function App() {
       </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => {
+      <TopBarsToggleButton
+        isTopBarsVisible={isTopBarsVisible}
+        onToggle={() => {
           setIsTopBarsVisible((current) => !current);
           setIsToolsMenuOpen(false);
           hideQuickHelp();
         }}
-        className={`fixed right-3 z-[90] flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-500 shadow-md backdrop-blur transition-all duration-300 hover:bg-white hover:text-slate-700 hover:shadow-lg ${isTopBarsVisible ? 'top-[8rem]' : 'top-2'}`}
-        title={isTopBarsVisible ? '上部の操作バーを隠す' : '上部の操作バーを表示'}
-        aria-label={isTopBarsVisible ? '上部の操作バーを隠す' : '上部の操作バーを表示'}
-        aria-pressed={!isTopBarsVisible}
-      >
-        {isTopBarsVisible ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-      </button>
+      />
 
       {(viewMode === 'list' || viewMode === 'single') && (
         <>
@@ -4174,34 +4171,7 @@ export default function App() {
       )}
 
       {(viewMode === 'list' || viewMode === 'single') && (
-        <div
-          className="fixed bottom-4 right-4 z-[90] flex items-center gap-0.5 rounded-xl border border-slate-200/80 bg-white/80 p-1 text-slate-500 shadow-sm backdrop-blur opacity-65 transition-all duration-200 hover:bg-white/95 hover:opacity-100 hover:shadow-md focus-within:opacity-100"
-          aria-label="表示倍率"
-        >
-          <button
-            type="button"
-            onClick={() => setZoomScale((scale) => Math.max(0.5, scale - 0.1))}
-            disabled={zoomScale <= 0.5}
-            className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30"
-            title="縮小"
-            aria-label="表示を縮小"
-          >
-            <ZoomOut size={15} />
-          </button>
-          <span className="w-10 select-none text-center font-mono text-[10px] font-bold text-slate-500" aria-live="polite">
-            {Math.round(zoomScale * 100)}%
-          </span>
-          <button
-            type="button"
-            onClick={() => setZoomScale((scale) => Math.min(1.5, scale + 0.1))}
-            disabled={zoomScale >= 1.5}
-            className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30"
-            title="拡大"
-            aria-label="表示を拡大"
-          >
-            <ZoomIn size={15} />
-          </button>
-        </div>
+        <ZoomControls zoomScale={zoomScale} setZoomScale={setZoomScale} />
       )}
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -4451,89 +4421,19 @@ export default function App() {
         visibleCodes={salesLookupVisibleCodes}
       />
 
-      {isQuickHelpMode && quickHelpPopup && (
-        <div
-          className="fixed z-[120] pointer-events-none"
-          style={{ left: quickHelpPopup.x, top: quickHelpPopup.y, transform: 'translateX(-50%)' }}
-        >
-          <div className="min-w-[320px] max-w-[460px] rounded-2xl border border-sky-200 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl">
-            <p className="text-[13px] font-bold text-sky-700">{quickHelpPopup.title}</p>
-            <p className="text-[12px] leading-relaxed text-slate-700 mt-1.5">{quickHelpPopup.description}</p>
-          </div>
-        </div>
-      )}
+      {isQuickHelpMode && quickHelpPopup && <QuickHelpPopup popup={quickHelpPopup} />}
 
       {panelArrangeModeSheetId && (
-        <div className="fixed right-48 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
-              <ArrowLeftRight size={17} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-extrabold text-slate-800">画像ホバリング中</p>
-              <p className={`text-[10px] font-bold ${unresolvedPanelArrangeCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                {unresolvedPanelArrangeCount > 0 ? `未配置 ${unresolvedPanelArrangeCount}件` : '解除できます'}
-              </p>
-            </div>
-          </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">画像を押したままコマへ移動できます。黄緑の枠は今回割り付けた画像です。</p>
-          <button
-            type="button"
-            onClick={finalizePanelArrangeMode}
-            disabled={isPanelArrangeFinalizing}
-            className={`mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-extrabold shadow-sm transition-all ${unresolvedPanelArrangeCount > 0
-              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
-              : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-              } disabled:cursor-wait disabled:opacity-60`}
-            title={unresolvedPanelArrangeCount > 0 ? '未配置画像をすべて割り付けてください' : '配置を保存してホバリングを解除'}
-          >
-            {isPanelArrangeFinalizing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-            ホバリングを解除
-          </button>
-        </div>
+        <PanelArrangeBanner
+          unresolvedCount={unresolvedPanelArrangeCount}
+          isFinalizing={isPanelArrangeFinalizing}
+          onFinalize={finalizePanelArrangeMode}
+        />
       )}
 
-      {pointerDragPreview && (
-        <div
-          ref={pointerDragOverlayRef}
-          className="fixed left-0 top-0 z-[160] pointer-events-none will-change-transform"
-        >
-          <div className="min-w-[96px] max-w-[144px] rounded-2xl border border-sky-200 bg-white/95 p-2 shadow-2xl backdrop-blur-md">
-            {pointerDragPreview.image ? (
-              <div className="aspect-square w-24 overflow-hidden rounded-xl bg-slate-100 flex items-center justify-center">
-                <img
-                  src={pointerDragPreview.image}
-                  alt="drag preview"
-                  className="max-w-full max-h-full object-contain"
-                  draggable={false}
-                />
-              </div>
-            ) : (
-              <div className="flex h-20 w-24 items-center justify-center rounded-xl bg-slate-100 px-2 text-center text-xs font-bold text-slate-600">
-                {pointerDragPreview.label || pointerDragPreview.code || (pointerDragPreview.text ? 'テキスト' : '移動')}
-              </div>
-            )}
-            <p className="mt-1.5 truncate text-center text-[10px] font-bold text-slate-700">
-              {pointerDragPreview.code || pointerDragPreview.label || pointerDragPreview.text || '移動中'}
-            </p>
-          </div>
-        </div>
-      )}
+      {pointerDragPreview && <PointerDragPreview ref={pointerDragOverlayRef} preview={pointerDragPreview} />}
 
-      {undoNotice && (
-        <div
-          className={`fixed bottom-5 left-1/2 z-[210] -translate-x-1/2 rounded-full border px-4 py-2 text-xs font-bold shadow-lg backdrop-blur-md ${undoNotice.tone === 'warning'
-            ? 'border-amber-200 bg-amber-50/95 text-amber-800'
-            : undoNotice.tone === 'neutral'
-              ? 'border-slate-200 bg-white/95 text-slate-600'
-              : 'border-emerald-200 bg-emerald-50/95 text-emerald-800'
-            }`}
-          role="status"
-          aria-live="polite"
-        >
-          {undoNotice.message}
-        </div>
-      )}
+      {undoNotice && <UndoNoticeToast notice={undoNotice} />}
 
       <input
         type="file"
