@@ -17,8 +17,8 @@ const PanelArrangeBanner = ({ unresolvedCount, pageCount = 1, isFinalizing, onFi
     </div>
     <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
       {pageCount > 1
-        ? '画像を押したまま2ページ間のコマへ移動できます。黄緑の枠は今回割り付けた画像です。'
-        : '画像を押したままコマへ移動できます。黄緑の枠は今回割り付けた画像です。'}
+        ? '画像を押したまま2ページ間のコマへ移動できます。青の点線は浮遊中、黄緑の枠は割付済みです。'
+        : '画像を押したままコマへ移動できます。青の点線は浮遊中、黄緑の枠は割付済みです。'}
     </p>
     <button
       type="button"

@@ -264,6 +264,7 @@ const Panel = React.memo(({
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
   const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
   const isArrangeImage = isArrangeMode && !!resolvedImage && !!arrangeTokenId;
+  const hasArrangeLayerOverlap = isArrangeImage && arrangeFloatingTokens.length > 0;
   const textLength = Array.from(localText || '').length;
   const textSizeClass = textLength > 180
     ? 'text-[9px]'
@@ -526,6 +527,7 @@ const Panel = React.memo(({
           className={`absolute inset-0 z-0 pointer-events-none transition-[opacity,transform,filter] duration-200
             ${isArrangeImage ? 'daiwari-panel-arrange-image' : ''}
             ${isArrangePlaced ? 'daiwari-panel-arrange-image-placed' : ''}
+            ${hasArrangeLayerOverlap ? 'daiwari-panel-arrange-image-underlay' : ''}
             ${isArrangeDragging ? 'daiwari-panel-arrange-image-active' : ''}
           `}
           style={{ animationDelay: isArrangeDragging ? undefined : `${(index % 8) * -0.13}s` }}
@@ -549,6 +551,12 @@ const Panel = React.memo(({
           draggable={false}
         />
       ))}
+
+      {hasArrangeLayerOverlap && (
+        <span className="pointer-events-none absolute left-1.5 top-1.5 z-[45] rounded-full border border-lime-500 bg-lime-100/95 px-2 py-0.5 text-[9px] font-black text-lime-800 shadow-md backdrop-blur-sm">
+          割付済
+        </span>
+      )}
 
       {(() => {
         const labels = data.freeLabels || (data.freeText
@@ -635,18 +643,18 @@ const Panel = React.memo(({
       {isArrangeMode && arrangeFloatingTokens.map((token, tokenIndex) => {
         const floatingImage = resolveArrangeTokenImage(token);
         const isDraggingToken = arrangeDraggingTokenId === token.id;
-        const offset = Math.min(tokenIndex, 3) * 6;
+        const stackOffset = Math.min(tokenIndex, 3) * 4;
         const tokenLabels = token.content?.freeLabels || [];
         return (
           <div
             key={token.id}
             data-arrange-floating-token-id={token.id}
-            className={`daiwari-panel-arrange-floating-token absolute z-[40] overflow-hidden rounded-xl border-2 border-dashed border-sky-300 bg-white/90 shadow-2xl backdrop-blur-sm cursor-grab active:cursor-grabbing transition-[opacity,filter] duration-150 ${isDraggingToken ? 'daiwari-panel-arrange-floating-token-active opacity-100' : 'opacity-80'}`}
+            className={`daiwari-panel-arrange-floating-token absolute z-[40] overflow-hidden rounded-xl border-[3px] border-dashed border-sky-500 bg-sky-50/95 shadow-2xl ring-2 ring-white/90 backdrop-blur-sm cursor-grab active:cursor-grabbing transition-[opacity,filter] duration-150 ${hasArrangeLayerOverlap ? 'daiwari-panel-arrange-floating-token-overlap' : ''} ${isDraggingToken ? 'daiwari-panel-arrange-floating-token-active opacity-100' : 'opacity-95'}`}
             style={{
-              left: `${7 + offset}%`,
-              top: `${7 + offset}%`,
-              right: `${7 - Math.min(tokenIndex, 2) * 2}%`,
-              bottom: `${7 - Math.min(tokenIndex, 2) * 2}%`,
+              left: hasArrangeLayerOverlap ? `${32 + stackOffset}%` : `${7 + stackOffset}%`,
+              top: hasArrangeLayerOverlap ? `${24 + stackOffset}%` : `${7 + stackOffset}%`,
+              right: hasArrangeLayerOverlap ? '4%' : `${7 - Math.min(tokenIndex, 2) * 2}%`,
+              bottom: hasArrangeLayerOverlap ? '5%' : `${7 - Math.min(tokenIndex, 2) * 2}%`,
               touchAction: 'none',
               animationDelay: isDraggingToken ? undefined : `${tokenIndex * -0.24}s`,
               filter: isDraggingToken
@@ -690,8 +698,9 @@ const Panel = React.memo(({
                 </span>
               );
             })}
-            <span className="absolute bottom-1.5 right-1.5 rounded-full bg-sky-600 px-2 py-0.5 text-[9px] font-bold text-white shadow">
-              未配置
+            <span className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 rounded-full border border-white/70 bg-sky-600 px-2 py-0.5 text-[9px] font-black text-white shadow-md">
+              <GripVertical size={9} strokeWidth={3} />
+              浮遊中
             </span>
           </div>
         );
