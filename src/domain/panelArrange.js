@@ -11,6 +11,14 @@ export const hasPanelImageContent = (panel = {}) => (
   && !panel.isText
 );
 
+export const hasPanelDummyContent = (panel = {}) => (
+  !!panel.label && !panel.isText
+);
+
+export const hasPanelArrangeContent = (panel = {}) => (
+  hasPanelImageContent(panel) || hasPanelDummyContent(panel)
+);
+
 const getArrangeContent = (panel = {}) => ({
   ...getPanelTransferableContent(panel),
   originalName: panel.originalName || null
@@ -27,7 +35,7 @@ const applyArrangeContent = (panel = {}, content = {}) => ({
 });
 
 const createTokenId = (sheetId, panelIndex, panel = {}) => (
-  `${sheetId}:${panelIndex}:${panel.imageId || panel.code || 'image'}`
+  `${sheetId}:${panelIndex}:${panel.imageId || panel.code || panel.label || 'content'}`
 );
 
 export const createPanelArrangeSessionForSheets = (sheetEntries = []) => {
@@ -44,7 +52,7 @@ export const createPanelArrangeSessionForSheets = (sheetEntries = []) => {
     sheetIds,
     tokens: normalizedEntries.flatMap(({ sheetId, panels }) => (
       panels.flatMap((panel, panelIndex) => (
-        hasPanelImageContent(panel)
+        hasPanelArrangeContent(panel)
           ? [{
             id: createTokenId(sheetId, panelIndex, panel),
             content: getArrangeContent(panel),
@@ -215,11 +223,11 @@ export const stagePanelArrangeDropAcrossSheets = (
   if (!sourceToken) return { status: 'invalid', session };
 
   const targetPanel = panels[targetPanelIndex] || {};
-  const hasBlockingNonImageContent = (
+  const hasBlockingContent = (
     hasPanelTransferableContent(targetPanel)
-    && !hasPanelImageContent(targetPanel)
+    && !hasPanelArrangeContent(targetPanel)
   );
-  if (hasBlockingNonImageContent) {
+  if (hasBlockingContent) {
     return { status: 'blocked-content', session };
   }
 
@@ -280,7 +288,7 @@ export const buildPanelArrangeViews = (panelsBySheetId = {}, session) => {
   Object.entries(panelsBySheetId).forEach(([sheetId, panels]) => {
     viewsBySheetId[sheetId] = {
       panels: panels.map((panel) => (
-        hasPanelImageContent(panel) ? clearArrangeContent(panel) : { ...panel }
+        hasPanelArrangeContent(panel) ? clearArrangeContent(panel) : { ...panel }
       )),
       assignedTokenIdsByPanel: {},
       placedPanelIndices: new Set(),

@@ -9,6 +9,7 @@ import {
   createPanelArrangeSession,
   createPanelArrangeSessionForSheets,
   getUnresolvedPanelArrangeTokens,
+  hasPanelArrangeContent,
   isPanelArrangeSessionComplete,
   reconcilePanelArrangeSession,
   stagePanelArrangeDropAcrossSheets,
@@ -92,12 +93,31 @@ test('merging panels makes tokens from hidden cells unresolved without losing th
   assert.equal(unresolved[0].floatingPanelIndex, 0);
 });
 
-test('non-image dummy content is protected from arrange-mode overwrite', () => {
+test('dummy panels participate in arrange mode and can swap places with images', () => {
   const panels = buildDefaultPanels();
   panels[0] = buildImagePanel(panels[0], 'image-a', 'E1001', 'Aラベル');
   panels[1] = { ...panels[1], label: 'タイトル' };
-  const session = createPanelArrangeSession('sheet-1', panels);
+  const initial = createPanelArrangeSession('sheet-1', panels);
 
+  assert.equal(hasPanelArrangeContent(panels[1]), true);
+  assert.equal(initial.tokens.length, 2);
+
+  const firstMove = stagePanelArrangeDrop(initial, initial.tokens[0].id, 1, panels);
+  const unresolvedDummy = getUnresolvedPanelArrangeTokens(firstMove.session)[0];
+  const completed = stagePanelArrangeDrop(firstMove.session, unresolvedDummy.id, 0, panels).session;
+  const finalPanels = buildPanelArrangeFinalPanels(panels, completed);
+
+  assert.equal(firstMove.status, 'placed');
+  assert.equal(unresolvedDummy.content.label, 'タイトル');
+  assert.equal(finalPanels[0].label, 'タイトル');
+  assert.equal(finalPanels[1].imageId, 'image-a');
+});
+
+test('text panels remain protected from arrange-mode overwrite', () => {
+  const panels = buildDefaultPanels();
+  panels[0] = buildImagePanel(panels[0], 'image-a', 'E1001', 'Aラベル');
+  panels[1] = { ...panels[1], label: 'テキスト', isText: true, text: '保護する文章' };
+  const session = createPanelArrangeSession('sheet-1', panels);
   const result = stagePanelArrangeDrop(session, session.tokens[0].id, 1, panels);
 
   assert.equal(result.status, 'blocked-content');
@@ -118,10 +138,48 @@ test('dummy panel remains a dummy even when legacy image data is still present',
   const result = stagePanelArrangeDrop(session, session.tokens[0].id, 1, panels);
   const view = buildPanelArrangeView(panels, session);
 
-  assert.equal(session.tokens.length, 1);
-  assert.equal(result.status, 'blocked-content');
+  assert.equal(session.tokens.length, 2);
+  assert.equal(result.status, 'placed');
   assert.equal(view.panels[1].label, '埋草');
   assert.equal(view.panels[1].image, 'data:image/png;base64,legacy');
+  assert.equal(getUnresolvedPanelArrangeTokens(result.session)[0].content.label, '埋草');
+});
+
+test('dummy panels can move across two pages without losing their type', () => {
+  const firstPanels = buildDefaultPanels();
+  const secondPanels = buildDefaultPanels();
+  firstPanels[0] = { ...firstPanels[0], label: '埋草', code: 'ダミーコマ' };
+  secondPanels[1] = buildImagePanel(secondPanels[1], 'image-b', 'E1002', 'Bラベル');
+  const panelsBySheetId = { 'sheet-1': firstPanels, 'sheet-2': secondPanels };
+  const initial = createPanelArrangeSessionForSheets([
+    { sheetId: 'sheet-1', panels: firstPanels },
+    { sheetId: 'sheet-2', panels: secondPanels }
+  ]);
+  const dummyToken = initial.tokens.find((token) => token.content.label === '埋草');
+
+  const moved = stagePanelArrangeDropAcrossSheets(
+    initial,
+    dummyToken.id,
+    'sheet-2',
+    1,
+    panelsBySheetId
+  );
+  const view = buildPanelArrangeViews(panelsBySheetId, moved.session);
+  const displacedImage = getUnresolvedPanelArrangeTokens(moved.session)[0];
+  const completed = stagePanelArrangeDropAcrossSheets(
+    moved.session,
+    displacedImage.id,
+    'sheet-1',
+    0,
+    panelsBySheetId
+  ).session;
+  const finalPanels = buildPanelArrangeFinalPanelsForSheets(panelsBySheetId, completed);
+
+  assert.equal(moved.status, 'placed');
+  assert.equal(view.viewsBySheetId['sheet-2'].panels[1].label, '埋草');
+  assert.equal(view.viewsBySheetId['sheet-2'].floatingTokensByPanel[1][0].content.imageId, 'image-b');
+  assert.equal(finalPanels['sheet-1'][0].imageId, 'image-b');
+  assert.equal(finalPanels['sheet-2'][1].label, '埋草');
 });
 
 test('two-page arrange session moves an image across pages and displaces the target image', () => {

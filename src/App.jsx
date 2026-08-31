@@ -79,7 +79,7 @@ import {
   createPanelArrangeSessionForSheets,
   getPanelArrangeSessionSheetIds,
   getUnresolvedPanelArrangeTokens,
-  hasPanelImageContent,
+  hasPanelArrangeContent,
   reconcilePanelArrangeSession,
   reconcilePanelArrangeSessionForSheets,
   stagePanelArrangeDropAcrossSheets
@@ -403,7 +403,7 @@ export default function App() {
       const targetSheet = sheets.find((sheet) => sheet.id === target.sheetId);
       if (!targetSheet) return;
       const targetPanel = targetSheet.panels?.[target.panelIndex];
-      if (!hasPanelImageContent(targetPanel)) return;
+      if (!hasPanelArrangeContent(targetPanel)) return;
       const workspaceSheets = [activeSheetId, secondarySheetId]
         .filter((sheetId, index, ids) => sheetId && ids.indexOf(sheetId) === index)
         .map((sheetId) => sheets.find((sheet) => sheet.id === sheetId))
@@ -2359,7 +2359,7 @@ export default function App() {
         panelsBySheetId
       );
       if (staged.status === 'blocked-content') {
-        showAlert('ダミーまたはテキストがあるコマには画像を重ねられません。空きコマを指定してください。');
+        showAlert('テキストなど移動対象外の内容があるコマには重ねられません。空きコマを指定してください。');
         return false;
       }
       if (staged.status !== 'placed') return false;

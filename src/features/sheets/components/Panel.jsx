@@ -23,6 +23,10 @@ import {
 } from '../../../lib/dragPayload';
 import { clamp } from '../../../lib/math';
 
+const createFreeLabelId = () => (
+  Date.now().toString() + Math.random().toString(36).substring(2, 7)
+);
+
 const Panel = React.memo(({
   index,
   data,
@@ -75,6 +79,8 @@ const Panel = React.memo(({
 
   useEffect(() => {
     if (!isFocusedRef.current) {
+      // 外部更新されたコマ本文を、編集中ではないローカル入力欄へ同期する。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocalText(data.text || '');
     }
   }, [data.text]);
@@ -243,7 +249,7 @@ const Panel = React.memo(({
       sourceSheetId: sheetId,
       sourceIndex: index,
       textData: currentText || '',
-      arrangeMode: isArrangeMode && !!resolvedImage,
+      arrangeMode: isArrangeMode && !!arrangeTokenId,
       arrangeSheetId: isArrangeMode ? sheetId : '',
       arrangeTokenId: isArrangeMode ? arrangeTokenId : ''
     });
@@ -270,12 +276,12 @@ const Panel = React.memo(({
         sourceSheetId: sheetId,
         sourceIndex: index,
         textData: currentText || '',
-        arrangeMode: isArrangeMode && !!resolvedImage,
+        arrangeMode: isArrangeMode && !!arrangeTokenId,
         arrangeSheetId: isArrangeMode ? sheetId : '',
         arrangeTokenId: isArrangeMode ? arrangeTokenId : ''
       },
       preview: {
-        image: resolvedImage || null,
+        image: isDummyPanel ? null : (resolvedImage || null),
         label: data.label || null,
         code: data.code || null,
         text: data.isText ? (currentText || data.text || '') : ''
@@ -305,7 +311,9 @@ const Panel = React.memo(({
       arrangeTokenId: token.id
     },
     preview: {
-      image: resolveArrangeTokenImage(token),
+      image: token?.content?.label && !token?.content?.isText
+        ? null
+        : resolveArrangeTokenImage(token),
       label: token?.content?.label || null,
       code: token?.content?.code || null,
       text: token?.content?.text || ''
@@ -365,8 +373,9 @@ const Panel = React.memo(({
   const hasFreeLabel = freeLabelsCount > 0 || (!!data.freeText && freeLabelsCount === 0);
   const shouldHighlightLabel = isOverview && highlightLabels && hasFreeLabel;
   const shouldHighlightEmpty = highlightEmpty && (!resolvedImage && (isEmpty || !!data.code));
-  const isArrangeImage = isArrangeMode && !!resolvedImage && !!arrangeTokenId;
-  const hasArrangeLayerOverlap = isArrangeImage && arrangeFloatingTokens.length > 0;
+  const isArrangeToken = isArrangeMode && !!arrangeTokenId;
+  const isArrangeImage = isArrangeToken && !!resolvedImage && !isDummyPanel;
+  const hasArrangeLayerOverlap = isArrangeToken && arrangeFloatingTokens.length > 0;
   const textLength = Array.from(localText || '').length;
   const textSizeClass = textLength > 180
     ? 'text-[9px]'
@@ -489,7 +498,7 @@ const Panel = React.memo(({
 
       const colorIndex = migratedLabels.length % FREE_LABEL_COLORS.length;
       const newLabel = {
-        id: Date.now().toString() + Math.random().toString(36).substring(2, 7),
+        id: createFreeLabelId(),
         text: 'ラベル',
         x: xPercent,
         y: yPercent,
@@ -518,13 +527,13 @@ const Panel = React.memo(({
     if (event.target.closest?.('textarea, input, button, select, [contenteditable="true"]')) return;
 
     if (isArrangeMode) {
-      if (!resolvedImage || !arrangeTokenId) return;
+      if (!arrangeTokenId) return;
       onArrangeDragStateChange?.(arrangeTokenId, true);
       handlePointerDragStart(event);
       return;
     }
 
-    if (resolvedImage && !isDummyPanel) {
+    if (resolvedImage || isDummyPanel) {
       onStartArrangeHold?.(event, { sheetId, panelIndex: index });
     }
     if (!isEmpty && !data.isText) {
@@ -565,12 +574,12 @@ const Panel = React.memo(({
       className={`relative border-t border-l flex flex-col items-center justify-center overflow-hidden transition-all duration-300
         ${(shouldHighlightLabel || shouldHighlightEmpty) ? 'ring-inset ring-2' : 'hover:shadow-md hover:z-10'}
         ${isSelected ? 'ring-4 z-20 shadow-xl' : ''}
-        ${(!isEmpty && !isOverview && !data.isText) || isArrangeImage ? 'cursor-grab active:cursor-grabbing' : ''}
+        ${(!isEmpty && !isOverview && !data.isText) || isArrangeToken ? 'cursor-grab active:cursor-grabbing' : ''}
         ${isArrangeMode ? 'ring-1 ring-inset ring-sky-300/35' : ''}
         ${isArrangeDragOver ? 'z-30 ring-4 ring-inset ring-sky-400 bg-sky-50/70' : ''}
         ${isSalesMode ? 'hover:ring-4 hover:z-40' : ''}
       `}
-      draggable={!isExportMode && !isOverview && !isLabelMode && (isArrangeMode ? isArrangeImage : (!isEmpty && !data.isText))}
+      draggable={!isExportMode && !isOverview && !isLabelMode && (isArrangeMode ? isArrangeToken : (!isEmpty && !data.isText))}
       onDragStart={isExportMode ? undefined : handleDragStart}
       onDragEnd={isExportMode ? undefined : handleDragEnd}
       onDragEnter={isExportMode ? undefined : handleDragEnter}
@@ -600,7 +609,7 @@ const Panel = React.memo(({
           : (isOverview
             ? 'pointer'
             : (isArrangeMode
-              ? (resolvedImage ? 'grab' : 'crosshair')
+              ? (isArrangeToken ? 'grab' : 'crosshair')
               : (!isEmpty && !data.isText ? 'grab' : 'default'))),
         gridColumn: `span ${data.colSpan || 1}`,
         gridRow: `span ${data.rowSpan || 1}`,
@@ -621,7 +630,7 @@ const Panel = React.memo(({
           : shouldHighlightLabel
             ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
             : undefined,
-        touchAction: !isExportMode && !isOverview && !isLabelMode && (!isEmpty || isArrangeImage) ? 'none' : undefined,
+        touchAction: !isExportMode && !isOverview && !isLabelMode && (!isEmpty || isArrangeToken) ? 'none' : undefined,
       }}
     >
       {resolvedImage && !isDummyPanel && (isArrangeImage ? (
@@ -682,7 +691,7 @@ const Panel = React.memo(({
                 width: `min(90%, calc(${labelColumns}em + 20px))`,
                 minWidth: '44px',
                 maxWidth: '90%',
-                ...(isArrangeImage ? {
+                ...(isArrangeToken ? {
                   opacity: isArrangeDragging ? 1 : (isArrangePlaced ? 0.9 : 0.45),
                   filter: 'drop-shadow(0 8px 10px rgba(15, 23, 42, 0.18))',
                   pointerEvents: 'none',
@@ -776,6 +785,8 @@ const Panel = React.memo(({
 
       {isArrangeMode && arrangeFloatingTokens.map((token, tokenIndex) => {
         const floatingImage = resolveArrangeTokenImage(token);
+        const isFloatingDummy = !!token.content?.label && !token.content?.isText;
+        const floatingDummyStyle = isFloatingDummy ? getLabelStyle(token.content.label) : null;
         const isDraggingToken = arrangeDraggingTokenId === token.id;
         const stackOffset = Math.min(tokenIndex, 3) * 4;
         const tokenLabels = token.content?.freeLabels || [];
@@ -801,9 +812,9 @@ const Panel = React.memo(({
             onPointerDown={(event) => handleFloatingTokenPointerDown(event, token)}
             onPointerUp={(event) => handleFloatingTokenPointerRelease(event, token)}
             onPointerCancel={(event) => handleFloatingTokenPointerRelease(event, token)}
-            title="未配置の浮遊画像：押したまま空きコマへ移動"
+            title={`未配置の浮遊${isFloatingDummy ? 'ダミー' : '画像'}：押したまま空きコマへ移動`}
           >
-            {floatingImage ? (
+            {floatingImage && !isFloatingDummy ? (
               <img
                 src={floatingImage}
                 alt="未配置の浮遊画像"
@@ -811,8 +822,14 @@ const Panel = React.memo(({
                 draggable={false}
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center px-2 text-center text-xs font-bold text-slate-600">
-                {token.content?.code || '未配置画像'}
+              <div
+                className="flex h-full w-full items-center justify-center px-2 text-center text-xs font-bold text-slate-600"
+                style={isFloatingDummy ? {
+                  background: floatingDummyStyle.bg,
+                  color: floatingDummyStyle.text
+                } : undefined}
+              >
+                {token.content?.label || token.content?.code || '未配置画像'}
               </div>
             )}
             {token.content?.code && (
@@ -877,8 +894,17 @@ const Panel = React.memo(({
       {data.label && !data.isText && (
         <div
           data-dummy-panel-label={data.label}
-          className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"
-          style={{ background: labelStyle.bg, color: labelStyle.text }}
+          className={`absolute inset-0 flex items-center justify-center pointer-events-none z-10 transition-[opacity,transform,filter] duration-200
+            ${isArrangeToken ? 'daiwari-panel-arrange-image' : ''}
+            ${isArrangePlaced ? 'daiwari-panel-arrange-image-placed' : ''}
+            ${hasArrangeLayerOverlap ? 'daiwari-panel-arrange-image-underlay' : ''}
+            ${isArrangeDragging ? 'daiwari-panel-arrange-image-active' : ''}
+          `}
+          style={{
+            background: labelStyle.bg,
+            color: labelStyle.text,
+            animationDelay: isArrangeDragging ? undefined : `${(index % 8) * -0.13}s`
+          }}
         >
           <span className="font-bold text-sm">{data.label}</span>
         </div>
