@@ -76,7 +76,6 @@ import {
 } from './domain/panels';
 import {
   buildPanelArrangeFinalPanelsForSheets,
-  buildPanelArrangeViews,
   createPanelArrangeSessionForSheets,
   getPanelArrangeSessionSheetIds,
   getUnresolvedPanelArrangeTokens,
@@ -97,9 +96,7 @@ import {
   toComparableSeconds
 } from './domain/workspaceComparators';
 import {
-  getAdjacentPageOptions,
-  getPageNavigationSelection,
-  getTwoPageDisplaySheets
+  getPageNavigationSelection
 } from './domain/twoPageWorkspace';
 import { normalizeCode } from './domain/productCodes';
 import {
@@ -107,21 +104,12 @@ import {
   getSizeType
 } from './domain/panelLayout';
 import {
-  DAIWARI_DROPZONE_ATTR,
-  DAIWARI_PANEL_DROPZONE_PREFIX,
   PANEL_ARRANGE_HOLD_MS,
-  POINTER_DRAG_THRESHOLD_PX,
-  clearActiveNativeDragPayload,
   extractPanelAssignmentFromDragPayload,
   extractPanelArrangeDragPayload,
   extractPanelMoveDragPayload,
-  getActiveNativeDragPayload,
   getActivePanelMoveDragPayload,
-  getDragPayload,
   hasPanelArrangeHoldMoved,
-  isDropEventHandled,
-  markDropEventHandled,
-  normalizeDragPayload,
   parseNullableDragValue
 } from './lib/dragPayload';
 import { parseCSVLine, readFileAutoEncoding } from './lib/csv';
@@ -142,6 +130,8 @@ import { useWorkspaceUndoState } from './hooks/useWorkspaceUndoState';
 import { useQuickHelp } from './hooks/useQuickHelp';
 import { useScreenLock } from './hooks/useScreenLock';
 import { useAppDialogs } from './hooks/useAppDialogs';
+import { useWorkspacePointerDrag } from './hooks/useWorkspacePointerDrag';
+import { useWorkspaceViewState } from './hooks/useWorkspaceViewState';
 import {
   buildFirestoreActionErrorMessage,
   getFirestoreErrorCode,
@@ -293,7 +283,6 @@ export default function App() {
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
-  const [pointerDragPreview, setPointerDragPreview] = useState(null);
   const [panelArrangeSession, setPanelArrangeSession] = useState(null);
   const [arrangeDraggingTokenId, setArrangeDraggingTokenId] = useState(null);
   const [isPanelArrangeFinalizing, setIsPanelArrangeFinalizing] = useState(false);
@@ -304,8 +293,6 @@ export default function App() {
   const undoNoticeTimerRef = useRef(null);
   const salesModeLongPressTimerRef = useRef(null);
   const salesModeLongPressTriggeredRef = useRef(false);
-  const pointerDragOverlayRef = useRef(null);
-  const pointerDragSessionRef = useRef(null);
   const panelArrangeHoldRef = useRef(null);
   const suppressNextClickRef = useRef(false);
 
@@ -2591,196 +2578,17 @@ export default function App() {
     showAlert
   ]);
 
-  const dispatchPointerDropToZone = useCallback((zoneId, dragPayload = {}) => {
-    if (!zoneId) return false;
-    if (extractPanelArrangeDragPayload(dragPayload) && !zoneId.startsWith(DAIWARI_PANEL_DROPZONE_PREFIX)) {
-      return false;
-    }
-    if (zoneId === 'temp') return applyDragPayloadToTempShelf(dragPayload);
-    if (zoneId === 'stock') return applyDragPayloadToStockList(dragPayload);
-    if (zoneId === 'excluded') return applyDragPayloadToExcludedList(dragPayload);
-    if (!zoneId.startsWith(DAIWARI_PANEL_DROPZONE_PREFIX)) return false;
-
-    const panelTarget = zoneId.slice(DAIWARI_PANEL_DROPZONE_PREFIX.length);
-    const separatorIndex = panelTarget.lastIndexOf(':');
-    if (separatorIndex === -1) return false;
-
-    const sheetId = panelTarget.slice(0, separatorIndex);
-    const panelIndex = Number.parseInt(panelTarget.slice(separatorIndex + 1), 10);
-    if (!sheetId || Number.isNaN(panelIndex)) return false;
-
-    return applyDragPayloadToPanel(sheetId, panelIndex, dragPayload);
-  }, [applyDragPayloadToTempShelf, applyDragPayloadToStockList, applyDragPayloadToExcludedList, applyDragPayloadToPanel]);
-
-  const handlePointerDropAtPoint = useCallback((clientX, clientY, dragPayload = {}) => {
-    if (typeof document === 'undefined') return false;
-    const target = document.elementFromPoint(clientX, clientY);
-    const dropZoneEl = target?.closest?.(`[${DAIWARI_DROPZONE_ATTR}]`);
-    const zoneId = dropZoneEl?.getAttribute?.(DAIWARI_DROPZONE_ATTR) || '';
-    return dispatchPointerDropToZone(zoneId, dragPayload);
-  }, [dispatchPointerDropToZone]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-
-    const handleDocumentDragOver = (event) => {
-      if (!getActiveNativeDragPayload()) return;
-      event.preventDefault();
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = 'move';
-      }
-    };
-
-    const handleDocumentDrop = (event) => {
-      if (isDropEventHandled(event)) return;
-      const dragPayload = getDragPayload(event.dataTransfer);
-      if (!dragPayload) {
-        clearActiveNativeDragPayload();
-        return;
-      }
-
-      const targetElement = event.target instanceof Element
-        ? event.target
-        : event.target?.parentElement;
-      const dropZoneEl = targetElement?.closest?.(`[${DAIWARI_DROPZONE_ATTR}]`);
-      const zoneId = dropZoneEl?.getAttribute?.(DAIWARI_DROPZONE_ATTR) || '';
-      if (!zoneId) {
-        clearActiveNativeDragPayload();
-        return;
-      }
-
-      const handled = dispatchPointerDropToZone(zoneId, dragPayload);
-      if (handled) {
-        markDropEventHandled(event);
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      clearActiveNativeDragPayload();
-    };
-
-    document.addEventListener('dragover', handleDocumentDragOver);
-    document.addEventListener('drop', handleDocumentDrop);
-
-    return () => {
-      document.removeEventListener('dragover', handleDocumentDragOver);
-      document.removeEventListener('drop', handleDocumentDrop);
-    };
-  }, [dispatchPointerDropToZone]);
-
-  const positionPointerDragOverlay = useCallback((clientX, clientY) => {
-    const overlay = pointerDragOverlayRef.current;
-    if (!overlay) return;
-    overlay.style.transform = `translate3d(${clientX + 18}px, ${clientY + 18}px, 0)`;
-  }, []);
-
-  const clearPointerDragSession = useCallback(() => {
-    const session = pointerDragSessionRef.current;
-    if (!session || typeof document === 'undefined') {
-      pointerDragSessionRef.current = null;
-      setPointerDragPreview(null);
-      return;
-    }
-
-    document.removeEventListener('pointermove', session.handleMove);
-    document.removeEventListener('pointerup', session.handleUp);
-    document.removeEventListener('pointercancel', session.handleCancel);
-
-    pointerDragSessionRef.current = null;
-    setPointerDragPreview(null);
-  }, []);
-
-  const startPointerDrag = useCallback((event, config = {}) => {
-    if (!event || event.pointerType === 'mouse' || event.isPrimary === false || !config.payload) return;
-    if (event.button !== undefined && event.button !== 0) return;
-
-    clearPointerDragSession();
-
-    const session = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      currentX: event.clientX,
-      currentY: event.clientY,
-      active: false,
-      payload: normalizeDragPayload(config.payload),
-      preview: config.preview || {}
-    };
-
-    const finishPointerDrag = (pointerEvent, shouldDrop) => {
-      if (!pointerEvent || pointerEvent.pointerId !== session.pointerId) return;
-      const wasActive = session.active;
-      clearPointerDragSession();
-      let handled = false;
-      if (wasActive) {
-        suppressNextClickRef.current = true;
-        if (shouldDrop) {
-          handled = handlePointerDropAtPoint(pointerEvent.clientX, pointerEvent.clientY, session.payload);
-        }
-      }
-      config.onFinish?.({ active: wasActive, handled });
-    };
-
-    session.handleMove = (moveEvent) => {
-      if (!moveEvent || moveEvent.pointerId !== session.pointerId) return;
-
-      session.currentX = moveEvent.clientX;
-      session.currentY = moveEvent.clientY;
-
-      if (!session.active) {
-        const distance = Math.hypot(
-          session.currentX - session.startX,
-          session.currentY - session.startY
-        );
-        if (distance < POINTER_DRAG_THRESHOLD_PX) return;
-        session.active = true;
-        setPointerDragPreview(session.preview);
-        requestAnimationFrame(() => positionPointerDragOverlay(session.currentX, session.currentY));
-      }
-
-      moveEvent.preventDefault();
-      positionPointerDragOverlay(session.currentX, session.currentY);
-    };
-
-    session.handleUp = (upEvent) => {
-      finishPointerDrag(upEvent, true);
-    };
-
-    session.handleCancel = (cancelEvent) => {
-      finishPointerDrag(cancelEvent, false);
-    };
-
-    pointerDragSessionRef.current = session;
-
-    try {
-      event.currentTarget?.setPointerCapture?.(event.pointerId);
-    } catch (error) {
-      void error;
-    }
-
-    document.addEventListener('pointermove', session.handleMove, { passive: false });
-    document.addEventListener('pointerup', session.handleUp, { passive: false });
-    document.addEventListener('pointercancel', session.handleCancel, { passive: false });
-  }, [clearPointerDragSession, handlePointerDropAtPoint, positionPointerDragOverlay]);
-
-  useEffect(() => {
-    const handleCaptureClick = (event) => {
-      if (!suppressNextClickRef.current) return;
-      suppressNextClickRef.current = false;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-
-    document.addEventListener('click', handleCaptureClick, true);
-    return () => {
-      document.removeEventListener('click', handleCaptureClick, true);
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      clearPointerDragSession();
-    };
-  }, [clearPointerDragSession]);
+  const {
+    pointerDragPreview,
+    pointerDragOverlayRef,
+    startPointerDrag
+  } = useWorkspacePointerDrag({
+    onDropToPanel: applyDragPayloadToPanel,
+    onDropToTemp: applyDragPayloadToTempShelf,
+    onDropToStock: applyDragPayloadToStockList,
+    onDropToExcluded: applyDragPayloadToExcludedList,
+    suppressNextClickRef
+  });
 
   // --- Image & Bulk Actions ---
 
@@ -3488,22 +3296,26 @@ export default function App() {
     }
   };
 
-  const displaySheets = useMemo(() => {
-    if (viewMode === 'single') {
-      return getTwoPageDisplaySheets(sheets, activeSheetId, secondarySheetId);
-    }
-    let result = genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
-    return result;
-  }, [sheets, genreFilter, viewMode, activeSheetId, secondarySheetId]);
-
-  const adjacentPageOptions = useMemo(
-    () => viewMode === 'single' ? getAdjacentPageOptions(sheets, activeSheetId) : [],
-    [viewMode, sheets, activeSheetId]
-  );
-
-  const isTwoPageMode = viewMode === 'single'
-    && !!secondarySheetId
-    && displaySheets.some((sheet) => sheet.id === secondarySheetId);
+  const {
+    displaySheets,
+    adjacentPageOptions,
+    isTwoPageMode,
+    panelArrangeWorkspaceView,
+    unresolvedPanelArrangeCount,
+    imageDataById,
+    currentList,
+    currentIndex,
+    salesLookupVisibleCodes,
+    activeSheetLabelCount
+  } = useWorkspaceViewState({
+    sheets,
+    images,
+    viewMode,
+    genreFilter,
+    activeSheetId,
+    secondarySheetId,
+    panelArrangeSession
+  });
 
   const handleSelectSecondPage = useCallback((sheetId) => {
     if (panelArrangeSession) return;
@@ -3516,31 +3328,6 @@ export default function App() {
     setSecondarySheetId(null);
     setSelection({ sheetId: null, indices: [] });
   }, []);
-
-  const panelArrangeWorkspaceView = useMemo(() => {
-    if (!panelArrangeSession) return null;
-    const panelsBySheetId = Object.fromEntries(
-      getPanelArrangeSessionSheetIds(panelArrangeSession).map((sheetId) => {
-        const targetSheet = sheets.find((sheet) => sheet.id === sheetId);
-        return [sheetId, targetSheet?.panels || []];
-      })
-    );
-    return buildPanelArrangeViews(panelsBySheetId, panelArrangeSession);
-  }, [panelArrangeSession, sheets]);
-
-  const unresolvedPanelArrangeCount = useMemo(() => (
-    getUnresolvedPanelArrangeTokens(panelArrangeWorkspaceView?.session || panelArrangeSession).length
-  ), [panelArrangeSession, panelArrangeWorkspaceView]);
-
-  const imageDataById = useMemo(() => {
-    const map = {};
-    images.forEach((img) => {
-      if (img?.id && img?.data) {
-        map[img.id] = img.data;
-      }
-    });
-    return map;
-  }, [images]);
 
   const handlePreviewAssignedImage = useCallback((preview) => {
     if (!preview?.src) return;
@@ -3567,44 +3354,6 @@ export default function App() {
     setIsMergeMode(false);
     setSelection({ sheetId: null, indices: [] });
   }, [panelArrangeSession, sheets, showAlert]);
-
-  const currentList = useMemo(() => {
-    if (viewMode === 'single') return sheets;
-    return genreFilter === 'all' ? sheets : sheets.filter(s => s.genre === genreFilter);
-  }, [sheets, genreFilter, viewMode]);
-
-  const currentIndex = useMemo(() => {
-    return currentList.findIndex(s => s.id === activeSheetId);
-  }, [currentList, activeSheetId]);
-
-  const salesLookupVisibleCodes = useMemo(() => {
-    if (viewMode !== 'single' || !activeSheetId) return null;
-    const activeSheet = sheets.find((sheet) => sheet.id === activeSheetId);
-    if (!activeSheet?.panels) return [];
-
-    const codes = new Set();
-    activeSheet.panels.forEach((panel) => {
-      if (!panel || panel.hidden) return;
-      const normalized = normalizeCode(panel.code || '');
-      if (normalized) {
-        codes.add(normalized);
-      }
-    });
-
-    return Array.from(codes);
-  }, [viewMode, activeSheetId, sheets]);
-
-  const activeSheetLabelCount = useMemo(() => {
-    if (viewMode !== 'single' || !activeSheetId) return 0;
-    const targetSheet = sheets.find((s) => s.id === activeSheetId);
-    if (!targetSheet?.panels) return 0;
-
-    return targetSheet.panels.reduce((count, panel) => {
-      const freeLabelsCount = panel?.freeLabels?.length || 0;
-      const hasLegacy = !!panel?.freeText && freeLabelsCount === 0;
-      return count + freeLabelsCount + (hasLegacy ? 1 : 0);
-    }, 0);
-  }, [viewMode, activeSheetId, sheets]);
 
   const handleBulkDeletePageLabels = useCallback(() => {
     if (isLockedRef.current) return;
