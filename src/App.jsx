@@ -1,7 +1,5 @@
 ﻿import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
 import {
-  getAuth,
   GoogleAuthProvider,
   browserLocalPersistence,
   setPersistence,
@@ -12,7 +10,6 @@ import {
   signOut
 } from 'firebase/auth';
 import {
-  getFirestore,
   collection,
   query,
   where,
@@ -24,7 +21,6 @@ import {
   updateDoc,
   serverTimestamp,
   writeBatch,
-  getDoc,
   getDocs,
   runTransaction,
   deleteField,
@@ -59,6 +55,16 @@ import {
   isAllowedGoogleUser,
   normalizeEmail
 } from './config/authPolicy';
+import {
+  USE_LOCAL_STORAGE,
+  DEFAULT_APP_ID,
+  auth,
+  db,
+  CLOUD_IMAGES_CACHE_KEY,
+  CLOUD_SALES_CACHE_KEY,
+  CLOUD_CACHE_TTL_MS,
+  LOCAL_WORK_LOGS_KEY
+} from './config/firebase';
 import {
   GENRES
 } from './constants/layout';
@@ -187,69 +193,6 @@ import {
   restoreCloudUndoEntry,
   undoEntryHasClientConflict
 } from './features/undo/accountUndo';
-
-// --- Firebase Configuration / Local Storage Mode ---
-// Firebase設定 (daiwari-kun)
-const firebaseConfig = {
-  apiKey: "AIzaSyAMxA79jj3ymqJSCBivjwEfPudnfy8CKAc",
-  authDomain: "daiwari-kun.firebaseapp.com",
-  projectId: "daiwari-kun",
-  storageBucket: "daiwari-kun.firebasestorage.app",
-  messagingSenderId: "712325109440",
-  appId: "1:712325109440:web:a4dd5d7bcdbb8edf607f25"
-};
-
-const LOCAL_WORK_LOGS_KEY = 'daiwari_work_activity_logs_v1';
-
-// 優先順位: 1. グローバル設定があればそれを使用, 2. なければハードコードされた設定を使用
-let activeConfig = null;
-try {
-  activeConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
-} catch (e) {
-  activeConfig = firebaseConfig;
-}
-
-const resolveStorageMode = () => {
-  if (typeof window === 'undefined') return 'cloud';
-
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const modeParam = (params.get('mode') || '').toLowerCase();
-    if (modeParam === 'local' || modeParam === 'cloud') {
-      localStorage.setItem('daiwari_storage_mode', modeParam);
-      return modeParam;
-    }
-
-    const savedMode = (localStorage.getItem('daiwari_storage_mode') || '').toLowerCase();
-    if (savedMode === 'local' || savedMode === 'cloud') {
-      return savedMode;
-    }
-  } catch (e) {
-    console.warn('Failed to resolve storage mode, defaulting to cloud.', e);
-  }
-
-  return 'cloud';
-};
-
-let USE_LOCAL_STORAGE = resolveStorageMode() === 'local';
-
-let app, auth, db;
-const DEFAULT_APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default-workspace';
-
-if (!USE_LOCAL_STORAGE) {
-  try {
-    app = initializeApp(activeConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-  } catch (e) {
-    console.error('Firebase initialization failed, falling back to localStorage:', e);
-    USE_LOCAL_STORAGE = true; // エラー時はローカルモードに強制移行
-  }
-}
-
-const CLOUD_IMAGES_CACHE_KEY = 'cloudImagesCache';
-const CLOUD_SALES_CACHE_KEY = 'cloudSalesDataCache';
-const CLOUD_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 // --- Components ---
 
