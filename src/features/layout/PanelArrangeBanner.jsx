@@ -3,9 +3,9 @@ import { ArrowLeftRight, Check, Loader2 } from 'lucide-react';
 
 // 画像ホバリング (パネル配置モード) 中に右側へ出す案内 + 解除ボタン。
 const PanelArrangeBanner = ({ unresolvedCount, pageCount = 1, isFinalizing, onFinalize }) => (
-  <div className="fixed right-48 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
+  <div className="daiwari-panel-arrange-banner fixed right-48 top-1/2 z-[155] w-48 -translate-y-1/2 rounded-2xl border border-sky-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
     <div className="flex items-center gap-2">
-      <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
+      <div className="daiwari-panel-arrange-icon flex h-8 w-8 flex-none items-center justify-center rounded-full bg-sky-100 text-sky-700">
         <ArrowLeftRight size={17} />
       </div>
       <div className="min-w-0">

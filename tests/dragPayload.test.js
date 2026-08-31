@@ -79,7 +79,7 @@ test('panel move extraction rejects incomplete and non-panel payloads', () => {
 });
 
 test('panel arrange payload requires its explicit mode and owning sheet', () => {
-  assert.equal(PANEL_ARRANGE_HOLD_MS, 3000);
+  assert.equal(PANEL_ARRANGE_HOLD_MS, 2000);
   assert.equal(PANEL_ARRANGE_MOVE_TOLERANCE_PX, 4);
   assert.equal(extractPanelArrangeDragPayload({ arrangeMode: true }), null);
   assert.equal(extractPanelArrangeDragPayload({ arrangeSheetId: 'sheet-1' }), null);

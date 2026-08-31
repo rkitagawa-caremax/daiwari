@@ -510,32 +510,72 @@ button:active {
 
 @keyframes daiwari-panel-hover {
     0%, 100% {
-        transform: translate3d(0, -3px, 0) rotate(-0.25deg) scale(0.985);
+        transform: translate3d(0, -4px, 0) rotate(-0.35deg) scale(0.99);
     }
 
     50% {
-        transform: translate3d(0, -5px, 0) rotate(0.25deg) scale(0.99);
+        transform: translate3d(0, -9px, 0) rotate(0.35deg) scale(1.01);
+    }
+}
+
+@keyframes daiwari-panel-placed-hover {
+    0%, 100% {
+        transform: translate3d(0, -4px, 0) scale(0.99);
+    }
+
+    50% {
+        transform: translate3d(0, -7px, 0) scale(1);
+    }
+}
+
+@keyframes daiwari-floating-token-hover {
+    0%, 100% {
+        transform: translate3d(0, -4px, 0) rotate(-0.45deg) scale(0.99);
+    }
+
+    50% {
+        transform: translate3d(0, -12px, 0) rotate(0.45deg) scale(1.015);
+    }
+}
+
+@keyframes daiwari-arrange-banner-glow {
+    0%, 100% {
+        box-shadow: 0 14px 32px rgba(15, 23, 42, 0.14), 0 0 0 0 rgba(14, 165, 233, 0.08);
+    }
+
+    50% {
+        box-shadow: 0 20px 42px rgba(15, 23, 42, 0.2), 0 0 24px 4px rgba(14, 165, 233, 0.18);
+    }
+}
+
+@keyframes daiwari-arrange-icon-hover {
+    0%, 100% {
+        transform: translate3d(0, 1px, 0) rotate(-4deg);
+    }
+
+    50% {
+        transform: translate3d(0, -3px, 0) rotate(4deg);
     }
 }
 
 .daiwari-panel-arrange-image {
     z-index: 14;
     inset: 3px;
-    opacity: 0.45;
-    filter: drop-shadow(0 10px 10px rgba(15, 23, 42, 0.22));
-    animation: daiwari-panel-hover 1.35s ease-in-out infinite;
+    opacity: 0.68;
+    filter: drop-shadow(0 14px 12px rgba(15, 23, 42, 0.28)) drop-shadow(0 0 8px rgba(14, 165, 233, 0.24));
+    animation: daiwari-panel-hover 1.8s ease-in-out infinite;
+    will-change: transform;
 }
 
 .daiwari-panel-arrange-image-placed {
-    opacity: 0.9;
+    opacity: 0.94;
     border: 3px solid #a3e635;
     border-radius: 8px;
     box-shadow:
         0 0 0 2px rgba(236, 252, 203, 0.95),
         0 0 16px 5px rgba(163, 230, 53, 0.72),
         inset 0 0 10px rgba(190, 242, 100, 0.35);
-    animation: none;
-    transform: translate3d(0, -4px, 0) scale(0.99);
+    animation: daiwari-panel-placed-hover 2.4s ease-in-out infinite;
 }
 
 .daiwari-panel-arrange-image-active {
@@ -546,10 +586,34 @@ button:active {
     transform: translate3d(0, -7px, 0) scale(1.025);
 }
 
+.daiwari-panel-arrange-floating-token {
+    animation: daiwari-floating-token-hover 1.65s ease-in-out infinite;
+    will-change: transform;
+}
+
+.daiwari-panel-arrange-floating-token-active {
+    animation: none;
+    transform: translate3d(0, -12px, 0) scale(1.03);
+}
+
+.daiwari-panel-arrange-banner {
+    animation: daiwari-arrange-banner-glow 2.8s ease-in-out infinite;
+}
+
+.daiwari-panel-arrange-icon {
+    animation: daiwari-arrange-icon-hover 1.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .daiwari-panel-arrange-image {
         animation: none;
         transform: translate3d(0, -4px, 0) scale(0.985);
+    }
+
+    .daiwari-panel-arrange-floating-token,
+    .daiwari-panel-arrange-banner,
+    .daiwari-panel-arrange-icon {
+        animation: none;
     }
 }
 

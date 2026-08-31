@@ -528,6 +528,7 @@ const Panel = React.memo(({
             ${isArrangePlaced ? 'daiwari-panel-arrange-image-placed' : ''}
             ${isArrangeDragging ? 'daiwari-panel-arrange-image-active' : ''}
           `}
+          style={{ animationDelay: isArrangeDragging ? undefined : `${(index % 8) * -0.13}s` }}
         >
           <img
             src={resolvedImage}
@@ -640,13 +641,14 @@ const Panel = React.memo(({
           <div
             key={token.id}
             data-arrange-floating-token-id={token.id}
-            className={`absolute z-[40] overflow-hidden rounded-xl border-2 border-dashed border-sky-300 bg-white/90 shadow-2xl backdrop-blur-sm cursor-grab active:cursor-grabbing transition-[opacity,filter] duration-150 ${isDraggingToken ? 'opacity-100' : 'opacity-[0.65]'}`}
+            className={`daiwari-panel-arrange-floating-token absolute z-[40] overflow-hidden rounded-xl border-2 border-dashed border-sky-300 bg-white/90 shadow-2xl backdrop-blur-sm cursor-grab active:cursor-grabbing transition-[opacity,filter] duration-150 ${isDraggingToken ? 'daiwari-panel-arrange-floating-token-active opacity-100' : 'opacity-80'}`}
             style={{
               left: `${7 + offset}%`,
               top: `${7 + offset}%`,
               right: `${7 - Math.min(tokenIndex, 2) * 2}%`,
               bottom: `${7 - Math.min(tokenIndex, 2) * 2}%`,
               touchAction: 'none',
+              animationDelay: isDraggingToken ? undefined : `${tokenIndex * -0.24}s`,
               filter: isDraggingToken
                 ? 'drop-shadow(0 16px 16px rgba(15, 23, 42, 0.35))'
                 : 'drop-shadow(0 10px 12px rgba(15, 23, 42, 0.24))'
