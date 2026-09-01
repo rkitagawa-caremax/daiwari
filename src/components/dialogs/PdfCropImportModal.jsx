@@ -91,6 +91,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const [bounds, setBounds] = useState({ ...DEFAULT_PDF_GRID_BOUNDS });
   const [errorMessage, setErrorMessage] = useState('');
   const [isReadingPdfs, setIsReadingPdfs] = useState(false);
+  const [skipExistingCodes, setSkipExistingCodes] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
 
@@ -99,8 +100,8 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
     applyPdfCropCatalogPageOverrides(buildPdfCropBatchPages(pdfSources), catalogPageOverrides)
   ), [catalogPageOverrides, pdfSources]);
   const pagePlans = useMemo(() => (
-    buildPdfCropPagePlans({ batchPages, rows: allRows, existingCodes })
-  ), [allRows, batchPages, existingCodes]);
+    buildPdfCropPagePlans({ batchPages, rows: allRows, existingCodes, skipExistingCodes })
+  ), [allRows, batchPages, existingCodes, skipExistingCodes]);
   const batchSummary = useMemo(() => summarizePdfCropPagePlans(pagePlans), [pagePlans]);
   const activePlan = useMemo(() => (
     pagePlans.find((plan) => plan.page.id === activeBatchPageId) || pagePlans[0] || null
@@ -455,7 +456,20 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                 <div className="rounded-xl bg-sky-50 p-3"><span className="block text-[10px] font-bold text-sky-600">コード一致<span className="ml-1 font-medium text-sky-400">表示中</span></span><span className="text-xl font-black text-sky-700">{codeMatchCount}</span></div>
                 <div className="rounded-xl bg-violet-50 p-3"><span className="block text-[10px] font-bold text-violet-600">文字保存<span className="ml-1 font-medium text-violet-400">表示中</span></span><span className="text-xl font-black text-violet-700">{textDetectedCount}</span></div>
               </div>
-              {batchSummary.skippedCount > 0 && <p className="mt-3 text-[10px] font-bold text-amber-700">既存画像・重複・配置エラーの{batchSummary.skippedCount}件は自動で除外します。</p>}
+              {batchSummary.existingCount > 0 && (
+                <label className="mt-3 flex items-start gap-2 text-[10px] font-bold text-slate-600">
+                  <input type="checkbox" checked={skipExistingCodes} onChange={(event) => setSkipExistingCodes(event.target.checked)} disabled={isImporting} className="mt-0.5" />
+                  <span>ライブラリに同じコードの画像が{batchSummary.existingCount}件あります。{skipExistingCodes ? 'この分はスキップします。' : 'そのまま追加登録します（スキップする場合はチェック）。'}</span>
+                </label>
+              )}
+              {(batchSummary.unplaceableCount > 0 || batchSummary.duplicateCodeCount > 0) && (
+                <p className="mt-2 text-[10px] font-bold text-amber-700">
+                  {[
+                    batchSummary.unplaceableCount > 0 ? `コード・位置が読めない${batchSummary.unplaceableCount}件` : '',
+                    batchSummary.duplicateCodeCount > 0 ? `同じコードの重複${batchSummary.duplicateCodeCount}件` : ''
+                  ].filter(Boolean).join('、')}は除外します。
+                </p>
+              )}
             </section>
 
             <section className="min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white p-3">
@@ -491,7 +505,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                         <span className={`mt-0.5 block text-[10px] font-bold ${statusClass}`}>
                           {statusLabel}
                           {plan.isDuplicateCatalogPage && <span className="ml-1 text-rose-600">・対象ページが重複</span>}
-                          {plan.conflictIds.size > 0 && <span className="ml-1 text-rose-600">・重なり{plan.conflictIds.size}件</span>}
+                          {plan.conflictIds.size > 0 && <span className="ml-1 text-amber-600">・重なり{plan.conflictIds.size}件（そのまま切り抜き）</span>}
                         </span>
                         {plan.importRows.length > 0 && (
                           <span className="mt-1 flex flex-wrap gap-1">
@@ -514,8 +528,8 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                 {errorMessage && <p className="font-bold text-rose-700">{errorMessage}</p>}
                 {csvFile && batchSummary.pagesWithoutCsv > 0 && <p>・CSVに該当ページがないPDFが{batchSummary.pagesWithoutCsv}件あります。「対象ページ」で指定してください。</p>}
                 {batchSummary.duplicateCatalogPages > 0 && <p>・同じ対象ページに割り当てられたPDFがあります。後のPDFは重複コードとして除外されます。</p>}
-                {batchSummary.conflictCount > 0 && <p>・座標が重なっているコマが{batchSummary.conflictCount}件あります。</p>}
-                {issues.length > 0 && <p>・CSV全体で読み取れない行が{issues.length}件あります。</p>}
+                {batchSummary.conflictCount > 0 && <p>・座標が重なっているコマが{batchSummary.conflictCount}件あります（切り抜きはそのまま行います）。</p>}
+                {issues.length > 0 && <p>・CSV全体で読み取れない行が{issues.length}件あります（保存には影響しません）。</p>}
               </section>
             )}
           </aside>

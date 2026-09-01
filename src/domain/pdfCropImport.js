@@ -156,10 +156,21 @@ const sortPdfCropRows = (rows) => [...rows].sort((left, right) => (
   (left.frameNumber || left.order || left.csvRow) - (right.frameNumber || right.order || right.csvRow)
 ));
 
+const hasPdfCropPosition = (row) => Number.isInteger(row?.xPos) && Number.isInteger(row?.yPos) && row.xPos >= 1 && row.yPos >= 1;
+
 // 一括処理の各ページについて「CSV 上の対象コマ」「実際に保存するコマ」を決める。
-// 保存対象から除外: コード不明 / 座標衝突 / 既存画像と同じコード / バッチ内で既に登場したコード。
+// 目的は「切り抜いてコード名で保存する」ことなので、除外は最小限にする:
+//   - コードが読めない / 座標が全く無い行 (切り抜き位置が決まらない)
+//   - 同じバッチ内で既に登場したコード (同名ファイルを二重に作らない)
+//   - skipExistingCodes 指定時のみ、ライブラリに同じコードがある行
+// 座標の重なり (conflict) は警告として数えるが、切り抜き自体は行う。
 // 同じ対象ページに複数の PDF ページが割り当たっている場合は isDuplicateCatalogPage を立てる。
-export const buildPdfCropPagePlans = ({ batchPages = [], rows = [], existingCodes = new Set() } = {}) => {
+export const buildPdfCropPagePlans = ({
+  batchPages = [],
+  rows = [],
+  existingCodes = new Set(),
+  skipExistingCodes = false
+} = {}) => {
   const seenCodes = new Set();
   const catalogPageCounts = new Map();
   batchPages.forEach((page) => {
@@ -170,14 +181,21 @@ export const buildPdfCropPagePlans = ({ batchPages = [], rows = [], existingCode
     const targetRows = sortPdfCropRows(rows.filter((row) => row.pageNumber === page.catalogPage));
     const conflictIds = findPdfCropGridConflicts(targetRows);
     let existingCount = 0;
+    let unplaceableCount = 0;
+    let duplicateCodeCount = 0;
     const importRows = targetRows.filter((row) => {
       const code = normalizePdfCropCode(row.code);
-      if (!code || conflictIds.has(row.id)) return false;
-      if (existingCodes.has(code)) {
-        existingCount++;
+      if (!code || !hasPdfCropPosition(row)) {
+        unplaceableCount++;
         return false;
       }
-      if (seenCodes.has(code)) return false;
+      const isExisting = existingCodes.has(code);
+      if (isExisting) existingCount++;
+      if (isExisting && skipExistingCodes) return false;
+      if (seenCodes.has(code)) {
+        duplicateCodeCount++;
+        return false;
+      }
       seenCodes.add(code);
       return true;
     });
@@ -187,6 +205,8 @@ export const buildPdfCropPagePlans = ({ batchPages = [], rows = [], existingCode
       conflictIds,
       importRows,
       existingCount,
+      unplaceableCount,
+      duplicateCodeCount,
       skippedCount: Math.max(0, targetRows.length - importRows.length),
       hasCsvRows: targetRows.length > 0,
       isDuplicateCatalogPage: (catalogPageCounts.get(page.catalogPage) || 0) > 1
@@ -199,10 +219,24 @@ export const summarizePdfCropPagePlans = (plans = []) => plans.reduce((summary, 
   targetCount: summary.targetCount + plan.targetRows.length,
   importCount: summary.importCount + plan.importRows.length,
   skippedCount: summary.skippedCount + plan.skippedCount,
+  existingCount: summary.existingCount + plan.existingCount,
+  unplaceableCount: summary.unplaceableCount + plan.unplaceableCount,
+  duplicateCodeCount: summary.duplicateCodeCount + plan.duplicateCodeCount,
   conflictCount: summary.conflictCount + plan.conflictIds.size,
   pagesWithoutCsv: summary.pagesWithoutCsv + (plan.hasCsvRows ? 0 : 1),
   duplicateCatalogPages: summary.duplicateCatalogPages + (plan.isDuplicateCatalogPage ? 1 : 0)
-}), { pageCount: 0, targetCount: 0, importCount: 0, skippedCount: 0, conflictCount: 0, pagesWithoutCsv: 0, duplicateCatalogPages: 0 });
+}), {
+  pageCount: 0,
+  targetCount: 0,
+  importCount: 0,
+  skippedCount: 0,
+  existingCount: 0,
+  unplaceableCount: 0,
+  duplicateCodeCount: 0,
+  conflictCount: 0,
+  pagesWithoutCsv: 0,
+  duplicateCatalogPages: 0
+});
 
 const isSupportedSizeType = (value = '') => {
   const normalized = String(value).normalize('NFKC').toLowerCase().replace(/\s+/g, '');

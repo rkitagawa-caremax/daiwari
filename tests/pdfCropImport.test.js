@@ -153,41 +153,73 @@ test('applyPdfCropCatalogPageOverrides replaces only valid overrides', () => {
   assert.equal(overridden[0], pages[0], 'pages without a valid override keep their identity');
 });
 
-test('buildPdfCropPagePlans dedupes codes across pages and flags duplicate targets', () => {
-  const rows = parsePdfCropCsv([
-    HEADER,
-    '食事関連,10,1,1,E1001,1/8 横（2コマ）,,,X1Y1,,1,1',
-    '食事関連,10,2,2,E1002,1/8 横（2コマ）,,,X3Y1,,3,1',
-    '食事関連,11,1,1,E1002,1/16（1コマ）,,,X1Y1,,1,1',
-    '食事関連,11,2,2,E1003,1/16（1コマ）,,,X2Y1,,2,1'
-  ].join('\n')).rows;
-  const batchPages = buildPdfCropBatchPages([
-    { file: { name: 'P010.pdf' }, numPages: 1 },
-    { file: { name: 'P011.pdf' }, numPages: 1 },
-    { file: { name: 'P011_copy.pdf' }, numPages: 1 },
-    { file: { name: 'P099.pdf' }, numPages: 1 }
-  ]);
-  const plans = buildPdfCropPagePlans({ batchPages, rows, existingCodes: new Set(['E1001']) });
+const PLAN_ROWS = () => parsePdfCropCsv([
+  HEADER,
+  '食事関連,10,1,1,E1001,1/8 横（2コマ）,,,X1Y1,,1,1',
+  '食事関連,10,2,2,E1002,1/8 横（2コマ）,,,X3Y1,,3,1',
+  '食事関連,11,1,1,E1002,1/16（1コマ）,,,X1Y1,,1,1',
+  '食事関連,11,2,2,E1003,1/16（1コマ）,,,X2Y1,,2,1'
+].join('\n')).rows;
+
+const PLAN_PAGES = () => buildPdfCropBatchPages([
+  { file: { name: 'P010.pdf' }, numPages: 1 },
+  { file: { name: 'P011.pdf' }, numPages: 1 },
+  { file: { name: 'P011_copy.pdf' }, numPages: 1 },
+  { file: { name: 'P099.pdf' }, numPages: 1 }
+]);
+
+test('buildPdfCropPagePlans keeps existing codes by default, dedupes within the batch and flags duplicate targets', () => {
+  const plans = buildPdfCropPagePlans({ batchPages: PLAN_PAGES(), rows: PLAN_ROWS(), existingCodes: new Set(['E1001']) });
 
   assert.deepEqual(plans.map((plan) => plan.importRows.map((row) => row.code)), [
-    ['E1002'],   // E1001 は既存画像なので除外
-    ['E1003'],   // E1002 は P.10 で保存済みなので除外
-    [],          // 同じ P.11 の重複 PDF: コードは全て登場済み
-    []           // CSV に P.99 がない
+    ['E1001', 'E1002'], // 既存コード E1001 も既定では保存する (追加登録)
+    ['E1003'],          // E1002 は P.10 で保存済みなので除外
+    [],                 // 同じ P.11 の重複 PDF: コードは全て登場済み
+    []                  // CSV に P.99 がない
   ]);
   assert.equal(plans[0].existingCount, 1);
+  assert.equal(plans[1].duplicateCodeCount, 1);
   assert.equal(plans[1].isDuplicateCatalogPage, true);
   assert.equal(plans[3].hasCsvRows, false);
 
   assert.deepEqual(summarizePdfCropPagePlans(plans), {
     pageCount: 4,
     targetCount: 6,
-    importCount: 2,
-    skippedCount: 4,
+    importCount: 3,
+    skippedCount: 3,
+    existingCount: 1,
+    unplaceableCount: 0,
+    duplicateCodeCount: 3,
     conflictCount: 0,
     pagesWithoutCsv: 1,
     duplicateCatalogPages: 2
   });
+});
+
+test('buildPdfCropPagePlans can skip existing codes on request', () => {
+  const plans = buildPdfCropPagePlans({
+    batchPages: PLAN_PAGES(),
+    rows: PLAN_ROWS(),
+    existingCodes: new Set(['E1001']),
+    skipExistingCodes: true
+  });
+  assert.deepEqual(plans[0].importRows.map((row) => row.code), ['E1002']);
+  assert.equal(plans[0].existingCount, 1);
+});
+
+test('buildPdfCropPagePlans still crops overlapping rows and only drops rows without a position', () => {
+  const rows = parsePdfCropCsv([
+    HEADER,
+    '食事関連,10,1,1,E1957,1/8 横（2コマ）,,,X1Y1,,,',
+    '食事関連,10,2,2,E1894,1/16（1コマ）,,,X2Y1,,,'
+  ].join('\n')).rows;
+  rows.push({ ...rows[1], id: 'nopos', code: 'E0000', xPos: null, yPos: null, layoutStatus: 'unresolved' });
+  const [plan] = buildPdfCropPagePlans({ batchPages: buildPdfCropBatchPages([{ file: { name: 'P010.pdf' }, numPages: 1 }]), rows });
+  assert.equal(rows[1].layoutStatus, 'conflict');
+  assert.deepEqual(plan.importRows.map((row) => row.code), ['E1957', 'E1894']);
+  assert.equal(plan.conflictIds.size, 3, 'overlapping pair + position-less row are reported as warnings');
+  assert.ok(plan.conflictIds.has(rows[0].id) && plan.conflictIds.has(rows[1].id));
+  assert.equal(plan.unplaceableCount, 1);
 });
 
 test('findPdfCropGridConflicts marks overlapping and out-of-grid rows', () => {
