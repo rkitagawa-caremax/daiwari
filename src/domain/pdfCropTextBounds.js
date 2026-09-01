@@ -183,16 +183,19 @@ export const resolvePdfCropTextRects = ({ rows = [], textItems = [], grid, optio
   return rects;
 };
 
-// 目印で決めた枠とピクセル検出で広げた枠の和 (どちらの内容も欠けないようにする)
-export const unionPdfCropRects = (first, second) => {
-  if (!first) return second;
-  if (!second) return first;
-  const x = Math.min(first.x, second.x);
-  const y = Math.min(first.y, second.y);
-  return {
-    x,
-    y,
-    width: Math.max(first.x + first.width, second.x + second.width) - x,
-    height: Math.max(first.y + first.height, second.y + second.height) - y
-  };
+// ピクセルから決まった枠と目印の枠を合わせる。
+// 罫線や余白を検出できた辺はコマの区切りそのものなのでその位置を採用し、
+// 検出できなかった辺だけ目印の枠まで広げて文字が欠けないようにする。
+export const mergePdfCropRects = (detected, textRect, detectedEdges = {}) => {
+  if (!detected) return textRect || null;
+  if (!textRect) return detected;
+  const left = detectedEdges.left ? detected.x : Math.min(detected.x, textRect.x);
+  const top = detectedEdges.top ? detected.y : Math.min(detected.y, textRect.y);
+  const right = detectedEdges.right
+    ? detected.x + detected.width
+    : Math.max(detected.x + detected.width, textRect.x + textRect.width);
+  const bottom = detectedEdges.bottom
+    ? detected.y + detected.height
+    : Math.max(detected.y + detected.height, textRect.y + textRect.height);
+  return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
 };

@@ -5,8 +5,8 @@ import {
   DEFAULT_PDF_TEXT_BOUNDS_OPTIONS as OPTIONS,
   findPdfCropCornerAnchor,
   getPdfTextItemBox,
-  resolvePdfCropTextRects,
-  unionPdfCropRects
+  mergePdfCropRects,
+  resolvePdfCropTextRects
 } from '../src/domain/pdfCropTextBounds.js';
 import { getPdfCropRectFromGrid } from '../src/domain/pdfCropImport.js';
 
@@ -137,15 +137,30 @@ test('findPdfCropCornerAnchor takes a real frame number at the corner only', () 
   assert.equal(findPdfCropCornerAnchor(boxes, { labels: [6], expected }), null);
 });
 
-test('unionPdfCropRects keeps both rectangles inside and tolerates a missing side', () => {
-  const text = { x: 0.1, y: 0.2, width: 0.2, height: 0.2 };
-  const snapped = { x: 0.09, y: 0.21, width: 0.22, height: 0.2 };
-  assert.deepEqual(unionPdfCropRects(snapped, text), {
-    x: 0.09,
-    y: 0.2,
-    width: 0.22,
-    height: 0.21000000000000002
-  });
-  assert.equal(unionPdfCropRects(snapped, null), snapped);
-  assert.equal(unionPdfCropRects(null, text), text);
+test('mergePdfCropRects keeps detected edges and only widens the undetected ones', () => {
+  // 検出枠: 左 .09 上 .21 右 .31 下 .41 / 目印枠: 左 .10 上 .20 右 .30 下 .45
+  const text = { x: 0.1, y: 0.2, width: 0.2, height: 0.25 };
+  const detected = { x: 0.09, y: 0.21, width: 0.22, height: 0.2 };
+
+  // 罫線で決まった辺は目印より外へは広げない
+  const kept = mergePdfCropRects(detected, text, { top: true, bottom: true, left: true, right: true });
+  near(kept.x, detected.x);
+  near(kept.y, detected.y);
+  near(kept.x + kept.width, detected.x + detected.width);
+  near(kept.y + kept.height, detected.y + detected.height);
+
+  // 何も検出できなければ両方を包む
+  const widened = mergePdfCropRects(detected, text, {});
+  near(widened.x, 0.09);
+  near(widened.y, 0.2);
+  near(widened.x + widened.width, 0.31);
+  near(widened.y + widened.height, 0.45);
+
+  // 上辺だけ検出できた場合、上は罫線の位置、下は目印まで広げる
+  const partial = mergePdfCropRects(detected, text, { top: true });
+  near(partial.y, 0.21);
+  near(partial.y + partial.height, 0.45);
+
+  assert.equal(mergePdfCropRects(detected, null), detected);
+  assert.equal(mergePdfCropRects(null, text), text);
 });

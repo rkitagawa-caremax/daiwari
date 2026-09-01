@@ -76,43 +76,52 @@ test('chooseGutterEdge picks the gutter nearest the expected edge and pads into 
   assert.equal(chooseGutterEdge([{ start: 40, end: 43, length: 4 }], { expected: 44, side: 'start', tolerance: 10, pad: 10 }), 42);
 });
 
-test('chooseLineEdge falls back to the outer side of the nearest thin line', () => {
+test('chooseLineEdge returns the inside of the nearest rule so the rule is not cropped in', () => {
   const lines = [{ start: 40, end: 42, center: 41 }, { start: 250, end: 252, center: 251 }];
-  assert.equal(chooseLineEdge(lines, { expected: 45, side: 'start', tolerance: 10 }), 39);
-  assert.equal(chooseLineEdge(lines, { expected: 245, side: 'end', tolerance: 10 }), 253);
+  assert.equal(chooseLineEdge(lines, { expected: 45, side: 'start', tolerance: 10 }), 43);
+  assert.equal(chooseLineEdge(lines, { expected: 245, side: 'end', tolerance: 10 }), 249);
+  // パディングを付けるとさらに内側へ
+  assert.equal(chooseLineEdge(lines, { expected: 45, side: 'start', tolerance: 10, pad: 2 }), 45);
+  assert.equal(chooseLineEdge(lines, { expected: 245, side: 'end', tolerance: 10, pad: 2 }), 247);
+  // 遠い線は使わない
   assert.equal(chooseLineEdge(lines, { expected: 150, side: 'end', tolerance: 10 }), null);
 });
 
-test('snapRectToFrame snaps a borderless panel onto the surrounding gutters', () => {
-  // 縦: 上のコマの内容 0-44 / 余白 45-56 / 自コマ 57-238 (内部に白帯 120-160) / 余白 239-250 / 下のコマ 251-
-  const rowsInk = buildCoverage(300, [[45, 56, 0], [120, 160, 0], [239, 250, 0]], 0.3);
-  // 横: 左のコマ / 余白 15-26 / 自コマ 27-222 / 余白 223-234 / 右のコマ
-  const colsInk = buildCoverage(260, [[15, 26, 0], [223, 234, 0]], 0.3);
-  const profiles = { rowsInk, colsInk, rowsDark: buildCoverage(300, []), colsDark: buildCoverage(260, []) };
-  // 期待枠は数 % ずれている想定 (上に 8px, 左に 6px)
-  const expected = { x: 21, y: 49, width: 190, height: 182 };
+test('snapRectToFrame prefers the ruled lines: thick rows, dotted columns', () => {
+  // 縦: 行の区切りは太い実線 (48-53 と 244-249)。すぐ上には余白もあるが、罫線を優先する
+  const rowsDark = buildCoverage(300, [[48, 53, 0.9], [244, 249, 0.9]], 0.1);
+  const rowsInk = buildCoverage(300, [[36, 47, 0]], 0.3);
+  // 横: 列の区切りは点線 (18-19 と 232-233)。途切れるので濃さは 0.35 しかない
+  const colsDark = buildCoverage(260, [[18, 19, 0.35], [232, 233, 0.35]], 0.05);
+  const colsInk = buildCoverage(260, [], 0.3);
+  const expected = { x: 24, y: 45, width: 200, height: 190 };
 
-  const snapped = snapRectToFrame({ profiles, expected });
-  // pad = round(182*0.02)=4 / round(190*0.02)=4 → 上 57-4=53, 下 238+4=242 (+1 で end 243), 左 27-4=23, 右 222+4=226 (+1)
+  const snapped = snapRectToFrame({ profiles: { rowsInk, rowsDark, colsInk, colsDark }, expected });
   assert.deepEqual(snapped, {
-    x: 23, y: 53, width: 204, height: 190,
+    // 上 54+1、下 243-1（+1 で end 243）、左 20+1、右 231-1（+1 で end 231）
+    x: 21,
+    y: 55,
+    width: 210,
+    height: 188,
     snappedEdges: { top: true, bottom: true, left: true, right: true }
   });
   assert.equal(countSnappedEdges(snapped.snappedEdges), 4);
 });
 
-test('snapRectToFrame uses thin frame lines when panels touch without a gutter', () => {
-  // 余白なし: 枠線 (濃い) が 50-51 と 240-241、内部は薄いインク
+test('snapRectToFrame falls back to gutters on edges without a rule', () => {
+  // 縦は罫線あり、横は罫線が無く余白だけ
+  const rowsDark = buildCoverage(300, [[48, 53, 0.9], [244, 249, 0.9]], 0.1);
   const rowsInk = buildCoverage(300, [], 0.3);
-  const rowsDark = buildCoverage(300, [[50, 51, 0.9], [240, 241, 0.9]]);
-  const colsInk = buildCoverage(260, [], 0.3);
-  const colsDark = buildCoverage(260, [[20, 21, 0.9], [230, 231, 0.9]]);
+  const colsDark = buildCoverage(260, [], 0.05);
+  const colsInk = buildCoverage(260, [[15, 26, 0], [223, 234, 0]], 0.3);
   const expected = { x: 24, y: 45, width: 200, height: 190 };
+
   const snapped = snapRectToFrame({ profiles: { rowsInk, rowsDark, colsInk, colsDark }, expected });
-  assert.deepEqual(snapped, {
-    x: 19, y: 49, width: 214, height: 194,
-    snappedEdges: { top: true, bottom: true, left: true, right: true }
-  });
+  assert.deepEqual(snapped.snappedEdges, { top: true, bottom: true, left: true, right: true });
+  assert.equal(snapped.y, 55, '上下は罫線の内側');
+  // 左右は余白の内側 + パディング（200*0.02=4）
+  assert.equal(snapped.x, 23);
+  assert.equal(snapped.x + snapped.width, 227);
 });
 
 test('snapRectToFrame falls back to the expected rect when nothing plausible is found', () => {

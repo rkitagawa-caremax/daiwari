@@ -4,20 +4,26 @@
 // 考え方:
 //   - 期待枠の「中央部分」(core) だけを使って、行ごと / 列ごとの「インク (白でない) ピクセルの割合」を出す
 //     → 隣のコマの内容が混ざりにくい
-//   - 期待した辺の近くで、コマ幅いっぱいに白が続く帯 (余白) を探し、その内側の縁 + 少しの余白を境界にする
-//     枠線がある誌面でも、枠線は余白の内側にあるインクとしてそのまま含まれる
-//   - 余白が見つからない (コマ同士が線一本で接している) 場合は、細い濃い線 (枠線) の位置を使う
+//   - 誌面のコマは罫線で区切られている。行の区切りは太い実線、列の区切りは点線なので、
+//     期待した辺の近くでまずその罫線を探し、罫線の内側を境界にする (罫線自体は切り抜きに含めない)
+//     太さと濃さの条件は軸ごとに変える。点線は途切れるぶん「濃いピクセルの割合」が低く出るため。
+//   - 罫線が見つからない辺は、コマ幅いっぱいに白が続く帯 (余白) の内側を境界にする
 //   - どちらも見つからない / サイズが大きく外れる場合は期待枠をそのまま使う
 
 export const DEFAULT_FRAME_SNAP_OPTIONS = Object.freeze({
   inkThreshold: 235,          // 輝度がこの値未満なら「インクあり」(白でない)
-  darkThreshold: 150,         // 輝度がこの値未満なら「濃い」(枠線判定用)
+  darkThreshold: 150,         // 輝度がこの値未満なら「濃い」(罫線判定用)
+  // 行の区切り = 横の太線。コマ幅いっぱいに引かれるので濃さの条件は厳しく、太さは許す
+  rowLineMinCoverage: 0.55,
+  rowLineMaxThicknessRatio: 0.035,
+  // 列の区切り = 縦の点線。途切れるので濃さの条件はゆるく、太さは細いものだけ
+  columnLineMinCoverage: 0.2,
+  columnLineMaxThicknessRatio: 0.02,
+  linePaddingRatio: 0.004,    // 罫線の内側へ逃がす量 (辺の長さ比、最低 1px)
   whiteMaxCoverage: 0.02,     // 余白とみなす最大のインク割合
   minGutterRatio: 0.006,      // 余白とみなす最小の連続長 (期待枠の辺の長さに対する比率)
   paddingRatio: 0.02,         // 境界を余白側へ広げる量 (辺の長さ比、余白の半分を上限)
-  searchToleranceRatio: 0.12, // 期待した辺からこの範囲 (辺の長さ比) で余白/枠線を探す
-  minLineCoverage: 0.55,      // 枠線とみなす最小の濃いピクセル割合
-  maxLineThicknessRatio: 0.015, // 枠線の最大太さ (辺の長さ比)
+  searchToleranceRatio: 0.12, // 期待した辺からこの範囲 (辺の長さ比) で罫線/余白を探す
   sizeToleranceRatio: 0.3,    // スナップ後の幅/高さが期待値から ±この比率を超えたら採用しない
   coreInsetRatio: 0.15        // プロファイル計算に使う中央部分 (両端をこの比率だけ除く)
 });
@@ -99,7 +105,8 @@ export const findWhiteRuns = (coverage, { whiteMax, minLength }) => {
   return runs;
 };
 
-// coverage 配列から「細い濃い線」(枠線候補) を抽出する。
+// coverage 配列から「濃いピクセルが続く細い帯」(罫線候補) を抽出する。
+// minCoverage は点線かどうかで変える (点線は途切れるぶん割合が下がる)。
 export const detectFrameLines = (coverage, { minCoverage, maxThickness }) => {
   const lines = [];
   let start = -1;
@@ -139,12 +146,17 @@ export const chooseGutterEdge = (runs, { expected, side, tolerance, pad = 0 }) =
   return candidates[0].boundary;
 };
 
-// 余白が無い場合の予備: 期待位置に最も近い枠線の外側の縁を境界にする。
-export const chooseLineEdge = (lines, { expected, side, tolerance }) => {
+// 期待位置に最も近い罫線を選び、その内側 (+ わずかなパディング) を境界として返す。
+// 罫線はコマ同士の区切りなので、切り抜きには含めない。
+export const chooseLineEdge = (lines, { expected, side, tolerance, pad = 0 }) => {
   const candidates = lines
     .map((line) => {
-      const edge = side === 'start' ? line.start : line.end;
-      return { boundary: side === 'start' ? line.start - 1 : line.end + 1, distance: Math.abs(edge - expected) };
+      const innerEdge = side === 'start' ? line.end + 1 : line.start - 1;
+      return {
+        boundary: side === 'start' ? innerEdge + pad : innerEdge - pad,
+        // 太線でも拾えるよう、線のどちらの縁から測っても近ければ採用する
+        distance: Math.min(Math.abs(line.start - expected), Math.abs(line.end - expected))
+      };
     })
     .filter((candidate) => candidate.distance <= tolerance);
   if (candidates.length === 0) return null;
@@ -152,21 +164,24 @@ export const chooseLineEdge = (lines, { expected, side, tolerance }) => {
   return candidates[0].boundary;
 };
 
-const snapAxis = ({ ink, dark }, expectedStart, expectedSize, options) => {
+const snapAxis = ({ ink, dark }, expectedStart, expectedSize, options, line) => {
   const tolerance = expectedSize * options.searchToleranceRatio;
-  const pad = Math.max(1, Math.round(expectedSize * options.paddingRatio));
-  const minGutter = Math.max(2, Math.round(expectedSize * options.minGutterRatio));
-  const maxThickness = Math.max(2, Math.round(expectedSize * options.maxLineThicknessRatio));
   const expectedEnd = expectedStart + expectedSize;
 
-  const runs = findWhiteRuns(ink, { whiteMax: options.whiteMaxCoverage, minLength: minGutter });
-  let start = chooseGutterEdge(runs, { expected: expectedStart, side: 'start', tolerance, pad });
-  let end = chooseGutterEdge(runs, { expected: expectedEnd, side: 'end', tolerance, pad });
+  // 1) 罫線を最優先。行の区切り (太い実線) と列の区切り (点線) で条件を変える
+  const maxThickness = Math.max(1, Math.round(expectedSize * line.maxThicknessRatio));
+  const linePad = Math.max(1, Math.round(expectedSize * options.linePaddingRatio));
+  const lines = detectFrameLines(dark, { minCoverage: line.minCoverage, maxThickness });
+  let start = chooseLineEdge(lines, { expected: expectedStart, side: 'start', tolerance, pad: linePad });
+  let end = chooseLineEdge(lines, { expected: expectedEnd, side: 'end', tolerance, pad: linePad });
 
+  // 2) 罫線が無い辺は余白 (ガター) の内側を使う
   if (start === null || end === null) {
-    const lines = detectFrameLines(dark, { minCoverage: options.minLineCoverage, maxThickness });
-    if (start === null) start = chooseLineEdge(lines, { expected: expectedStart, side: 'start', tolerance });
-    if (end === null) end = chooseLineEdge(lines, { expected: expectedEnd, side: 'end', tolerance });
+    const pad = Math.max(1, Math.round(expectedSize * options.paddingRatio));
+    const minGutter = Math.max(2, Math.round(expectedSize * options.minGutterRatio));
+    const runs = findWhiteRuns(ink, { whiteMax: options.whiteMaxCoverage, minLength: minGutter });
+    if (start === null) start = chooseGutterEdge(runs, { expected: expectedStart, side: 'start', tolerance, pad });
+    if (end === null) end = chooseGutterEdge(runs, { expected: expectedEnd, side: 'end', tolerance, pad });
   }
 
   let resolvedStart = start === null ? expectedStart : Math.max(0, start);
@@ -185,11 +200,24 @@ const snapAxis = ({ ink, dark }, expectedStart, expectedSize, options) => {
   };
 };
 
-// 探索窓内のプロファイルと期待枠 (窓内 px 座標) から、余白/枠線にスナップした矩形を返す。
+// 探索窓内のプロファイルと期待枠 (窓内 px 座標) から、罫線/余白にスナップした矩形を返す。
+// 上下の辺は行プロファイル上の「横線」、左右の辺は列プロファイル上の「縦線」で判定する。
 export const snapRectToFrame = ({ profiles, expected, options = {} }) => {
   const resolved = { ...DEFAULT_FRAME_SNAP_OPTIONS, ...options };
-  const vertical = snapAxis({ ink: profiles.rowsInk, dark: profiles.rowsDark }, expected.y, expected.height, resolved);
-  const horizontal = snapAxis({ ink: profiles.colsInk, dark: profiles.colsDark }, expected.x, expected.width, resolved);
+  const vertical = snapAxis(
+    { ink: profiles.rowsInk, dark: profiles.rowsDark },
+    expected.y,
+    expected.height,
+    resolved,
+    { minCoverage: resolved.rowLineMinCoverage, maxThicknessRatio: resolved.rowLineMaxThicknessRatio }
+  );
+  const horizontal = snapAxis(
+    { ink: profiles.colsInk, dark: profiles.colsDark },
+    expected.x,
+    expected.width,
+    resolved,
+    { minCoverage: resolved.columnLineMinCoverage, maxThicknessRatio: resolved.columnLineMaxThicknessRatio }
+  );
   return {
     x: horizontal.start,
     y: vertical.start,

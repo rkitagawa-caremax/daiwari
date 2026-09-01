@@ -32,7 +32,7 @@ import {
   setPdfCropManualRect,
   zoomPdfPreviewSize
 } from '../../domain/pdfCropEditor';
-import { resolvePdfCropTextRects, unionPdfCropRects } from '../../domain/pdfCropTextBounds';
+import { mergePdfCropRects, resolvePdfCropTextRects } from '../../domain/pdfCropTextBounds';
 import { readFileAutoEncoding } from '../../lib/csv';
 import { cropPdfPageToFile, openPdfFile, refineCropRectToFrame, renderPdfPage } from '../../lib/pdfCropImport';
 
@@ -77,8 +77,8 @@ const destroyDocument = async (pdfDocument) => {
 
 // 切り抜き枠の決め方 (プレビューと保存で同じ関数を使う):
 //   1. コマ左上の番号ラベルと右下のメーカー名などの目印から求めた枠 (textRect) があればそれを出発点にする
-//   2. 描画ピクセルから余白/枠線を探して外側の境界へ広げる
-//   3. 目印の枠と和を取り、文字が欠けないようにする
+//   2. 描画ピクセルから罫線 (行=太線 / 列=点線) を探し、その内側を境界にする。罫線が無い辺は余白を使う
+//   3. 検出できなかった辺だけ目印の枠まで広げ、文字が欠けないようにする
 // 目印が無いコマは校正済みグリッドの推定枠を出発点にする (ラベルが多いページほど探索範囲を狭める)。
 const MIN_ANCHORS_FOR_TIGHT_SEARCH = 3;
 const ANCHORED_SEARCH_TOLERANCE = 0.08;
@@ -110,7 +110,7 @@ const resolveCropRect = (canvas, row, grid, textRects, manualRect) => {
     : (grid.anchorCount >= MIN_ANCHORS_FOR_TIGHT_SEARCH ? CALIBRATED_SEARCH_TOLERANCE : UNCALIBRATED_SEARCH_TOLERANCE);
   const refined = refineCropRectToFrame(canvas, base, { searchToleranceRatio });
   return {
-    rect: unionPdfCropRects(refined.rect, textRect),
+    rect: mergePdfCropRects(refined.rect, textRect, refined.snappedEdges),
     snappedCount: refined.snappedCount,
     hasTextAnchor: !!textRect,
     isManual: false
