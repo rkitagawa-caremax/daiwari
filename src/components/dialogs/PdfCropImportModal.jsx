@@ -15,6 +15,7 @@ import {
   summarizePdfCropPagePlans
 } from '../../domain/pdfCropImport';
 import { calibratePdfCropGrid } from '../../domain/pdfCropGridCalibration';
+import { stabilizePdfCropPageRects } from '../../domain/pdfCropPageConsensus';
 import {
   applyPdfCropDrag,
   clearPdfCropManualPage,
@@ -102,7 +103,7 @@ const NUDGE_STEP_LARGE = 0.01;
 
 const resolveCropRect = (canvas, row, grid, textRects, manualRect) => {
   // 手で決めた枠があれば自動補正より優先する
-  if (manualRect) return { rect: manualRect, snappedCount: 0, hasTextAnchor: false, isManual: true };
+  if (manualRect) return { rect: manualRect, snappedEdges: {}, snappedCount: 0, hasTextAnchor: false, isManual: true };
   const textRect = textRects?.get(row.id) || null;
   const base = textRect || getPdfCropRectFromGrid(row, grid);
   const searchToleranceRatio = textRect
@@ -111,6 +112,7 @@ const resolveCropRect = (canvas, row, grid, textRects, manualRect) => {
   const refined = refineCropRectToFrame(canvas, base, { searchToleranceRatio });
   return {
     rect: mergePdfCropRects(refined.rect, textRect, refined.snappedEdges),
+    snappedEdges: refined.snappedEdges,
     snappedCount: refined.snappedCount,
     hasTextAnchor: !!textRect,
     isManual: false
@@ -180,11 +182,12 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   // 自動で求めた枠。ピクセル解析を含むのでドラッグ中に作り直さないよう、手動ぶんとは分けて memo する
   const autoPreviewRects = useMemo(() => {
     const canvas = canvasRef.current;
-    return activeTargetRows.map((row) => {
+    const entries = activeTargetRows.map((row) => {
       const base = previewTextRects.get(row.id) || getPdfCropRectFromGrid(row, previewGrid);
-      if (!canvas || !preview.width || preview.isLoading) return { row, rect: base, snappedCount: 0, hasTextAnchor: previewTextRects.has(row.id), isManual: false };
+      if (!canvas || !preview.width || preview.isLoading) return { row, rect: base, snappedEdges: {}, snappedCount: 0, hasTextAnchor: previewTextRects.has(row.id), isManual: false };
       return { row, ...resolveCropRect(canvas, row, previewGrid, previewTextRects) };
     });
+    return stabilizePdfCropPageRects({ entries, grid: previewGrid });
   }, [activeTargetRows, preview, previewGrid, previewTextRects]);
 
   // プレビュー上の切り抜き枠 (手動で決めた枠が最優先)
@@ -485,9 +488,19 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               const pageGrid = calibratePdfCropGrid({ rows: plan.targetRows, textItems: rendered.textItems, bounds });
               const pageTextRects = resolvePdfCropTextRects({ rows: plan.targetRows, textItems: rendered.textItems, grid: pageGrid });
               const pageManualRects = getPdfCropManualRects(manualRects, page.id);
+              const pageAutoEntries = stabilizePdfCropPageRects({
+                grid: pageGrid,
+                entries: plan.targetRows.map((row) => ({
+                  row,
+                  ...resolveCropRect(rendered.canvas, row, pageGrid, pageTextRects)
+                }))
+              });
+              const pageAutoRects = new Map(pageAutoEntries.map((entry) => [entry.row.id, entry.rect]));
               for (const row of importRows) {
                 const code = normalizePdfCropCode(row.code);
-                const { rect: cropRect } = resolveCropRect(rendered.canvas, row, pageGrid, pageTextRects, pageManualRects[row.id]);
+                const cropRect = pageManualRects[row.id]
+                  || pageAutoRects.get(row.id)
+                  || getPdfCropRectFromGrid(row, pageGrid);
                 const sourceTextData = extractPdfTextInRect(rendered.textItems, cropRect);
                 const file = await cropPdfPageToFile({
                   canvas: rendered.canvas,
@@ -572,7 +585,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                 <button type="button" onClick={resetSelectedFrame} disabled={isImporting} className="shrink-0 rounded-full border border-indigo-200 px-2.5 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40">この枠を自動に戻す</button>
               )}
               {activeTargetRows.length > 0 && preview.width > 0 && (
-                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="コマ左上の番号ラベルとコードラベルを目印に切り抜き枠を合わせ、さらに余白/枠線を検出して外側の境界へ広げたコマ数">枠を自動補正 {previewSnappedCount}/{activeTargetRows.length}・目印{previewTextRects.size}{pageManualCount > 0 ? `・手動${pageManualCount}` : ''}</span>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="文字の目印と罫線を検出し、同じ行・列の境界をページ全体で突き合わせて外れ値を除いています">枠をページ補正 {previewSnappedCount}/{activeTargetRows.length}・目印{previewTextRects.size}{pageManualCount > 0 ? `・手動${pageManualCount}` : ''}</span>
               )}
             </div>
             {/* ページを表示領域いっぱいに収め、その上に切り抜き枠を重ねる (枠はドラッグで調整できる) */}
