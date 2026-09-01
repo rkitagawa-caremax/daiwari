@@ -370,11 +370,11 @@ const Sidebar = React.memo(({
                 type="button"
                 onClick={onOpenPdfCropImport}
                 disabled={isLocked}
-                onMouseEnter={(e) => onShowQuickHelp?.(e, 'PDF＋CSV画像取り込み', '前号PDFをCSVの介援隊コード・座標・コマサイズで切り抜き、画像ライブラリへ一括登録します。')}
+                onMouseEnter={(e) => onShowQuickHelp?.(e, 'PDFから画像を切り抜き', '校正PDFと台割CSVを選ぶと、商品コマを介援隊コード名の画像として切り抜き、画像ライブラリへまとめて登録します。')}
                 onMouseLeave={() => onHideQuickHelp?.()}
                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs font-extrabold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <FileImage size={16} /> PDF＋CSVから切り抜き
+                <FileImage size={16} /> PDFから画像を切り抜き
               </button>
             </div>
 

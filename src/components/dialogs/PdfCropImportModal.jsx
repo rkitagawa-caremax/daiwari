@@ -373,7 +373,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
         if (cancelled || sequence !== renderSequenceRef.current) return;
         console.error('PDF preview rendering failed:', error);
         setPreview((current) => ({ ...current, isLoading: false }));
-        setErrorMessage(`PDFプレビューを表示できません。${error?.message || ''}`);
+        setErrorMessage(`プレビューを表示できません。${error?.message || ''}`);
       });
 
     return () => {
@@ -407,7 +407,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
 
       const totalPages = sources.reduce((sum, source) => sum + source.numPages, 0);
       if (totalPages > MAX_PDF_CROP_BATCH_PAGES) {
-        setErrorMessage(`一度に処理できるのは合計${MAX_PDF_CROP_BATCH_PAGES}ページまでです（選択: ${sources.length}ファイル / ${totalPages}ページ）。`);
+        setErrorMessage(`一度に扱えるのは${MAX_PDF_CROP_BATCH_PAGES}ページまでです（選んだのは${sources.length}ファイル・${totalPages}ページ）`);
         return;
       }
       if (sources.length === 0) {
@@ -426,7 +426,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
       setCatalogPageOverrides({});
       setActiveBatchPageId('');
       setManualRects(EMPTY_PDF_CROP_MANUAL_RECTS);
-      if (unreadable.length > 0) setErrorMessage(`読み込めなかったPDFは除外しました: ${unreadable.join(', ')}`);
+      if (unreadable.length > 0) setErrorMessage(`読み込めなかったPDFは除きました: ${unreadable.join(', ')}`);
     } finally {
       setIsReadingPdfs(false);
     }
@@ -444,7 +444,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
       setAllRows(parsed.rows);
       setIssues(parsed.issues);
       setManualRects(EMPTY_PDF_CROP_MANUAL_RECTS);
-      if (parsed.rows.length === 0) setErrorMessage('切り抜き対象の介援隊コードがCSVにありません。');
+      if (parsed.rows.length === 0) setErrorMessage('このCSVに切り抜けるコマがありません');
     } catch (error) {
       console.error('Crop CSV loading failed:', error);
       setErrorMessage(`CSVを読み込めません。${error?.message || ''}`);
@@ -480,7 +480,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
         try {
           for (const plan of plans) {
             const { page, importRows } = plan;
-            setProgress({ current: completed, total, message: `${page.filename}（P.${page.catalogPage}）を描画しています…` });
+            setProgress({ current: completed, total, message: `${page.filename}（P.${page.catalogPage}）を読み込み中…` });
             const rendered = await renderPdfPage(sourceDocument, page.pdfPageNumber, { scale: EXPORT_SCALE });
             try {
               // このページのグリッドを高解像度描画の文字レイヤーで校正し、目印の座標も取り直してから切り抜く
@@ -546,7 +546,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
       if (!result || result.successCount > 0) onClose();
     } catch (error) {
       console.error('PDF crop import failed:', error);
-      setErrorMessage(`切り抜き画像の登録に失敗しました。${error?.message || ''}`);
+      setErrorMessage(`画像を保存できませんでした。${error?.message || ''}`);
     } finally {
       setIsImporting(false);
     }
@@ -556,12 +556,12 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const isBusy = isImporting || isReadingPdfs;
   const isReady = hasPdf && !!csvFile && !isBusy && batchSummary.importCount > 0;
   const warnings = [
-    hasPdf && csvFile && batchSummary.importCount === 0 ? '保存できるコマがありません（ページ一覧で対象ページを確認）' : '',
-    csvFile && batchSummary.pagesWithoutCsv > 0 ? `CSVに該当ページがないPDFが${batchSummary.pagesWithoutCsv}件（ページ一覧で対象ページを変更）` : '',
-    batchSummary.duplicateCatalogPages > 0 ? '同じ対象ページに複数のPDFが割り当てられています' : '',
-    batchSummary.unplaceableCount > 0 ? `コード・位置が読めない${batchSummary.unplaceableCount}件は除外` : '',
-    batchSummary.duplicateCodeCount > 0 ? `同じコードの重複${batchSummary.duplicateCodeCount}件は除外` : '',
-    issues.length > 0 ? `CSVで読み取れない行が${issues.length}件（保存には影響しません）` : ''
+    hasPdf && csvFile && batchSummary.importCount === 0 ? '保存できるコマがありません（対象ページを確認）' : '',
+    csvFile && batchSummary.pagesWithoutCsv > 0 ? `CSVに無いページのPDFが${batchSummary.pagesWithoutCsv}件（P.を選び直す）` : '',
+    batchSummary.duplicateCatalogPages > 0 ? '同じP.に複数のPDFが割り当て済み' : '',
+    batchSummary.unplaceableCount > 0 ? `コードか位置が無い${batchSummary.unplaceableCount}件は除外` : '',
+    batchSummary.duplicateCodeCount > 0 ? `重複したコード${batchSummary.duplicateCodeCount}件は除外` : '',
+    issues.length > 0 ? `CSVの${issues.length}行は対象外（保存に影響なし）` : ''
   ].filter(Boolean);
 
   return (
@@ -587,13 +587,13 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                 <button type="button" onClick={resetSelectedFrame} disabled={isImporting} className="shrink-0 rounded-full border border-indigo-200 px-2.5 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40">この枠を自動に戻す</button>
               )}
               {activeTargetRows.length > 0 && preview.width > 0 && (
-                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="文字の目印と罫線を検出し、同じ行・列の境界をページ全体で突き合わせて外れ値を除いています">枠をページ補正 {previewSnappedCount}/{activeTargetRows.length}・目印{previewTextRects.size}{pageManualCount > 0 ? `・手動${pageManualCount}` : ''}</span>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="自動＝罫線や余白から境界を決めた枠。目印＝コマ番号やコードを見つけた枠。手動＝自分で調整した枠。（境界はページ全体で突き合わせて外れ値を除いています）">枠 自動{previewSnappedCount}/{activeTargetRows.length}・目印{previewTextRects.size}{pageManualCount > 0 ? `・手動${pageManualCount}` : ''}</span>
               )}
             </div>
             {/* ページを表示領域いっぱいに収め、その上に切り抜き枠を重ねる (枠はドラッグで調整できる) */}
             <div ref={stageRef} className="relative min-h-0 flex-1 overflow-hidden bg-slate-300 p-1">
               <div className="flex h-full w-full overflow-auto">
-                {!hasPdf && <p className="m-auto text-sm font-bold text-slate-500">PDFを選択するとプレビューが表示されます</p>}
+                {!hasPdf && <p className="m-auto text-sm font-bold text-slate-500">PDFを選ぶとページが表示されます</p>}
                 {hasPdf && (
                   <div
                     className="relative m-auto shadow-xl"
@@ -669,15 +669,15 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               <button type="button" onClick={() => pdfInputRef.current?.click()} disabled={isBusy} className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${hasPdf ? 'border-indigo-300 bg-indigo-50' : 'border-dashed border-slate-300 bg-white hover:bg-slate-50'}`}>
                 {isReadingPdfs ? <Loader2 size={18} className="shrink-0 animate-spin text-indigo-600" /> : <FileImage size={18} className="shrink-0 text-indigo-600" />}
                 <span className="min-w-0">
-                  <span className="block truncate text-xs font-black text-slate-700">{hasPdf ? `PDF ${pdfSources.length}ファイル / ${batchPages.length}ページ` : 'PDFを選択（複数可）'}</span>
-                  <span className="block truncate text-[10px] text-slate-500">{isReadingPdfs ? 'PDFを確認しています…' : hasPdf ? 'クリックで選び直し' : `最大${MAX_PDF_CROP_BATCH_PAGES}ページ`}</span>
+                  <span className="block truncate text-xs font-black text-slate-700">{hasPdf ? `PDF ${pdfSources.length}ファイル・${batchPages.length}ページ` : '校正PDFを選ぶ'}</span>
+                  <span className="block truncate text-[10px] text-slate-500">{isReadingPdfs ? 'PDFを読んでいます…' : hasPdf ? '選び直す' : `まとめて選べます（最大${MAX_PDF_CROP_BATCH_PAGES}ページ）`}</span>
                 </span>
               </button>
               <button type="button" onClick={() => csvInputRef.current?.click()} disabled={isBusy} className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${csvFile ? 'border-emerald-300 bg-emerald-50' : 'border-dashed border-slate-300 bg-white hover:bg-slate-50'}`}>
                 <FileSpreadsheet size={18} className="shrink-0 text-emerald-600" />
                 <span className="min-w-0">
-                  <span className="block truncate text-xs font-black text-slate-700">{csvFile ? 'CSV 選択済み' : 'CSV（全データ）を選択'}</span>
-                  <span className="block truncate text-[10px] text-slate-500">{csvFile?.name || '台割の出力CSV'}</span>
+                  <span className="block truncate text-xs font-black text-slate-700">{csvFile ? '台割CSV' : '台割CSVを選ぶ'}</span>
+                  <span className="block truncate text-[10px] text-slate-500">{csvFile?.name || '台割から書き出した全データCSV'}</span>
                 </span>
               </button>
               <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" onChange={handlePdfChange} />
@@ -687,12 +687,12 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
             <section className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5">
               <p className="flex items-baseline justify-between gap-2">
                 <span className="text-[10px] font-bold text-slate-500">保存するコマ</span>
-                <span className="text-[10px] font-bold text-slate-500"><span className="text-base font-black text-indigo-700">{batchSummary.importCount}</span>コマ / {batchSummary.pageCount}ページ</span>
+                <span className="text-[10px] font-bold text-slate-500"><span className="text-base font-black text-indigo-700">{batchSummary.importCount}</span>コマ（{batchSummary.pageCount}ページ）</span>
               </p>
               {batchSummary.existingCount > 0 && (
                 <label className="mt-1 flex items-start gap-1.5 text-[10px] font-bold leading-snug text-slate-600">
                   <input type="checkbox" checked={skipExistingCodes} onChange={(event) => setSkipExistingCodes(event.target.checked)} disabled={isImporting} className="mt-0.5" />
-                  <span>同じコードの{batchSummary.existingCount}件をスキップ（未チェックなら追加登録）</span>
+                  <span>ライブラリにある{batchSummary.existingCount}件は保存しない</span>
                 </label>
               )}
               {(errorMessage || warnings.length > 0) && (
@@ -707,17 +707,17 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               <div className="space-y-1">
                 <details className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5">
                   <summary className="cursor-pointer text-[10px] font-bold text-slate-500">コマ枠の手動調整{totalManualCount > 0 ? `・${totalManualCount}コマ` : ''}</summary>
-                  <p className="mt-1 text-[10px] leading-snug text-slate-500">枠をクリックして選び、ドラッグで移動・角や辺のつまみでサイズ変更。矢印キーで微調整（Shiftで大きく）。</p>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-500">枠をクリック → ドラッグで移動、つまみでサイズ変更、矢印キーで微調整（Shiftで大きく）</p>
                 </details>
                 {pageManualCount > 0 && (
-                  <button type="button" onClick={resetPageFrames} disabled={isImporting} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">このページの手動調整{pageManualCount}件を自動に戻す</button>
+                  <button type="button" onClick={resetPageFrames} disabled={isImporting} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">このページの{pageManualCount}件を自動に戻す</button>
                 )}
               </div>
             )}
 
             <section className="min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white p-2">
-              <p className="px-2 pb-1 pt-1 text-[10px] font-bold text-slate-500">ページ一覧（クリックでプレビュー / 対象ページは変更可）</p>
-              {pagePlans.length === 0 && <p className="px-2 py-3 text-xs text-slate-500">PDFを選択すると表示されます。</p>}
+              <p className="px-2 pb-1 pt-1 text-[10px] font-bold text-slate-500" title="クリックでそのページを表示します。P.○○ を選ぶと、そのPDFに当てるカタログのページを変えられます。">ページ一覧（クリックで表示）</p>
+              {pagePlans.length === 0 && <p className="px-2 py-3 text-xs text-slate-500">PDFを選ぶとここに並びます</p>}
               <ul className="space-y-1">
                 {pagePlans.map((plan) => {
                   const isActive = plan.page.id === activeBatchPage?.id;
