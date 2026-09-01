@@ -15,6 +15,7 @@ import {
   isPdfCropRowInsideGrid,
   normalizePdfCropCode,
   parsePdfCropCsv,
+  resolvePdfCropCsvColumns,
   pdfTextItemsContainCode,
   updatePdfCropRowSize
 } from '../src/domain/pdfCropImport.js';
@@ -230,4 +231,107 @@ test('findPdfCropGridConflicts marks overlapping and out-of-grid rows', () => {
     { id: 'd', xPos: 3, yPos: 3, rowSpan: 1, colSpan: 1 }
   ]);
   assert.deepEqual([...conflicts].sort(), ['a', 'b', 'c']);
+});
+
+// 台割の別出力フォーマット (コマID/掲載ブロック/ページ番号/X_POS/Y_POS/コマ番号/コマ種別/コマサイズ/介援隊コード/掲載名)
+const BLOCK_HEADER = 'コマID,掲載ブロック,ページ番号,X_POS,Y_POS,コマ番号,コマ種別,コマサイズ,介援隊コード,掲載名';
+
+test('parsePdfCropCsv reads the block-layout CSV where the code is in column I', () => {
+  const content = [
+    BLOCK_HEADER,
+    '0064872,食事関連,10,1,1,1,商品,1/8 横（2コマ）,E1957,エンジョイ小さなカップゼリー150',
+    '0059340,食事関連,10,3,1,2,商品,1/8 横（2コマ）,E1894,やさしくラクケアシリーズ まるで果物のようなゼリー',
+    '0061379,食事関連,10,1,2,3,商品,1/4 横（4コマ）,E1723,アイソカルゼリーハイカロリー',
+    '0065422,ネジ,10,1,4,4,タイトル,1/8 横（2コマ）,E9999,タイトル',
+    '0065421,ネジ,10,3,4,5,,1/8 横（2コマ）,,'
+  ].join('\n');
+
+  const { rows, issues } = parsePdfCropCsv(content);
+  assert.equal(issues.length, 0);
+  assert.deepEqual(rows.map((row) => row.code), ['E1957', 'E1894', 'E1723'], 'タイトル行と空コード行は対象外');
+  assert.deepEqual(rows[1], {
+    id: '10-E1894-3',
+    csvRow: 3,
+    pageNumber: 10,
+    order: 0,
+    frameNumber: 2,
+    rawCode: 'E1894',
+    code: 'E1894',
+    filename: 'E1894.jpg',
+    sizeType: '1/8 横（2コマ）',
+    rowSpan: 1,
+    colSpan: 2,
+    xPos: 3,
+    yPos: 1,
+    positionSource: 'csv',
+    layoutStatus: 'ready'
+  });
+  assert.deepEqual(
+    rows[2],
+    { ...rows[2], xPos: 1, yPos: 2, rowSpan: 1, colSpan: 4, frameNumber: 3 }
+  );
+});
+
+test('resolvePdfCropCsvColumns marks absent columns instead of guessing a position', () => {
+  const blockColumns = resolvePdfCropCsvColumns(BLOCK_HEADER.split(','));
+  assert.deepEqual(blockColumns, {
+    pageNumber: 2,
+    order: -1,
+    frameNumber: 5,
+    code: 8,
+    sizeType: 7,
+    kind: 6,
+    text: -1,
+    coordinate: -1,
+    xPos: 3,
+    yPos: 4
+  });
+
+  // 旧フォーマットは見出しどおりに読める
+  const legacyColumns = resolvePdfCropCsvColumns(HEADER.split(','));
+  assert.deepEqual(
+    { code: legacyColumns.code, sizeType: legacyColumns.sizeType, text: legacyColumns.text, xPos: legacyColumns.xPos },
+    { code: 4, sizeType: 5, text: 7, xPos: 10 }
+  );
+
+  // 見出しが読めない CSV は旧フォーマットの列位置にフォールバックする
+  assert.deepEqual(resolvePdfCropCsvColumns(['a', 'b', 'c']), {
+    pageNumber: 1,
+    order: 2,
+    frameNumber: 3,
+    code: 4,
+    sizeType: 5,
+    kind: -1,
+    text: 7,
+    coordinate: 8,
+    xPos: 10,
+    yPos: 11
+  });
+});
+
+test('parsePdfCropCsv leaves blank coordinates unplaced when the CSV positions the rest of the page', () => {
+  // 一部の行だけ座標が空欄 = グリッド外のコマ。追番順に押し込まず、除外対象にする
+  const mixed = [
+    BLOCK_HEADER,
+    '0000001,災害,278,1,1,1,商品,1/16（1コマ）,O0941,アルファ米',
+    '0000002,災害,278,,,2,商品,1/16（1コマ）,O1183,8年保存 大判ウェット'
+  ].join('\n');
+  const { rows, issues } = parsePdfCropCsv(mixed);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(({ code, layoutStatus }) => ({ code, layoutStatus })), [
+    { code: 'O0941', layoutStatus: 'ready' },
+    { code: 'O1183', layoutStatus: 'unresolved' }
+  ]);
+  assert.deepEqual(issues.map((issue) => issue.type), ['layout-unresolved']);
+
+  // 部品表のように 4x4 に収まらないページも推測しない
+  const partsList = [
+    BLOCK_HEADER,
+    ...Array.from({ length: 20 }, (_, index) => (
+      `000${index},歩行,158,,,${index + 1},商品,1/16（1コマ）,W${1000 + index},交換ゴム`
+    ))
+  ].join('\n');
+  const partsPage = parsePdfCropCsv(partsList);
+  assert.equal(partsPage.rows.filter((row) => row.layoutStatus === 'ready').length, 0);
+  assert.equal(partsPage.issues.length, 20);
 });

@@ -39,22 +39,57 @@ const normalizeHeader = (value = '') => String(value)
   .replace(/[\s_-]+/g, '');
 
 const HEADER_ALIASES = Object.freeze({
-  pageNumber: ['ページ数', 'ページ', 'page', 'pageno', '頁'],
+  pageNumber: ['ページ数', 'ページ番号', 'ページ', 'page', 'pageno', '頁'],
   order: ['追番', '順番', 'order'],
   frameNumber: ['コマ番号', '枠番号', 'frameno'],
   code: ['介援隊コード', '介援隊cd', '商品コード', 'code'],
   sizeType: ['コマ数', 'コマサイズ', 'サイズ', 'sizetype'],
+  kind: ['コマ種別', '種別', 'kind'],
   text: ['テキスト情報', 'テキスト', 'text'],
   coordinate: ['座標', 'coordinate', 'position'],
   xPos: ['xpos', 'x座標'],
   yPos: ['ypos', 'y座標']
 });
 
-const findHeaderIndex = (headers, aliases, fallback) => {
+// 見出しが読めない CSV 用の列位置 (旧フォーマット: ジャンル,ページ数,追番,コマ番号,介援隊コード,コマ数,,テキスト情報,座標,コマID,X_POS,Y_POS)
+const HEADER_FALLBACK_INDEXES = Object.freeze({
+  pageNumber: 1,
+  order: 2,
+  frameNumber: 3,
+  code: 4,
+  sizeType: 5,
+  text: 7,
+  coordinate: 8,
+  xPos: 10,
+  yPos: 11
+});
+
+const REQUIRED_HEADER_KEYS = Object.freeze(['pageNumber', 'code', 'sizeType']);
+
+const findHeaderIndex = (headers, aliases) => {
   const normalizedAliases = new Set(aliases.map(normalizeHeader));
-  const index = headers.findIndex((header) => normalizedAliases.has(normalizeHeader(header)));
-  return index >= 0 ? index : fallback;
+  return headers.findIndex((header) => normalizedAliases.has(normalizeHeader(header)));
 };
+
+// 見出し行から列位置を決める。
+// 主要な列 (ページ / 介援隊コード / コマサイズ) が見出しで揃っていれば、見つからない列は「無し」(-1) にする。
+// 列の並びが違う CSV でも、余った列を別の意味に取り違えないようにするため。
+// 見出しが揃っていない CSV だけ、旧フォーマットの列位置で読む。
+export const resolvePdfCropCsvColumns = (headers = []) => {
+  const matched = Object.fromEntries(
+    Object.entries(HEADER_ALIASES).map(([key, aliases]) => [key, findHeaderIndex(headers, aliases)])
+  );
+  if (REQUIRED_HEADER_KEYS.every((key) => matched[key] >= 0)) return matched;
+  return Object.fromEntries(Object.entries(matched).map(([key, index]) => [
+    key,
+    index >= 0 ? index : (HEADER_FALLBACK_INDEXES[key] ?? -1)
+  ]));
+};
+
+const valueAt = (values, index) => (index >= 0 ? String(values[index] ?? '') : '');
+
+// コマ種別が「タイトル」「見出し」などの行は切り抜き対象ではない
+const NON_PRODUCT_KIND = /^(タイトル|見出し|ダミー)/;
 
 const splitCsvRecords = (text = '') => {
   const records = [];
@@ -265,6 +300,11 @@ const resolveMissingPositions = (rows, issues) => {
     const sortedRows = [...pageRows].sort((left, right) => (
       (left.frameNumber || left.order || left.csvRow) - (right.frameNumber || right.order || right.csvRow)
     ));
+    // 座標が無い行を追番順に置けるのは「そのページが全く座標を持たず、4x4 に収まる」ときだけ。
+    // 一部の行だけ座標が空欄なら CSV 上の意図的な空欄 (グリッド外のコマ) なので推測しない。
+    // 部品表のようにコマ数がページを超えるページも同様。
+    const canEstimatePositions = sortedRows.every((row) => !(row.xPos && row.yPos))
+      && sortedRows.reduce((cells, row) => cells + row.rowSpan * row.colSpan, 0) <= 16;
 
     sortedRows.forEach((row) => {
       let startIndex = null;
@@ -280,6 +320,14 @@ const resolveMissingPositions = (rows, issues) => {
           return;
         }
         row.positionSource = 'csv';
+      } else if (!canEstimatePositions) {
+        row.layoutStatus = 'unresolved';
+        issues.push({
+          type: 'layout-unresolved',
+          csvRow: row.csvRow,
+          message: `CSV ${row.csvRow}行目（${row.code}）は座標が空欄のため配置できません。`
+        });
+        return;
       } else {
         const orderHint = row.order > 0 && row.order <= 16 ? row.order - 1 : 0;
         startIndex = findFirstPlaceableIndex(row.rowSpan, row.colSpan, occupied, orderHint);
@@ -311,17 +359,7 @@ export const parsePdfCropCsv = (content, { parseLine = parseCSVLine } = {}) => {
   if (records.length === 0) return { rows: [], issues: [{ type: 'empty-csv', message: 'CSVにデータがありません。' }] };
 
   const headers = parseLine(records[0]);
-  const indexes = {
-    pageNumber: findHeaderIndex(headers, HEADER_ALIASES.pageNumber, 1),
-    order: findHeaderIndex(headers, HEADER_ALIASES.order, 2),
-    frameNumber: findHeaderIndex(headers, HEADER_ALIASES.frameNumber, 3),
-    code: findHeaderIndex(headers, HEADER_ALIASES.code, 4),
-    sizeType: findHeaderIndex(headers, HEADER_ALIASES.sizeType, 5),
-    text: findHeaderIndex(headers, HEADER_ALIASES.text, 7),
-    coordinate: findHeaderIndex(headers, HEADER_ALIASES.coordinate, 8),
-    xPos: findHeaderIndex(headers, HEADER_ALIASES.xPos, 10),
-    yPos: findHeaderIndex(headers, HEADER_ALIASES.yPos, 11)
-  };
+  const indexes = resolvePdfCropCsvColumns(headers);
 
   const rows = [];
   const issues = [];
@@ -329,9 +367,10 @@ export const parsePdfCropCsv = (content, { parseLine = parseCSVLine } = {}) => {
   records.slice(1).forEach((record, recordIndex) => {
     const values = parseLine(record);
     const csvRow = recordIndex + 2;
-    const rawCode = values[indexes.code] || '';
-    const rawText = values[indexes.text] || '';
-    if (!rawCode || rawCode === 'ダミーコマ' || rawText.trim()) return;
+    const rawCode = valueAt(values, indexes.code);
+    const rawText = valueAt(values, indexes.text);
+    const kind = valueAt(values, indexes.kind).trim();
+    if (!rawCode || rawCode === 'ダミーコマ' || rawText.trim() || NON_PRODUCT_KIND.test(kind)) return;
 
     const code = normalizePdfCropCode(rawCode);
     if (!code) {
@@ -339,23 +378,23 @@ export const parsePdfCropCsv = (content, { parseLine = parseCSVLine } = {}) => {
       return;
     }
 
-    const pageNumber = Number.parseInt(values[indexes.pageNumber], 10);
+    const pageNumber = Number.parseInt(valueAt(values, indexes.pageNumber), 10);
     if (!Number.isInteger(pageNumber) || pageNumber < 1) {
       issues.push({ type: 'invalid-page', csvRow, message: `CSV ${csvRow}行目（${code}）のページ番号が不正です。` });
       return;
     }
 
-    const sizeType = (values[indexes.sizeType] || '').trim();
+    const sizeType = valueAt(values, indexes.sizeType).trim();
     if (!isSupportedSizeType(sizeType)) {
       issues.push({ type: 'invalid-size', csvRow, message: `CSV ${csvRow}行目（${code}）のコマサイズを認識できません。` });
       return;
     }
     const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(sizeType);
-    const coordinate = parseCoordinate(values[indexes.coordinate]);
-    const xPos = clampGridPosition(values[indexes.xPos]) || coordinate.xPos;
-    const yPos = clampGridPosition(values[indexes.yPos]) || coordinate.yPos;
-    const order = Number.parseInt(values[indexes.order], 10) || 0;
-    const frameNumber = Number.parseInt(values[indexes.frameNumber], 10) || 0;
+    const coordinate = parseCoordinate(valueAt(values, indexes.coordinate));
+    const xPos = clampGridPosition(valueAt(values, indexes.xPos)) || coordinate.xPos;
+    const yPos = clampGridPosition(valueAt(values, indexes.yPos)) || coordinate.yPos;
+    const order = Number.parseInt(valueAt(values, indexes.order), 10) || 0;
+    const frameNumber = Number.parseInt(valueAt(values, indexes.frameNumber), 10) || 0;
 
     rows.push({
       id: `${pageNumber}-${code}-${csvRow}`,
