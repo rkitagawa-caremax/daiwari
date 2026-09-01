@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  chooseFrameEdge,
-  computeDarkCoverageProfiles,
+  chooseGutterEdge,
+  chooseLineEdge,
+  computeCoverageProfiles,
   countSnappedEdges,
   detectFrameLines,
+  findWhiteRuns,
   snapRectToFrame
 } from '../src/domain/pdfCropFrame.js';
 
-// 行 coverage を「区間 → 値」で組み立てるヘルパー
+// coverage を「区間 → 値」で組み立てるヘルパー (指定外は base)
 const buildCoverage = (length, segments, base = 0) => {
   const coverage = new Float32Array(length).fill(base);
   segments.forEach(([start, end, value]) => {
@@ -18,28 +20,39 @@ const buildCoverage = (length, segments, base = 0) => {
   return coverage;
 };
 
-test('computeDarkCoverageProfiles counts dark pixels per row and column', () => {
-  // 4x3 の画像: 1 行目は全て黒、2 行目は左端だけ黒、3 行目は白
-  const width = 4;
-  const height = 3;
+test('computeCoverageProfiles measures rows over the core columns only (and vice versa)', () => {
+  // 6x4 の画像。左端 1 列は隣のコマの文字 (黒)、行 1 は全面黒、それ以外は白
+  const width = 6;
+  const height = 4;
   const data = new Uint8ClampedArray(width * height * 4).fill(255);
   const paintBlack = (x, y) => {
     const index = (y * width + x) * 4;
     data[index] = 0; data[index + 1] = 0; data[index + 2] = 0;
   };
-  for (let x = 0; x < width; x++) paintBlack(x, 0);
-  paintBlack(0, 1);
+  for (let y = 0; y < height; y++) paintBlack(0, y);
+  for (let x = 0; x < width; x++) paintBlack(x, 1);
 
-  const { rows, cols } = computeDarkCoverageProfiles(data, width, height);
-  assert.deepEqual(Array.from(rows), [1, 0.25, 0]);
-  assert.deepEqual(Array.from(cols).map((value) => Number(value.toFixed(4))), [0.6667, 0.3333, 0.3333, 0.3333]);
+  const { rowsInk, colsInk, rowsDark } = computeCoverageProfiles(data, width, height, { core: { x0: 1, x1: 6, y0: 0, y1: 4 } });
+  // 行: 隣コマ (x=0) は集計外なので、黒い行 1 以外は 0
+  assert.deepEqual(Array.from(rowsInk), [0, 1, 0, 0]);
+  assert.deepEqual(Array.from(rowsDark), [0, 1, 0, 0]);
+  // 列: x=0 は全行黒、その他は行 1 だけ黒
+  assert.deepEqual(Array.from(colsInk), [1, 0.25, 0.25, 0.25, 0.25, 0.25]);
+});
+
+test('findWhiteRuns returns runs of near-white entries at least minLength long', () => {
+  const coverage = buildCoverage(40, [[0, 4, 0], [5, 9, 0.5], [10, 21, 0.01], [22, 30, 0.4], [31, 32, 0], [33, 39, 0.6]], 0.5);
+  assert.deepEqual(findWhiteRuns(coverage, { whiteMax: 0.02, minLength: 3 }), [
+    { start: 0, end: 4, length: 5 },
+    { start: 10, end: 21, length: 12 }
+  ]);
 });
 
 test('detectFrameLines keeps thin high-coverage runs and drops thick bands', () => {
   const coverage = buildCoverage(100, [
-    [10, 12, 0.9],   // 枠線 (3px)
-    [40, 60, 0.95],  // 商品画像や色帯 (21px) → 除外
-    [80, 80, 0.7]    // 枠線 (1px)
+    [10, 12, 0.9],
+    [40, 60, 0.95],
+    [80, 80, 0.7]
   ]);
   assert.deepEqual(detectFrameLines(coverage, { minCoverage: 0.55, maxThickness: 6 }), [
     { start: 10, end: 12, center: 11 },
@@ -47,57 +60,72 @@ test('detectFrameLines keeps thin high-coverage runs and drops thick bands', () 
   ]);
 });
 
-test('chooseFrameEdge picks the inner line of a neighbouring border pair', () => {
-  // 上のコマの下枠 (40-42) と、余白 (43-52) を挟んだ自コマの上枠 (53-55)
-  const coverage = buildCoverage(300, [
-    [40, 42, 0.9],
-    [53, 55, 0.9],
-    [56, 200, 0.3]   // コマ内部 (文字などで薄く暗い)
-  ]);
-  const lines = detectFrameLines(coverage, { minCoverage: 0.55, maxThickness: 6 });
-  // 期待位置 (45) は上のコマの下枠に近いが、外側が白い自コマの上枠 53 が選ばれる
-  assert.equal(chooseFrameEdge(lines, coverage, { expected: 45, side: 'start', tolerance: 30, maxPairGap: 15, whiteMax: 0.03 }), 53);
-  // 下辺: 自コマの下枠 (end) は外側 (下) が白い
-  const bottomCoverage = buildCoverage(300, [
-    [200, 202, 0.9],
-    [214, 216, 0.9],
-    [217, 299, 0.3]
-  ]);
-  const bottomLines = detectFrameLines(bottomCoverage, { minCoverage: 0.55, maxThickness: 6 });
-  assert.equal(chooseFrameEdge(bottomLines, bottomCoverage, { expected: 210, side: 'end', tolerance: 30, maxPairGap: 15, whiteMax: 0.03 }), 202);
-  assert.equal(chooseFrameEdge(bottomLines, bottomCoverage, { expected: 100, side: 'end', tolerance: 10, maxPairGap: 15, whiteMax: 0.03 }), null);
+test('chooseGutterEdge picks the gutter nearest the expected edge and pads into it', () => {
+  const runs = [
+    { start: 40, end: 52, length: 13 },   // 上のコマとの余白
+    { start: 120, end: 160, length: 41 }, // コマ内部の広い白帯 (タイトルと画像の間)
+    { start: 240, end: 251, length: 12 }  // 下のコマとの余白
+  ];
+  // 上辺: 期待 56 → 余白 40-52 の内側 53 から 4px 余白側へ
+  assert.equal(chooseGutterEdge(runs, { expected: 56, side: 'start', tolerance: 25, pad: 4 }), 49);
+  // 下辺: 期待 236 → 余白 240-251 の内側 239 から 4px 余白側へ
+  assert.equal(chooseGutterEdge(runs, { expected: 236, side: 'end', tolerance: 25, pad: 4 }), 243);
+  // 許容範囲外なら null
+  assert.equal(chooseGutterEdge(runs, { expected: 200, side: 'end', tolerance: 10, pad: 4 }), null);
+  // パディングは余白の半分まで
+  assert.equal(chooseGutterEdge([{ start: 40, end: 43, length: 4 }], { expected: 44, side: 'start', tolerance: 10, pad: 10 }), 42);
 });
 
-test('snapRectToFrame moves the grid rect onto the detected frame and reports snapped edges', () => {
-  // 縦: 上のコマの下枠 40-42 / 余白 / 自コマ 53-55 〜 240-242 / 余白 / 次のコマ 252-254
-  const rows = buildCoverage(300, [
-    [40, 42, 0.9], [53, 55, 0.9], [56, 239, 0.3], [240, 242, 0.9], [252, 254, 0.9]
-  ]);
-  // 横: 左枠 20-22, 右枠 220-222
-  const cols = buildCoverage(260, [[20, 22, 0.9], [23, 219, 0.3], [220, 222, 0.9]]);
-  const expected = { x: 24, y: 45, width: 190, height: 187 }; // グリッド計算がやや上にずれている想定
+test('chooseLineEdge falls back to the outer side of the nearest thin line', () => {
+  const lines = [{ start: 40, end: 42, center: 41 }, { start: 250, end: 252, center: 251 }];
+  assert.equal(chooseLineEdge(lines, { expected: 45, side: 'start', tolerance: 10 }), 39);
+  assert.equal(chooseLineEdge(lines, { expected: 245, side: 'end', tolerance: 10 }), 253);
+  assert.equal(chooseLineEdge(lines, { expected: 150, side: 'end', tolerance: 10 }), null);
+});
 
-  const snapped = snapRectToFrame({ profiles: { rows, cols }, expected });
+test('snapRectToFrame snaps a borderless panel onto the surrounding gutters', () => {
+  // 縦: 上のコマの内容 0-44 / 余白 45-56 / 自コマ 57-238 (内部に白帯 120-160) / 余白 239-250 / 下のコマ 251-
+  const rowsInk = buildCoverage(300, [[45, 56, 0], [120, 160, 0], [239, 250, 0]], 0.3);
+  // 横: 左のコマ / 余白 15-26 / 自コマ 27-222 / 余白 223-234 / 右のコマ
+  const colsInk = buildCoverage(260, [[15, 26, 0], [223, 234, 0]], 0.3);
+  const profiles = { rowsInk, colsInk, rowsDark: buildCoverage(300, []), colsDark: buildCoverage(260, []) };
+  // 期待枠は数 % ずれている想定 (上に 8px, 左に 6px)
+  const expected = { x: 21, y: 49, width: 190, height: 182 };
+
+  const snapped = snapRectToFrame({ profiles, expected });
+  // pad = round(182*0.02)=4 / round(190*0.02)=4 → 上 57-4=53, 下 238+4=242 (+1 で end 243), 左 27-4=23, 右 222+4=226 (+1)
   assert.deepEqual(snapped, {
-    x: 19, y: 52, width: 204, height: 191,
+    x: 23, y: 53, width: 204, height: 190,
     snappedEdges: { top: true, bottom: true, left: true, right: true }
   });
   assert.equal(countSnappedEdges(snapped.snappedEdges), 4);
 });
 
-test('snapRectToFrame falls back to the expected rect when no frame is found or the size is implausible', () => {
-  const blankRows = buildCoverage(300, []);
-  const blankCols = buildCoverage(260, []);
+test('snapRectToFrame uses thin frame lines when panels touch without a gutter', () => {
+  // 余白なし: 枠線 (濃い) が 50-51 と 240-241、内部は薄いインク
+  const rowsInk = buildCoverage(300, [], 0.3);
+  const rowsDark = buildCoverage(300, [[50, 51, 0.9], [240, 241, 0.9]]);
+  const colsInk = buildCoverage(260, [], 0.3);
+  const colsDark = buildCoverage(260, [[20, 21, 0.9], [230, 231, 0.9]]);
+  const expected = { x: 24, y: 45, width: 200, height: 190 };
+  const snapped = snapRectToFrame({ profiles: { rowsInk, rowsDark, colsInk, colsDark }, expected });
+  assert.deepEqual(snapped, {
+    x: 19, y: 49, width: 214, height: 194,
+    snappedEdges: { top: true, bottom: true, left: true, right: true }
+  });
+});
+
+test('snapRectToFrame falls back to the expected rect when nothing plausible is found', () => {
   const expected = { x: 24, y: 45, width: 190, height: 187 };
-  const untouched = snapRectToFrame({ profiles: { rows: blankRows, cols: blankCols }, expected });
-  assert.deepEqual(untouched, {
+  const blank = { rowsInk: buildCoverage(300, [], 0.3), rowsDark: buildCoverage(300, []), colsInk: buildCoverage(260, [], 0.3), colsDark: buildCoverage(260, []) };
+  assert.deepEqual(snapRectToFrame({ profiles: blank, expected }), {
     ...expected,
     snappedEdges: { top: false, bottom: false, left: false, right: false }
   });
 
-  // 上下とも許容範囲ぎりぎりの線が見つかるが、採用すると高さが 30% 以上縮む → 縦方向は期待値のまま
-  const rows = buildCoverage(300, [[88, 90, 0.9], [190, 192, 0.9]]);
-  const partial = snapRectToFrame({ profiles: { rows, cols: blankCols }, expected });
+  // 上下の余白が見つかるが、採用すると高さが 30% 以上縮む → 縦方向は期待値のまま
+  const rowsInk = buildCoverage(300, [[65, 75, 0], [195, 205, 0]], 0.3);
+  const partial = snapRectToFrame({ profiles: { ...blank, rowsInk }, expected, options: { searchToleranceRatio: 0.25 } });
   assert.equal(partial.y, expected.y);
   assert.equal(partial.height, expected.height);
   assert.equal(partial.snappedEdges.top, false);

@@ -1,47 +1,105 @@
-// 描画済みページのピクセルから、コマの枠線 (上下左右) を検出して切り抜き枠をスナップさせる純粋ロジック。
-// 入力は RGBA バイト列と期待枠 (グリッドから計算した枠) で、Canvas には依存しない (lib/pdfCropImport.js が橋渡しする)。
+// 描画済みページのピクセルから、コマの境界 (余白 = ガター) を検出して切り抜き枠をスナップさせる純粋ロジック。
+// 入力は RGBA バイト列と期待枠で、Canvas には依存しない (lib/pdfCropImport.js が橋渡しする)。
 //
 // 考え方:
-//   - 行ごと / 列ごとに「暗いピクセルの割合」(coverage) を出す
-//   - 割合が高く、かつ細い行の連なり = 枠線 (太い帯や商品画像は除外)
-//   - 期待した辺の近くにある枠線のうち、外側が白い余白 (隣のコマとの間隔) になっているものを優先して選ぶ
-//     → 隣のコマの枠線を誤って拾わない
-//   - 見つからない / サイズが大きく外れる場合は期待枠をそのまま使う
+//   - 期待枠の「中央部分」(core) だけを使って、行ごと / 列ごとの「インク (白でない) ピクセルの割合」を出す
+//     → 隣のコマの内容が混ざりにくい
+//   - 期待した辺の近くで、コマ幅いっぱいに白が続く帯 (余白) を探し、その内側の縁 + 少しの余白を境界にする
+//     枠線がある誌面でも、枠線は余白の内側にあるインクとしてそのまま含まれる
+//   - 余白が見つからない (コマ同士が線一本で接している) 場合は、細い濃い線 (枠線) の位置を使う
+//   - どちらも見つからない / サイズが大きく外れる場合は期待枠をそのまま使う
 
 export const DEFAULT_FRAME_SNAP_OPTIONS = Object.freeze({
-  darkThreshold: 110,        // 輝度がこの値未満なら「暗いピクセル」
-  minLineCoverage: 0.55,     // 枠線とみなす最小の暗ピクセル割合 (探索窓の幅に対する比率)
-  maxLineThicknessRatio: 0.015, // 枠線の最大太さ (期待枠の辺の長さに対する比率)
-  whiteMaxCoverage: 0.03,    // 余白とみなす最大の暗ピクセル割合
-  maxPairGapRatio: 0.08,     // 隣接コマの枠線ペアとみなす最大の間隔 (期待枠の辺の長さに対する比率)
-  searchToleranceRatio: 0.25, // 期待した辺からこの範囲 (辺の長さ比) で枠線を探す
-  sizeToleranceRatio: 0.3,   // スナップ後の幅/高さが期待値から ±この比率を超えたら採用しない
-  outerPadding: 1            // 枠線を含めるための外側パディング (px)
+  inkThreshold: 235,          // 輝度がこの値未満なら「インクあり」(白でない)
+  darkThreshold: 150,         // 輝度がこの値未満なら「濃い」(枠線判定用)
+  whiteMaxCoverage: 0.02,     // 余白とみなす最大のインク割合
+  minGutterRatio: 0.006,      // 余白とみなす最小の連続長 (期待枠の辺の長さに対する比率)
+  paddingRatio: 0.02,         // 境界を余白側へ広げる量 (辺の長さ比、余白の半分を上限)
+  searchToleranceRatio: 0.12, // 期待した辺からこの範囲 (辺の長さ比) で余白/枠線を探す
+  minLineCoverage: 0.55,      // 枠線とみなす最小の濃いピクセル割合
+  maxLineThicknessRatio: 0.015, // 枠線の最大太さ (辺の長さ比)
+  sizeToleranceRatio: 0.3,    // スナップ後の幅/高さが期待値から ±この比率を超えたら採用しない
+  coreInsetRatio: 0.15        // プロファイル計算に使う中央部分 (両端をこの比率だけ除く)
 });
 
-// RGBA バイト列から行ごと・列ごとの暗ピクセル割合を求める。
-export const computeDarkCoverageProfiles = (data, width, height, darkThreshold = DEFAULT_FRAME_SNAP_OPTIONS.darkThreshold) => {
-  const rowCounts = new Uint32Array(height);
-  const colCounts = new Uint32Array(width);
+const clampIndex = (value, max) => Math.min(max, Math.max(0, Math.round(value)));
+
+// RGBA バイト列から行ごと・列ごとの「インク割合」と「濃いピクセル割合」を求める。
+// 行プロファイルは core.x0〜x1 の列だけ、列プロファイルは core.y0〜y1 の行だけを集計する。
+export const computeCoverageProfiles = (data, width, height, {
+  core = { x0: 0, x1: width, y0: 0, y1: height },
+  inkThreshold = DEFAULT_FRAME_SNAP_OPTIONS.inkThreshold,
+  darkThreshold = DEFAULT_FRAME_SNAP_OPTIONS.darkThreshold
+} = {}) => {
+  const x0 = clampIndex(core.x0, width);
+  const x1 = Math.max(x0 + 1, clampIndex(core.x1, width));
+  const y0 = clampIndex(core.y0, height);
+  const y1 = Math.max(y0 + 1, clampIndex(core.y1, height));
+  const rowInk = new Uint32Array(height);
+  const rowDark = new Uint32Array(height);
+  const colInk = new Uint32Array(width);
+  const colDark = new Uint32Array(width);
+
   for (let y = 0; y < height; y++) {
+    const inCoreRows = y >= y0 && y < y1;
     const rowOffset = y * width * 4;
     for (let x = 0; x < width; x++) {
+      const inCoreCols = x >= x0 && x < x1;
+      if (!inCoreRows && !inCoreCols) continue;
       const index = rowOffset + x * 4;
       const luminance = 0.299 * data[index] + 0.587 * data[index + 1] + 0.114 * data[index + 2];
-      if (luminance < darkThreshold) {
-        rowCounts[y]++;
-        colCounts[x]++;
+      const isInk = luminance < inkThreshold;
+      const isDark = luminance < darkThreshold;
+      if (inCoreCols) {
+        if (isInk) rowInk[y]++;
+        if (isDark) rowDark[y]++;
+      }
+      if (inCoreRows) {
+        if (isInk) colInk[x]++;
+        if (isDark) colDark[x]++;
       }
     }
   }
-  const rows = new Float32Array(height);
-  const cols = new Float32Array(width);
-  for (let y = 0; y < height; y++) rows[y] = width > 0 ? rowCounts[y] / width : 0;
-  for (let x = 0; x < width; x++) cols[x] = height > 0 ? colCounts[x] / height : 0;
-  return { rows, cols };
+
+  const coreWidth = x1 - x0;
+  const coreHeight = y1 - y0;
+  const rowsInk = new Float32Array(height);
+  const rowsDark = new Float32Array(height);
+  const colsInk = new Float32Array(width);
+  const colsDark = new Float32Array(width);
+  for (let y = 0; y < height; y++) {
+    rowsInk[y] = rowInk[y] / coreWidth;
+    rowsDark[y] = rowDark[y] / coreWidth;
+  }
+  for (let x = 0; x < width; x++) {
+    colsInk[x] = colInk[x] / coreHeight;
+    colsDark[x] = colDark[x] / coreHeight;
+  }
+  return { rowsInk, rowsDark, colsInk, colsDark };
 };
 
-// coverage 配列から「細い枠線」の候補 (連続区間) を抽出する。
+// coverage 配列から「白が連続する区間」(余白候補) を抽出する。
+export const findWhiteRuns = (coverage, { whiteMax, minLength }) => {
+  const runs = [];
+  let start = -1;
+  const flush = (end) => {
+    if (start < 0) return;
+    const length = end - start + 1;
+    if (length >= minLength) runs.push({ start, end, length });
+    start = -1;
+  };
+  for (let index = 0; index < coverage.length; index++) {
+    if (coverage[index] <= whiteMax) {
+      if (start < 0) start = index;
+    } else {
+      flush(index - 1);
+    }
+  }
+  flush(coverage.length - 1);
+  return runs;
+};
+
+// coverage 配列から「細い濃い線」(枠線候補) を抽出する。
 export const detectFrameLines = (coverage, { minCoverage, maxThickness }) => {
   const lines = [];
   let start = -1;
@@ -62,56 +120,62 @@ export const detectFrameLines = (coverage, { minCoverage, maxThickness }) => {
   return lines;
 };
 
-const isWhiteRange = (coverage, from, to, whiteMax) => {
-  for (let index = from; index <= to; index++) {
-    if (coverage[index] > whiteMax) return false;
-  }
-  return true;
-};
-
-// 「短い白い間隔を挟んで並ぶ 2 本の枠線」= 隣接するコマ同士の枠線ペア。
-// 上/左辺を探すときはペアの後ろ側 (自コマ側)、下/右辺を探すときはペアの前側を優先する。
-export const markFrameLinePairs = (lines, coverage, { maxPairGap, whiteMax }) => lines.map((line, index) => {
-  const previous = lines[index - 1];
-  const next = lines[index + 1];
-  const pairedWithPrevious = !!previous
-    && line.start - previous.end - 1 <= maxPairGap
-    && isWhiteRange(coverage, previous.end + 1, line.start - 1, whiteMax);
-  const pairedWithNext = !!next
-    && next.start - line.end - 1 <= maxPairGap
-    && isWhiteRange(coverage, line.end + 1, next.start - 1, whiteMax);
-  return { ...line, pairedWithPrevious, pairedWithNext };
-});
-
-// 期待位置に最も近い枠線の辺を選ぶ。side='start' は上/左辺、'end' は下/右辺。
-export const chooseFrameEdge = (lines, coverage, { expected, side, tolerance, maxPairGap, whiteMax }) => {
-  const edgeOf = (line) => (side === 'start' ? line.start : line.end);
-  const marked = markFrameLinePairs(lines, coverage, { maxPairGap, whiteMax });
-  const candidates = marked.filter((line) => Math.abs(edgeOf(line) - expected) <= tolerance);
+// 期待位置に最も近い余白を選び、その内側の縁 (+余白側へのパディング) を境界として返す。
+// side='start' は上/左辺 (余白の下/右端が内側)、'end' は下/右辺 (余白の上/左端が内側)。
+export const chooseGutterEdge = (runs, { expected, side, tolerance, pad = 0 }) => {
+  const candidates = runs
+    .map((run) => {
+      const innerEdge = side === 'start' ? run.end + 1 : run.start - 1;
+      const padding = Math.min(pad, Math.floor(run.length / 2));
+      return {
+        innerEdge,
+        boundary: side === 'start' ? innerEdge - padding : innerEdge + padding,
+        distance: Math.abs(innerEdge - expected)
+      };
+    })
+    .filter((candidate) => candidate.distance <= tolerance);
   if (candidates.length === 0) return null;
-  // 隣のコマ側の枠線 (上辺探索ならペアの前側、下辺探索ならペアの後ろ側) は後回しにする
-  const preferred = candidates.filter((line) => (side === 'start' ? !line.pairedWithNext : !line.pairedWithPrevious));
-  const pool = preferred.length > 0 ? preferred : candidates;
-  pool.sort((left, right) => Math.abs(edgeOf(left) - expected) - Math.abs(edgeOf(right) - expected));
-  return edgeOf(pool[0]);
+  candidates.sort((left, right) => left.distance - right.distance);
+  return candidates[0].boundary;
 };
 
-const snapAxis = (coverage, expectedStart, expectedSize, options) => {
-  const maxThickness = Math.max(2, Math.round(expectedSize * options.maxLineThicknessRatio));
-  const tolerance = expectedSize * options.searchToleranceRatio;
-  const maxPairGap = Math.max(2, Math.round(expectedSize * options.maxPairGapRatio));
-  const lines = detectFrameLines(coverage, { minCoverage: options.minLineCoverage, maxThickness });
-  const shared = { tolerance, maxPairGap, whiteMax: options.whiteMaxCoverage };
-  const start = chooseFrameEdge(lines, coverage, { ...shared, expected: expectedStart, side: 'start' });
-  const end = chooseFrameEdge(lines, coverage, { ...shared, expected: expectedStart + expectedSize, side: 'end' });
+// 余白が無い場合の予備: 期待位置に最も近い枠線の外側の縁を境界にする。
+export const chooseLineEdge = (lines, { expected, side, tolerance }) => {
+  const candidates = lines
+    .map((line) => {
+      const edge = side === 'start' ? line.start : line.end;
+      return { boundary: side === 'start' ? line.start - 1 : line.end + 1, distance: Math.abs(edge - expected) };
+    })
+    .filter((candidate) => candidate.distance <= tolerance);
+  if (candidates.length === 0) return null;
+  candidates.sort((left, right) => left.distance - right.distance);
+  return candidates[0].boundary;
+};
 
-  let resolvedStart = start === null ? expectedStart : start - options.outerPadding;
-  let resolvedEnd = end === null ? expectedStart + expectedSize : end + options.outerPadding;
+const snapAxis = ({ ink, dark }, expectedStart, expectedSize, options) => {
+  const tolerance = expectedSize * options.searchToleranceRatio;
+  const pad = Math.max(1, Math.round(expectedSize * options.paddingRatio));
+  const minGutter = Math.max(2, Math.round(expectedSize * options.minGutterRatio));
+  const maxThickness = Math.max(2, Math.round(expectedSize * options.maxLineThicknessRatio));
+  const expectedEnd = expectedStart + expectedSize;
+
+  const runs = findWhiteRuns(ink, { whiteMax: options.whiteMaxCoverage, minLength: minGutter });
+  let start = chooseGutterEdge(runs, { expected: expectedStart, side: 'start', tolerance, pad });
+  let end = chooseGutterEdge(runs, { expected: expectedEnd, side: 'end', tolerance, pad });
+
+  if (start === null || end === null) {
+    const lines = detectFrameLines(dark, { minCoverage: options.minLineCoverage, maxThickness });
+    if (start === null) start = chooseLineEdge(lines, { expected: expectedStart, side: 'start', tolerance });
+    if (end === null) end = chooseLineEdge(lines, { expected: expectedEnd, side: 'end', tolerance });
+  }
+
+  let resolvedStart = start === null ? expectedStart : Math.max(0, start);
+  let resolvedEnd = end === null ? expectedEnd : Math.min(ink.length, end + 1);
   const size = resolvedEnd - resolvedStart;
   const withinTolerance = size > 0 && Math.abs(size - expectedSize) <= expectedSize * options.sizeToleranceRatio;
   if (!withinTolerance) {
     resolvedStart = expectedStart;
-    resolvedEnd = expectedStart + expectedSize;
+    resolvedEnd = expectedEnd;
   }
   return {
     start: resolvedStart,
@@ -121,11 +185,11 @@ const snapAxis = (coverage, expectedStart, expectedSize, options) => {
   };
 };
 
-// 探索窓内のピクセル分布 (profiles) と期待枠 (窓内 px 座標) から、枠線にスナップした矩形を返す。
+// 探索窓内のプロファイルと期待枠 (窓内 px 座標) から、余白/枠線にスナップした矩形を返す。
 export const snapRectToFrame = ({ profiles, expected, options = {} }) => {
   const resolved = { ...DEFAULT_FRAME_SNAP_OPTIONS, ...options };
-  const vertical = snapAxis(profiles.rows, expected.y, expected.height, resolved);
-  const horizontal = snapAxis(profiles.cols, expected.x, expected.width, resolved);
+  const vertical = snapAxis({ ink: profiles.rowsInk, dark: profiles.rowsDark }, expected.y, expected.height, resolved);
+  const horizontal = snapAxis({ ink: profiles.colsInk, dark: profiles.colsDark }, expected.x, expected.width, resolved);
   return {
     x: horizontal.start,
     y: vertical.start,

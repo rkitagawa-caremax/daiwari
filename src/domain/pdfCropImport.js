@@ -385,20 +385,25 @@ export const updatePdfCropRowSize = (row, sizeType) => {
   return { ...row, sizeType, rowSpan, colSpan };
 };
 
-export const getPdfCropRect = (row, bounds = DEFAULT_PDF_GRID_BOUNDS) => {
+// 余白設定 (%) から 4x4 グリッドの原点とセルサイズ (正規化座標) を求める
+export const getPdfGridGeometry = (bounds = DEFAULT_PDF_GRID_BOUNDS) => {
   const left = Number(bounds.left) / 100;
   const top = Number(bounds.top) / 100;
   const usableWidth = 1 - left - Number(bounds.right) / 100;
   const usableHeight = 1 - top - Number(bounds.bottom) / 100;
-  const cellWidth = usableWidth / 4;
-  const cellHeight = usableHeight / 4;
-  return {
-    x: left + (row.xPos - 1) * cellWidth,
-    y: top + (row.yPos - 1) * cellHeight,
-    width: row.colSpan * cellWidth,
-    height: row.rowSpan * cellHeight
-  };
+  return { left, top, cellWidth: usableWidth / 4, cellHeight: usableHeight / 4 };
 };
+
+export const getPdfCropRectFromGrid = (row, grid) => ({
+  x: grid.left + (row.xPos - 1) * grid.cellWidth,
+  y: grid.top + (row.yPos - 1) * grid.cellHeight,
+  width: row.colSpan * grid.cellWidth,
+  height: row.rowSpan * grid.cellHeight
+});
+
+export const getPdfCropRect = (row, bounds = DEFAULT_PDF_GRID_BOUNDS) => (
+  getPdfCropRectFromGrid(row, getPdfGridGeometry(bounds))
+);
 
 export const isPdfCropRowInsideGrid = (row) => (
   row.layoutStatus !== 'conflict'

@@ -1,12 +1,12 @@
 import * as pdfjs from 'pdfjs-dist/build/pdf.mjs';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-import { computeDarkCoverageProfiles, countSnappedEdges, snapRectToFrame } from '../domain/pdfCropFrame.js';
+import { DEFAULT_FRAME_SNAP_OPTIONS, computeCoverageProfiles, countSnappedEdges, snapRectToFrame } from '../domain/pdfCropFrame.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // 枠線検出のために期待枠の周囲をどれだけ広く読むか (辺の長さに対する比率)
-const FRAME_SEARCH_EXPANSION = 0.2;
+const FRAME_SEARCH_EXPANSION = 0.3;
 const NO_SNAP = Object.freeze({ top: false, bottom: false, left: false, right: false });
 
 export const openPdfFile = async (file) => {
@@ -98,8 +98,8 @@ export const cropPdfPageToFile = async ({
   return new File([blob], filename, { type: 'image/jpeg', lastModified: Date.now() });
 };
 
-// 描画済みキャンバス上で、グリッドから求めた正規化矩形をコマの枠線にスナップさせる。
-// 枠線が見つからない場合は元の矩形をそのまま返す (snappedCount = 0)。
+// 描画済みキャンバス上で、グリッドから求めた正規化矩形をコマの境界 (余白/枠線) にスナップさせる。
+// 境界が見つからない場合は元の矩形をそのまま返す (snappedCount = 0)。
 export const refineCropRectToFrame = (canvas, normalizedRect, options = {}) => {
   const fallback = { rect: normalizedRect, snappedEdges: NO_SNAP, snappedCount: 0 };
   if (!canvas || !normalizedRect || !canvas.width || !canvas.height) return fallback;
@@ -126,12 +126,20 @@ export const refineCropRectToFrame = (canvas, normalizedRect, options = {}) => {
     return fallback;
   }
 
-  const profiles = computeDarkCoverageProfiles(imageData.data, windowWidth, windowHeight, options.darkThreshold);
-  const snapped = snapRectToFrame({
-    profiles,
-    expected: { x: px.x - windowX, y: px.y - windowY, width: px.width, height: px.height },
-    options
+  const expected = { x: px.x - windowX, y: px.y - windowY, width: px.width, height: px.height };
+  const inset = options.coreInsetRatio ?? DEFAULT_FRAME_SNAP_OPTIONS.coreInsetRatio;
+  const profiles = computeCoverageProfiles(imageData.data, windowWidth, windowHeight, {
+    // 隣のコマの内容を拾わないよう、期待枠の中央部分だけで行/列プロファイルを取る
+    core: {
+      x0: expected.x + expected.width * inset,
+      x1: expected.x + expected.width * (1 - inset),
+      y0: expected.y + expected.height * inset,
+      y1: expected.y + expected.height * (1 - inset)
+    },
+    inkThreshold: options.inkThreshold,
+    darkThreshold: options.darkThreshold
   });
+  const snapped = snapRectToFrame({ profiles, expected, options });
   return {
     rect: {
       x: (windowX + snapped.x) / canvas.width,
