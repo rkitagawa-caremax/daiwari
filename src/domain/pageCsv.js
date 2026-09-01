@@ -2,10 +2,10 @@ import { getPanelCsvCode } from './panels.js';
 import { getSizeType } from './panelLayout.js';
 
 // 台割ページ CSV (出力側) のカラム定義。
-// K列「X_POS」と L列「Y_POS」: I列「座標」(X{n}Y{m}) を分解した数値。
-// 例: 座標 X3Y2 → X_POS=3, Y_POS=2 (1始まり、4×4 グリッド内)
+// 「追番」と結合済みの「座標」(X{n}Y{m}) は内部データとして扱い、CSVには出力しない。
+// 配置は X_POS / Y_POS の数値（1始まり、4×4 グリッド内）として出力する。
 export const PAGE_CSV_HEADERS = Object.freeze([
-  'ジャンル', 'ページ数', '追番', 'コマ番号', '介援隊コード', 'コマ数', '', 'テキスト情報', '座標', 'コマID', 'X_POS', 'Y_POS'
+  'ジャンル', '介援隊コード', 'ページ数', 'X_POS', 'Y_POS', 'コマ番号', 'コマ数', 'コマID', 'テキスト情報'
 ]);
 
 export const EXCLUDED_ITEMS_CSV_HEADERS = Object.freeze(['介援隊コード', '画像名', 'ラベル', '登録日時']);
@@ -22,43 +22,29 @@ const joinCsvLines = (headers, rows) => CSV_BOM + [headers.join(','), ...rows].j
 // 1ページ分のコマを CSV 行 (文字列) の配列にする。
 export const buildPageCsvRowsForSheet = (sheet, { pageNum, genreLabel }) => {
   const rows = [];
-  let visibleCounter = 0;
   let frameCounter = 0;
 
   (sheet?.panels || []).forEach((panel, panelIndex) => {
     if (panel.hidden) return;
     frameCounter++;
-    const isSpecialDummy = panel.label === '埋草' || panel.label === 'タイトル';
-    let panelNum = '';
-    if (!isSpecialDummy) {
-      visibleCounter++;
-      panelNum = visibleCounter;
-    }
     const codeVal = getPanelCsvCode(panel);
     const sizeVal = panel.sizeType || getSizeType(panel.rowSpan || 1, panel.colSpan || 1);
     const textVal = escapeCsvText(panel.text || '');
 
-    // I列: グリッド座標 (X1Y1 〜 X4Y4)
     const gridRow = Math.floor(panelIndex / 4) + 1; // 1始まり
     const gridCol = (panelIndex % 4) + 1;           // 1始まり
-    const coordVal = `X${gridCol}Y${gridRow}`;
-
-    // J列: コマID（パネルデータに保持している値を出力）
     const panelIdVal = panel.panelId || '';
 
     rows.push([
       genreLabel,
-      pageNum,
-      panelNum,
-      frameCounter,
       codeVal,
+      pageNum,
+      gridCol,
+      gridRow,
+      frameCounter,
       sizeVal,
-      '',
-      textVal,
-      coordVal,
       panelIdVal,
-      gridCol, // K列: X_POS
-      gridRow  // L列: Y_POS
+      textVal
     ].join(','));
   });
 

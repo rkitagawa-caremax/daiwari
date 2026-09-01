@@ -133,6 +133,53 @@ test('attached block-layout CSV resolves columns by header and keeps explicit X/
   assert.equal(importSummary.autoFailed, 0);
 });
 
+test('new exported column order can be imported without 追番 or combined 座標 columns', async () => {
+  const exportedHeader = 'ジャンル,介援隊コード,ページ数,X_POS,Y_POS,コマ番号,コマ数,コマID,テキスト情報';
+  const columns = resolvePageCsvColumns(parseCSVLine(exportedHeader));
+  assert.deepEqual({
+    genre: columns.genre,
+    code: columns.code,
+    page: columns.page,
+    xPos: columns.xPos,
+    yPos: columns.yPos,
+    frame: columns.frame,
+    size: columns.size,
+    panelId: columns.panelId,
+    text: columns.text,
+    order: columns.order,
+    coordinate: columns.coordinate
+  }, {
+    genre: 0,
+    code: 1,
+    page: 2,
+    xPos: 3,
+    yPos: 4,
+    frame: 5,
+    size: 6,
+    panelId: 7,
+    text: 8,
+    order: -1,
+    coordinate: -1
+  });
+
+  const { sheetUpdates } = await parseRows([
+    exportedHeader,
+    '食事関連,A1234,2,3,1,4,1/8 横（2コマ）,PID-4,',
+    '食事関連,,2,1,2,5,1/16（1コマ）,PID-T,"自由,テキスト"'
+  ]);
+
+  const [codeItem, textItem] = sheetUpdates[1].contentItems;
+  assert.equal(codeItem.frameNo, 4);
+  assert.equal(codeItem.order, 4);
+  assert.equal(codeItem.positionIndex, 2);
+  assert.equal(codeItem.data.code, 'A1234');
+  assert.equal(codeItem.data.panelId, 'PID-4');
+  assert.equal(textItem.frameNo, 5);
+  assert.equal(textItem.positionIndex, 4);
+  assert.equal(textItem.data.text, '自由,テキスト');
+  assert.equal(textItem.data.panelId, 'PID-T');
+});
+
 test('parsePageCsvRows falls back between 追番 and コマ番号 and reports progress every 50 rows', async () => {
   const rows = [HEADER];
   for (let i = 1; i <= 120; i++) {
