@@ -46,6 +46,7 @@ const HEADER_ALIASES = Object.freeze({
   sizeType: ['コマ数', 'コマサイズ', 'サイズ', 'sizetype'],
   kind: ['コマ種別', '種別', 'kind'],
   text: ['テキスト情報', 'テキスト', 'text'],
+  catalogName: ['掲載名', '商品名', 'catalogname', 'productname'],
   coordinate: ['座標', 'coordinate', 'position'],
   xPos: ['xpos', 'x座標'],
   yPos: ['ypos', 'y座標']
@@ -395,6 +396,7 @@ export const parsePdfCropCsv = (content, { parseLine = parseCSVLine } = {}) => {
     const yPos = clampGridPosition(valueAt(values, indexes.yPos)) || coordinate.yPos;
     const order = Number.parseInt(valueAt(values, indexes.order), 10) || 0;
     const frameNumber = Number.parseInt(valueAt(values, indexes.frameNumber), 10) || 0;
+    const catalogName = valueAt(values, indexes.catalogName).normalize('NFKC').trim();
 
     rows.push({
       id: `${pageNumber}-${code}-${csvRow}`,
@@ -405,6 +407,7 @@ export const parsePdfCropCsv = (content, { parseLine = parseCSVLine } = {}) => {
       rawCode,
       code,
       filename: `${code}.jpg`,
+      ...(catalogName ? { catalogName } : {}),
       sizeType,
       rowSpan,
       colSpan,
@@ -475,6 +478,7 @@ export const pdfTextItemsContainCode = (textItems, row, bounds = DEFAULT_PDF_GRI
 };
 
 export const MAX_PDF_CROP_TEXT_LENGTH = 4000;
+export const PDF_CROP_TEXT_VERSION = 2;
 
 const compactPdfText = (values) => values
   .map((value) => String(value || '').normalize('NFKC').trim())
@@ -484,17 +488,280 @@ const compactPdfText = (values) => values
   .replace(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])\s+(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu, '$1')
   .trim();
 
+const getPdfTextItemCenter = (item) => ({
+  x: Number(item?.x || 0) + Math.max(0, Number(item?.width || 0)) / 2,
+  y: Number(item?.y || 0) - Math.max(0, Number(item?.height || 0)) * 0.34
+});
+
+const isTextItemCenteredInRect = (item, rect) => {
+  const center = getPdfTextItemCenter(item);
+  return center.x >= rect.x
+    && center.x <= rect.x + rect.width
+    && center.y >= rect.y
+    && center.y <= rect.y + rect.height;
+};
+
+const sortPdfTextItemsForReading = (items = []) => {
+  const positioned = items.map((item) => ({
+    item,
+    center: getPdfTextItemCenter(item),
+    height: Math.max(0, Number(item?.height || 0))
+  })).sort((left, right) => left.center.y - right.center.y || left.center.x - right.center.x);
+  const lines = [];
+
+  positioned.forEach((entry) => {
+    const currentLine = lines[lines.length - 1];
+    const tolerance = Math.max(0.003, Math.max(entry.height, currentLine?.maxHeight || 0) * 0.65);
+    if (!currentLine || Math.abs(entry.center.y - currentLine.y) > tolerance) {
+      lines.push({ y: entry.center.y, maxHeight: entry.height, entries: [entry] });
+      return;
+    }
+    currentLine.entries.push(entry);
+    currentLine.y = currentLine.entries.reduce((sum, value) => sum + value.center.y, 0) / currentLine.entries.length;
+    currentLine.maxHeight = Math.max(currentLine.maxHeight, entry.height);
+  });
+
+  return lines.flatMap((line) => line.entries
+    .sort((left, right) => left.center.x - right.center.x)
+    .map((entry) => entry.item.text));
+};
+
+const intersectPdfRects = (left, right) => {
+  if (!left) return right || null;
+  if (!right) return left;
+  const x = Math.max(left.x, right.x);
+  const y = Math.max(left.y, right.y);
+  const rightEdge = Math.min(left.x + left.width, right.x + right.width);
+  const bottomEdge = Math.min(left.y + left.height, right.y + right.height);
+  if (rightEdge <= x || bottomEdge <= y) return null;
+  return { x, y, width: rightEdge - x, height: bottomEdge - y };
+};
+
+// 自動枠が隣接コマ側へ広がっても、文字はCSVグリッドと文字アンカーの内側だけから取得する。
+// 手動枠はユーザーが確定した範囲をそのまま尊重する。
+export const resolvePdfTextExtractionRect = ({ cropRect, gridRect, textRect, isManual = false } = {}) => {
+  if (isManual) return cropRect || textRect || gridRect || null;
+  let resolved = intersectPdfRects(cropRect, gridRect) || gridRect || cropRect || null;
+  if (textRect) resolved = intersectPdfRects(resolved, textRect) || resolved;
+  return resolved;
+};
+
 // 指定矩形 (正規化座標) 内の文字を保存用に整形して返す
 export const extractPdfTextInRect = (textItems, rect, maxLength = MAX_PDF_CROP_TEXT_LENGTH) => {
   if (!Array.isArray(textItems) || !rect) return { text: '', truncated: false };
-  const compacted = compactPdfText(textItems
-    .filter((item) => isTextItemInRect(item, rect))
-    .map((item) => item.text));
+  const compacted = compactPdfText(sortPdfTextItemsForReading(textItems
+    .filter((item) => isTextItemCenteredInRect(item, rect))));
   const safeMaxLength = Math.max(0, Number.parseInt(maxLength, 10) || 0);
   if (!safeMaxLength || compacted.length <= safeMaxLength) {
     return { text: compacted, truncated: false };
   }
   return { text: compacted.slice(0, safeMaxLength), truncated: true };
+};
+
+const findPrimaryPrice = (candidates, referenceIndex) => {
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((left, right) => {
+    if (referenceIndex < 0) return left.index - right.index;
+    const leftDistance = Math.abs(left.index - referenceIndex) + (left.index < referenceIndex ? 10000 : 0);
+    const rightDistance = Math.abs(right.index - referenceIndex) + (right.index < referenceIndex ? 10000 : 0);
+    return leftDistance - rightDistance;
+  })[0];
+};
+
+// 金額を単一値に決め打ちせず候補も残す。将来の検索・突合では primary と候補の両方を利用できる。
+export const extractPdfPriceFields = (sourceText = '', code = '') => {
+  const normalizedText = String(sourceText || '').normalize('NFKC');
+  const normalizedCode = normalizePdfCropCode(code);
+  const candidates = [];
+  const seen = new Set();
+  const pricePattern = /[¥￥]\s*([0-9][0-9,]*)/g;
+  let match;
+  while ((match = pricePattern.exec(normalizedText)) !== null) {
+    const amount = Number.parseInt(match[1].replace(/,/g, ''), 10);
+    if (!Number.isFinite(amount)) continue;
+    const prefix = normalizedText.slice(Math.max(0, match.index - 12), match.index);
+    const taxType = /税\s*抜/.test(prefix) ? 'excluding' : 'including';
+    const key = `${taxType}:${amount}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ amount, taxType, text: match[0].replace(/\s+/g, ''), index: match.index });
+  }
+
+  const codeIndex = normalizedCode ? normalizedText.toUpperCase().indexOf(normalizedCode) : -1;
+  const including = findPrimaryPrice(candidates.filter((candidate) => candidate.taxType === 'including'), codeIndex);
+  const excludingReference = including?.index ?? codeIndex;
+  const excluding = findPrimaryPrice(candidates.filter((candidate) => candidate.taxType === 'excluding'), excludingReference);
+  const compactCandidates = candidates.slice(0, 20).map((candidate) => ({
+    amount: candidate.amount,
+    taxType: candidate.taxType,
+    text: candidate.text
+  }));
+
+  return {
+    ...(including ? { priceIncludingTax: including.amount } : {}),
+    ...(excluding ? { priceExcludingTax: excluding.amount } : {}),
+    ...(compactCandidates.length > 0 ? { priceCandidates: compactCandidates } : {}),
+    priceExtractionConfidence: including && codeIndex >= 0 && including.index >= codeIndex && including.index - codeIndex <= 200
+      ? 'high'
+      : (including ? 'medium' : 'none')
+  };
+};
+
+const uniqueStrings = (values, limit) => [...new Set(values.filter(Boolean))].slice(0, limit);
+
+const extractHandlingMarkers = (text) => uniqueStrings(
+  [...text.matchAll(/[（(]\s*([A-Z]{1,3})\s*[）)]/gi)].map((match) => `(${match[1].toUpperCase()})`),
+  20
+);
+
+const extractSpecificationDetails = (text) => {
+  const specifications = uniqueStrings(text
+    .split('●')
+    .slice(1)
+    .map((value) => value
+      .split(/(?=在庫商品|直送商品|メーカー直送|受注生産|返品不可|株式会社|有限会社|\(株\))/)[0]
+      .trim())
+    .filter(Boolean)
+    .map((value) => `●${value.slice(0, 300)}`), 30);
+  return {
+    specifications,
+    compositionDetails: specifications.filter((value) => /成分|原材料|栄養/.test(value)).slice(0, 12),
+    materialDetails: specifications.filter((value) => /材質|素材/.test(value)).slice(0, 12)
+  };
+};
+
+const extractCatchCopyCandidates = (text, productName, code) => {
+  const normalizedProductName = String(productName || '').normalize('NFKC').trim();
+  const normalizedCode = normalizePdfCropCode(code);
+  const chunks = [];
+  let current = '';
+  for (const character of text) {
+    current += character;
+    if (/[。！？!?♪]/.test(character) || current.length >= 180) {
+      chunks.push(current);
+      current = '';
+    }
+  }
+  if (current) chunks.push(current);
+
+  const proofBoilerplate = /校正|変更あり|変更なし|ご返答|メール到着|カタログ紙面|商品情報|メーカーご担当|営業企画部|アップをお願い|JANコード|CMCystem/i;
+  return uniqueStrings(chunks.map((value) => {
+    let candidate = value.replace(/\s+/g, ' ').trim();
+    if (normalizedProductName) candidate = candidate.replace(normalizedProductName, '').trim();
+    if (normalizedCode && candidate.toUpperCase().includes(normalizedCode)) {
+      candidate = candidate.slice(candidate.toUpperCase().lastIndexOf(normalizedCode) + normalizedCode.length).trim();
+    }
+    if (/[¥￥]/.test(candidate)) {
+      candidate = candidate.replace(/^.*[¥￥]\s*[0-9][0-9,]*\s*[）)]?\s*/, '').trim();
+    }
+    candidate = candidate.replace(/^\d{1,3}\s+/, '').trim();
+    return candidate;
+  }).filter((candidate) => (
+    candidate.length >= 8
+    && candidate.length <= 180
+    && /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(candidate)
+    && !proofBoilerplate.test(candidate)
+    && !candidate.includes('●')
+    && !/[¥￥]/.test(candidate)
+    && !(normalizedCode && candidate.toUpperCase().includes(normalizedCode))
+    && !/税抜|生産国|材質|成分|原材料/.test(candidate)
+  )), 8);
+};
+
+const extractItemNumberCandidates = (text, code) => {
+  const normalizedCode = normalizePdfCropCode(code);
+  const codeIndex = normalizedCode ? text.toUpperCase().indexOf(normalizedCode) : -1;
+  const matches = [];
+  const addMatches = (pattern, confidence) => {
+    for (const match of text.matchAll(pattern)) {
+      const value = String(match[0] || '').toUpperCase();
+      if (!value || value === normalizedCode || value.includes(`-${normalizedCode}`)) continue;
+      if (/^\d{1,2}-\d{1,2}$/.test(value)) continue;
+      matches.push({ value, index: match.index ?? 0, confidence });
+    }
+  };
+
+  addMatches(/(?<![A-Z0-9])[A-Z0-9]{2,10}-[A-Z0-9-]{2,14}(?![A-Z0-9])/gi, 'high');
+  addMatches(/(?<![A-Z0-9])(?=[A-Z0-9]{5,18}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{5,18}(?![A-Z0-9])/gi, 'medium');
+
+  if (codeIndex >= 0) {
+    const nearbyStart = Math.max(0, codeIndex - 60);
+    const nearby = text.slice(nearbyStart, Math.min(text.length, codeIndex + normalizedCode.length + 100));
+    for (const match of nearby.matchAll(/(?<![A-Z0-9,])\d{4,8}(?![A-Z0-9,])/gi)) {
+      const index = nearbyStart + (match.index ?? 0);
+      const suffix = text.slice(index + match[0].length, index + match[0].length + 5);
+      const prefix = text.slice(Math.max(0, index - 2), index);
+      if (/^(?:g|kg|mg|mL|L|cm|mm|枚|本|個|食|円|kcal)/i.test(suffix.trim())) continue;
+      if (/[¥￥]/.test(prefix)) continue;
+      matches.push({ value: match[0], index, confidence: 'medium' });
+    }
+  }
+
+  const candidates = [];
+  const seen = new Set();
+  matches.sort((left, right) => {
+    if (codeIndex < 0) return left.index - right.index;
+    return Math.abs(left.index - codeIndex) - Math.abs(right.index - codeIndex);
+  }).forEach((match) => {
+    if (seen.has(match.value)) return;
+    seen.add(match.value);
+    candidates.push(match);
+  });
+  const limited = candidates.slice(0, 20);
+  return {
+    ...(limited[0] ? {
+      itemNumber: limited[0].value,
+      itemNumberExtractionConfidence: limited[0].confidence
+    } : {}),
+    itemNumberCandidates: limited.map((candidate) => candidate.value)
+  };
+};
+
+export const extractPdfCatalogDetails = (sourceText = '', { code = '', productName = '' } = {}) => {
+  const text = String(sourceText || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const handlingMarkers = extractHandlingMarkers(text);
+  const availabilityLabels = uniqueStrings([
+    ...(/在庫商品/.test(text) ? ['在庫商品'] : []),
+    ...(/(?:メーカー直送|直送商品|直送品|直送)/.test(text) ? ['直送'] : []),
+    ...(/受注生産/.test(text) ? ['受注生産'] : []),
+    ...(/返品不可/.test(text) ? ['返品不可'] : []),
+    ...(/ケース販売/.test(text) ? ['ケース販売'] : [])
+  ], 10);
+  const specificationData = extractSpecificationDetails(text);
+  const catchCopyCandidates = extractCatchCopyCandidates(text, productName, code);
+  const itemNumberData = extractItemNumberCandidates(text, code);
+  const hasStock = availabilityLabels.includes('在庫商品');
+  const hasDirect = availabilityLabels.includes('直送');
+
+  return {
+    version: 1,
+    ...itemNumberData,
+    ...(catchCopyCandidates[0] ? {
+      catchCopy: catchCopyCandidates[0],
+      catchCopyExtractionConfidence: 'medium'
+    } : {}),
+    catchCopyCandidates,
+    availability: hasStock && hasDirect ? 'mixed' : (hasStock ? 'stock' : (hasDirect ? 'direct' : 'unknown')),
+    availabilityLabels,
+    handlingMarkers,
+    hasDemoMarker: handlingMarkers.includes('(D)') || /デモ機/.test(text),
+    ...specificationData
+  };
+};
+
+export const extractPdfCatalogTextData = ({ textItems = [], rect, code = '', catalogName = '' } = {}) => {
+  const sourceText = extractPdfTextInRect(textItems, rect);
+  const productName = String(catalogName || '').normalize('NFKC').trim();
+  return {
+    sourceText: sourceText.text,
+    sourceTextTruncated: sourceText.truncated,
+    sourceTextVersion: PDF_CROP_TEXT_VERSION,
+    catalogCode: normalizePdfCropCode(code),
+    productName,
+    productNameSource: productName ? 'csv' : 'unavailable',
+    ...extractPdfPriceFields(sourceText.text, code),
+    catalogTextData: extractPdfCatalogDetails(sourceText.text, { code, productName })
+  };
 };
 
 export const extractPdfCropText = (

@@ -1,6 +1,11 @@
 import { normalizeCode } from './productCodes.js';
 import { buildDefaultPanels } from './panels.js';
-import { fillPanelArea, findFirstPlaceableIndex, getSpansFromSizeTypeRobust } from './panelLayout.js';
+import {
+  canPlacePanelAt,
+  fillPanelArea,
+  findFirstPlaceableIndex,
+  getSpansFromSizeTypeRobust
+} from './panelLayout.js';
 
 // 台割ページ CSV 取り込みの純粋ロジック。
 // App.jsx 側は「ファイル読込 → parsePageCsvRows → buildImportedSheets → 永続化 → buildPageCsvImportReport」の順に呼ぶ。
@@ -10,6 +15,74 @@ export const PAGE_CSV_MIN_COLUMNS = 6;
 export const PAGE_CSV_PROGRESS_INTERVAL = 50;
 export const IMAGE_MATCH_THRESHOLD = 90;
 const DEFAULT_SIZE_TYPE = '1/16（1コマ）';
+
+const normalizeHeader = (value = '') => String(value)
+  .normalize('NFKC')
+  .trim()
+  .toLowerCase()
+  .replace(/[\s_-]+/g, '');
+
+const PAGE_CSV_HEADER_ALIASES = Object.freeze({
+  genre: ['ジャンル', '掲載ブロック'],
+  page: ['ページ数', 'ページ番号', 'ページ', 'page', 'pageno', '頁'],
+  order: ['追番', '順番', 'order'],
+  frame: ['コマ番号', '枠番号', 'frameno'],
+  code: ['介援隊コード', '介援隊cd', '商品コード', 'code'],
+  size: ['コマ数', 'コマサイズ', 'サイズ', 'sizetype'],
+  dummyLabel: ['ダミーラベル種別', 'ダミー種別'],
+  kind: ['コマ種別', '種別', 'kind'],
+  text: ['テキスト情報', 'テキスト', 'text'],
+  coordinate: ['座標', 'coordinate', 'position'],
+  panelId: ['コマid', 'panelid'],
+  xPos: ['xpos', 'x座標'],
+  yPos: ['ypos', 'y座標'],
+  catalogName: ['掲載名', '商品名']
+});
+
+const LEGACY_PAGE_CSV_COLUMNS = Object.freeze({
+  genre: 0,
+  page: 1,
+  order: 2,
+  frame: 3,
+  code: 4,
+  size: 5,
+  dummyLabel: 6,
+  kind: -1,
+  text: 7,
+  coordinate: 8,
+  panelId: 9,
+  xPos: 10,
+  yPos: 11,
+  catalogName: -1
+});
+
+const findHeaderIndex = (headers, aliases) => {
+  const normalizedAliases = new Set(aliases.map(normalizeHeader));
+  return headers.findIndex((header) => normalizedAliases.has(normalizeHeader(header)));
+};
+
+export const resolvePageCsvColumns = (headers = []) => {
+  const matched = Object.fromEntries(Object.entries(PAGE_CSV_HEADER_ALIASES).map(([key, aliases]) => (
+    [key, findHeaderIndex(headers, aliases)]
+  )));
+  const legacyLayout = matched.genre === 0 && matched.page === 1 && matched.code === 4 && matched.size === 5;
+  return Object.fromEntries(Object.keys(PAGE_CSV_HEADER_ALIASES).map((key) => [
+    key,
+    matched[key] >= 0 ? matched[key] : (legacyLayout ? LEGACY_PAGE_CSV_COLUMNS[key] : -1)
+  ]));
+};
+
+const valueAt = (cols, index) => index >= 0 ? String(cols[index] ?? '') : '';
+
+const parseGridPosition = (value) => {
+  const parsed = Number.parseInt(String(value || '').normalize('NFKC'), 10);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 4 ? parsed : null;
+};
+
+const parseGridCoordinate = (value = '') => {
+  const match = String(value).normalize('NFKC').match(/X\s*([1-4])\s*Y\s*([1-4])/i);
+  return match ? { xPos: Number(match[1]), yPos: Number(match[2]) } : { xPos: null, yPos: null };
+};
 
 // 全角英数字を半角に変換＆小文字化
 export const normalizeImageSearchText = (value) => (
@@ -79,6 +152,8 @@ export const parsePageCsvRows = async (rows, { parseLine, images = [], genres = 
   const searchableImages = buildSearchableImages(images);
   const sheetUpdates = {};
   let maxPageIndex = -1;
+  const headers = rows.length > 0 ? parseLine(rows[0]) : [];
+  const indexes = resolvePageCsvColumns(headers);
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -91,29 +166,34 @@ export const parsePageCsvRows = async (rows, { parseLine, images = [], genres = 
     const cols = parseLine(row);
     if (cols.length < PAGE_CSV_MIN_COLUMNS) continue;
 
-    // カラム定義: 0:ジャンル, 1:ページ数, 2:追番, 3:コマ番号, 4:介援隊コード, 5:コマ数, 6:ダミーラベル種別, 7:テキスト情報, 8:座標(無視), 9:コマID
-    const genreLabel = cols[0];
-    const pageNum = parseInt(cols[1], 10);
-    const panelNumRaw = parseInt(cols[2], 10);
-    const frameNumRaw = parseInt(cols[3], 10);
+    const genreLabel = valueAt(cols, indexes.genre).trim();
+    const pageNum = parseInt(valueAt(cols, indexes.page), 10);
+    const panelNumRaw = parseInt(valueAt(cols, indexes.order), 10);
+    const frameNumRaw = parseInt(valueAt(cols, indexes.frame), 10);
     const frameNum = (!isNaN(frameNumRaw) && frameNumRaw > 0)
       ? frameNumRaw
       : ((!isNaN(panelNumRaw) && panelNumRaw > 0) ? panelNumRaw : NaN);
     const panelNum = (!isNaN(panelNumRaw) && panelNumRaw > 0)
       ? panelNumRaw
       : ((!isNaN(frameNumRaw) && frameNumRaw > 0) ? frameNumRaw : NaN);
-    const codeVal = cols[4] === 'ダミーコマ' ? '' : (cols[4] || '').trim();
-    const isDummyMarker = cols[4] === 'ダミーコマ';
-    const sizeVal = cols[5] || DEFAULT_SIZE_TYPE;
-    const textVal = (cols[7] || '').trim();
-    // J列: コマID（台割には反映しない。介援隊コードに紐づけてデータとして保持）
-    const panelIdVal = (cols[9] || '').trim();
+    const rawCode = valueAt(cols, indexes.code).trim();
+    const kindVal = valueAt(cols, indexes.kind).trim();
+    const codeVal = rawCode === 'ダミーコマ' ? '' : rawCode;
+    const isNonProductKind = !!kindVal && !/^(商品|製品)$/i.test(kindVal);
+    const isDummyMarker = rawCode === 'ダミーコマ' || (!codeVal && isNonProductKind);
+    const sizeVal = valueAt(cols, indexes.size).trim() || DEFAULT_SIZE_TYPE;
+    const textVal = valueAt(cols, indexes.text).trim();
+    const panelIdVal = valueAt(cols, indexes.panelId).trim();
+    const coordinate = parseGridCoordinate(valueAt(cols, indexes.coordinate));
+    const xPos = parseGridPosition(valueAt(cols, indexes.xPos)) || coordinate.xPos;
+    const yPos = parseGridPosition(valueAt(cols, indexes.yPos)) || coordinate.yPos;
+    const positionIndex = xPos && yPos ? (yPos - 1) * 4 + xPos - 1 : null;
 
     const isFixed = !isNaN(frameNum) && frameNum > 0;
 
-    // ページ番号は必須。コマ番号か追番のどちらかは必須。
+    // ページ番号は必須。コマ番号・追番・明示座標のいずれかは必須。
     if (isNaN(pageNum)) continue;
-    if (!isFixed && (isNaN(panelNum))) continue;
+    if (!isFixed && isNaN(panelNum) && positionIndex === null) continue;
 
     const pageIndex = pageNum - 1;
     if (pageIndex > maxPageIndex) maxPageIndex = pageIndex;
@@ -137,7 +217,7 @@ export const parsePageCsvRows = async (rows, { parseLine, images = [], genres = 
       targetCode = codeVal ? normalizeCode(codeVal) : null;
     } else if (isDummyMarker) {
       // ダミーコマの種別を判定: cols[6]（ラベル列）、cols[5]（コマ数列）、cols[4]の順にチェック
-      const dummyLabel = (cols[6] || '').trim();
+      const dummyLabel = valueAt(cols, indexes.dummyLabel).trim() || kindVal;
       if (dummyLabel === 'タイトル' || sizeVal.includes('タイトル')) {
         targetLabel = 'タイトル';
       } else if (dummyLabel === '埋草' || sizeVal.includes('埋草')) {
@@ -185,7 +265,7 @@ export const parsePageCsvRows = async (rows, { parseLine, images = [], genres = 
       }
     }
 
-    sheetUpdates[pageIndex].contentItems.push({
+    const contentItem = {
       isFixed: isFixed,
       frameNo: isFixed ? frameNum : -1,
       order: isNaN(panelNum) ? 9999 : panelNum,
@@ -197,9 +277,11 @@ export const parsePageCsvRows = async (rows, { parseLine, images = [], genres = 
         sizeType: sizeVal,
         text: textVal,
         isText: isText,
-        panelId: panelIdVal || null  // J列から読み込んだコマID（台割には非表示）
+        panelId: panelIdVal || null
       }
-    });
+    };
+    if (positionIndex !== null) contentItem.positionIndex = positionIndex;
+    sheetUpdates[pageIndex].contentItems.push(contentItem);
   }
 
   return { sheetUpdates, maxPageIndex };
@@ -271,12 +353,22 @@ export const buildImportedSheets = async ({
       const { data } = item;
       const { r: rowSpan, c: colSpan } = getSpansFromSizeTypeRobust(data.sizeType);
 
-      // 前のコマ配置後の occupied を考慮し、先頭から最初に配置可能な位置を探す
-      // コマ番号 (item.order) を開始座標のヒントとして使用
-      // ユーザーの要件: コマ番号1→X1Y1, 2→X2Y1 ... 等。
-      // findFirstPlaceableIndex に第4引数として (order-1) を渡す。
-      const startCandidate = (item.order > 0 && item.order <= 16) ? item.order - 1 : 0;
-      const resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied, startCandidate);
+      // X_POS / Y_POS または「X1Y1」座標があれば、その位置を最優先する。
+      // 重複・グリッド外の場合だけ、従来どおりコマ番号順の空き位置へ退避する。
+      const hasExplicitPosition = Number.isInteger(item.positionIndex);
+      let resolvedStartIdx = -1;
+      if (hasExplicitPosition) {
+        if (canPlacePanelAt(item.positionIndex, rowSpan, colSpan, occupied)) {
+          resolvedStartIdx = item.positionIndex;
+          importSummary.fixedSuccess++;
+        } else {
+          importSummary.fixedFailed++;
+        }
+      }
+      if (resolvedStartIdx === -1) {
+        const startCandidate = (item.order > 0 && item.order <= 16) ? item.order - 1 : 0;
+        resolvedStartIdx = findFirstPlaceableIndex(rowSpan, colSpan, occupied, startCandidate);
+      }
 
       if (resolvedStartIdx === -1) {
         importSummary.autoFailed++;
@@ -292,7 +384,8 @@ export const buildImportedSheets = async ({
         hidden: false
       };
       fillPanelArea(newPanels, resolvedStartIdx, rowSpan, colSpan, occupied);
-      importSummary.autoSuccess++;
+      // 明示位置が衝突して空きへ退避した場合も、自動配置として記録する。
+      if (!hasExplicitPosition || resolvedStartIdx !== item.positionIndex) importSummary.autoSuccess++;
     }
 
     currentSheet.panels = newPanels;

@@ -7,7 +7,8 @@ import {
   buildPageCsvImportReport,
   buildSearchableImages,
   findBestImageMatch,
-  parsePageCsvRows
+  parsePageCsvRows,
+  resolvePageCsvColumns
 } from '../src/domain/pageCsvImport.js';
 import { parseCSVLine } from '../src/lib/csv.js';
 
@@ -57,12 +58,12 @@ test('parsePageCsvRows resolves text / dummy / matched code / unmatched code row
     '食事関連,1,5,5,自由ラベル,1/16（1コマ）,,,X2Y2,',
     '',
     '入浴関連,,1,1,A1234,1/16（1コマ）,,,X1Y1,',   // ページ番号なし → skip
-    '入浴関連,3,,,A1234,1/16（1コマ）,,,X1Y1,'     // 追番・コマ番号なし → skip
+    '入浴関連,3,,,A1234,1/16（1コマ）,,,X1Y1,'     // 追番・コマ番号なしでも座標があるため取り込む
   ];
 
   const { sheetUpdates, maxPageIndex } = await parseRows(rows);
-  assert.equal(maxPageIndex, 0);
-  assert.deepEqual(Object.keys(sheetUpdates), ['0']);
+  assert.equal(maxPageIndex, 2);
+  assert.deepEqual(Object.keys(sheetUpdates), ['0', '2']);
 
   const page = sheetUpdates[0];
   assert.equal(page.genre, 'meal');
@@ -70,7 +71,7 @@ test('parsePageCsvRows resolves text / dummy / matched code / unmatched code row
 
   const [textItem, dummyItem, codeItem, unmatchedItem, labelItem] = page.contentItems;
   assert.deepEqual(textItem, {
-    isFixed: true, frameNo: 1, order: 1,
+    isFixed: true, frameNo: 1, order: 1, positionIndex: 0,
     data: { code: null, image: null, imageId: null, label: 'テキスト', sizeType: '1/16（1コマ）', text: '自由テキスト', isText: true, panelId: null }
   });
   assert.equal(dummyItem.data.label, 'タイトル');
@@ -85,6 +86,51 @@ test('parsePageCsvRows resolves text / dummy / matched code / unmatched code row
 
   assert.deepEqual(page.matchDetails, [{ code: 'A1234', imageName: 'A1234.jpg', score: 100, csvRow: 4 }]);
   assert.deepEqual(page.unmatchedCodes, [{ code: 'Z9999', csvRow: 5, bestScore: 0, bestMatch: 'なし' }]);
+});
+
+test('attached block-layout CSV resolves columns by header and keeps explicit X/Y placement', async () => {
+  const attachedHeader = 'コマID,掲載ブロック,ページ番号,X_POS,Y_POS,コマ番号,コマ種別,コマサイズ,介援隊コード,掲載名';
+  const columns = resolvePageCsvColumns(parseCSVLine(attachedHeader));
+  assert.deepEqual({
+    panelId: columns.panelId,
+    genre: columns.genre,
+    page: columns.page,
+    xPos: columns.xPos,
+    yPos: columns.yPos,
+    frame: columns.frame,
+    kind: columns.kind,
+    size: columns.size,
+    code: columns.code
+  }, { panelId: 0, genre: 1, page: 2, xPos: 3, yPos: 4, frame: 5, kind: 6, size: 7, code: 8 });
+
+  const rows = [
+    attachedHeader,
+    '0065438,食事関連,4,1,1,1,タイトル,1/8 横（2コマ）,,タイトル',
+    '0059208,食事関連,4,3,2,4,商品,1/8 横（2コマ）,A1234,商品名'
+  ];
+  const { sheetUpdates, maxPageIndex } = await parseRows(rows);
+  assert.equal(maxPageIndex, 3);
+  assert.equal(sheetUpdates[3].genre, 'meal');
+  assert.equal(sheetUpdates[3].contentItems[0].positionIndex, 0);
+  assert.equal(sheetUpdates[3].contentItems[0].data.label, 'タイトル');
+  assert.equal(sheetUpdates[3].contentItems[0].data.panelId, '0065438');
+  assert.equal(sheetUpdates[3].contentItems[1].positionIndex, 6);
+  assert.equal(sheetUpdates[3].contentItems[1].data.code, 'A1234');
+  assert.equal(sheetUpdates[3].contentItems[1].data.imageId, 'img-a1234');
+
+  const { localSheets, importSummary } = await buildImportedSheets({
+    sheets: [],
+    sheetUpdates,
+    finalPageCount: 4,
+    generateId: () => 'sheet-id'
+  });
+  assert.equal(localSheets[3].panels[0].label, 'タイトル');
+  assert.equal(localSheets[3].panels[1].hidden, true);
+  assert.equal(localSheets[3].panels[6].code, 'A1234');
+  assert.equal(localSheets[3].panels[7].hidden, true);
+  assert.equal(importSummary.fixedSuccess, 2);
+  assert.equal(importSummary.autoSuccess, 0);
+  assert.equal(importSummary.autoFailed, 0);
 });
 
 test('parsePageCsvRows falls back between 追番 and コマ番号 and reports progress every 50 rows', async () => {

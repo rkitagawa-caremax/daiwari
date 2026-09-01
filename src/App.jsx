@@ -87,6 +87,7 @@ import {
 } from './domain/panelArrange';
 import {
   isSameStockImageList,
+  normalizeCloudImageDocuments,
   normalizeStockImages
 } from './domain/images';
 import { buildPdfExportPlan } from './domain/pdfExport';
@@ -124,6 +125,10 @@ import {
   buildExcludedItemsCsvContent,
   buildPageCsvContent
 } from './domain/pageCsv';
+import {
+  buildCatalogTextCsvContent,
+  countCatalogTextExportImages
+} from './domain/catalogTextCsv';
 import {
   buildImportedSheets,
   buildPageCsvImportReport,
@@ -883,14 +888,7 @@ export default function App() {
       try {
         const snapshot = await getDocs(imagesCollection);
         if (isCancelled) return;
-        const loadedImages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        const loadedImageDataById = {};
-        loadedImages.forEach((img) => {
-          if (img?.id && (img?.data || img?.image)) {
-            loadedImageDataById[img.id] = img.data || img.image;
-          }
-        });
-        const normalizedLoadedImages = normalizeStockImages(loadedImages, loadedImageDataById);
+        const normalizedLoadedImages = normalizeCloudImageDocuments(snapshot.docs);
         syncImages((prev) => (isSameStockImageList(prev, normalizedLoadedImages) ? prev : normalizedLoadedImages));
         await idbHelper.setItem(CLOUD_IMAGES_CACHE_KEY, {
           items: normalizedLoadedImages,
@@ -2570,6 +2568,19 @@ export default function App() {
     });
   }, []);
 
+  const refreshImageLibrary = useCallback(async (currentImages = []) => {
+    if (USE_LOCAL_STORAGE) return currentImages;
+    if (!imagesCollection) {
+      throw new Error('画像ライブラリに接続できません。時間をおいて再度お試しください。');
+    }
+
+    const snapshot = await getDocs(imagesCollection);
+    const refreshedImages = normalizeCloudImageDocuments(snapshot.docs);
+    syncImages((previous) => (isSameStockImageList(previous, refreshedImages) ? previous : refreshedImages));
+    persistCloudImagesCache(refreshedImages);
+    return refreshedImages;
+  }, [imagesCollection, persistCloudImagesCache, syncImages]);
+
   const persistImageEntries = async (entries, onProgress = null) => {
     if (!Array.isArray(entries) || entries.length === 0 || !isAuthenticated) {
       return { successCount: 0, failCount: 0, newImages: [] };
@@ -2590,8 +2601,22 @@ export default function App() {
           ...(entry?.pdfPageNumber ? { pdfPageNumber: entry.pdfPageNumber } : {}),
           ...(entry?.sizeType ? { sizeType: entry.sizeType } : {}),
           ...(entry?.cropRect ? { cropRect: entry.cropRect } : {}),
-          ...(entry?.sourceText ? { sourceText: entry.sourceText, sourceTextVersion: 1 } : {}),
-          ...(entry?.sourceTextTruncated ? { sourceTextTruncated: true } : {})
+          ...(entry?.textExtractionRect ? { textExtractionRect: entry.textExtractionRect } : {}),
+          ...(entry?.sourceText ? {
+            sourceText: entry.sourceText,
+            sourceTextVersion: entry.sourceTextVersion || 1
+          } : {}),
+          ...(entry?.sourceTextTruncated ? { sourceTextTruncated: true } : {}),
+          ...(entry?.catalogCode ? { catalogCode: entry.catalogCode } : {}),
+          ...(entry?.productName ? { productName: entry.productName } : {}),
+          ...(entry?.productNameSource ? { productNameSource: entry.productNameSource } : {}),
+          ...(Number.isFinite(entry?.priceIncludingTax) ? { priceIncludingTax: entry.priceIncludingTax } : {}),
+          ...(Number.isFinite(entry?.priceExcludingTax) ? { priceExcludingTax: entry.priceExcludingTax } : {}),
+          ...(Array.isArray(entry?.priceCandidates) && entry.priceCandidates.length > 0
+            ? { priceCandidates: entry.priceCandidates }
+            : {}),
+          ...(entry?.priceExtractionConfidence ? { priceExtractionConfidence: entry.priceExtractionConfidence } : {}),
+          ...(entry?.catalogTextData ? { catalogTextData: entry.catalogTextData } : {})
         };
         const newImage = {
           id: idbHelper.generateId(),
@@ -3189,9 +3214,39 @@ export default function App() {
     }
   };
 
+  const handleExportCatalogTextCSV = useCallback(async () => {
+    if (isProcessing) return;
+    setIsHiddenImportModalOpen(false);
+    setIsProcessing(true);
+    setProgressValue(0);
+    setProgressMax(1);
+    setProgressMessage(USE_LOCAL_STORAGE
+      ? 'コマテキストCSVを作成しています...'
+      : '画像ライブラリを最新化しています...');
+
+    try {
+      const exportImages = await refreshImageLibrary(images);
+      const exportCount = countCatalogTextExportImages(exportImages);
+      if (exportCount === 0) {
+        showAlert('PDFから取り込んだコマテキストがありません。');
+        return;
+      }
+
+      setProgressMessage(`${exportCount}件のコマテキストCSVを作成しています...`);
+      const csvContent = buildCatalogTextCsvContent(exportImages);
+      downloadTextFile(csvContent, buildDatedCsvFilename('koma_text_export'));
+      setProgressValue(1);
+    } catch (error) {
+      console.error('Catalog text CSV export failed:', error);
+      showAlert('コマテキストCSVの出力に失敗しました: ' + error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [images, isProcessing, refreshImageLibrary, showAlert]);
+
   // --- CSV Import Logic (for Pages) ---
   const handleImportCSV = async (e) => {
-    if (isLockedRef.current) return;
+    if (isLockedRef.current || isProcessing) return;
     const file = e.target.files[0];
     if (!file) return;
 
@@ -3206,11 +3261,14 @@ export default function App() {
       const headers = parseCSVLine(rows[0]);
       if (headers.length < 6) throw new Error('CSVの形式が正しくありません。カラム数が足りません。');
 
+      if (!USE_LOCAL_STORAGE) setProgressMessage("画像ライブラリを最新化しています...");
+      const importImages = await refreshImageLibrary(images);
+
       setProgressMessage("データを解析中...");
 
       const { sheetUpdates, maxPageIndex } = await parsePageCsvRows(rows, {
         parseLine: parseCSVLine,
-        images,
+        images: importImages,
         genres: GENRES,
         onProgress: async (rowIndex, totalRows) => {
           setProgressValue(Math.floor((rowIndex / totalRows) * 100));
@@ -3813,6 +3871,7 @@ export default function App() {
         onClose={() => setIsHiddenImportModalOpen(false)}
         onOpenPageCsvImport={openPageCsvImportFromHiddenMenu}
         onOpenSalesCsvImport={openSalesCsvImportFromHiddenMenu}
+        onExportCatalogTextCsv={handleExportCatalogTextCSV}
         onOpenWorkLogs={openWorkLogDashboardFromHiddenMenu}
       />
 

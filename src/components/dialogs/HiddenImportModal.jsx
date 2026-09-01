@@ -1,11 +1,12 @@
 import React from 'react';
-import { BarChart3, FileText, TrendingUp, Upload, X } from 'lucide-react';
+import { BarChart3, FileDown, FileText, TrendingUp, Upload, X } from 'lucide-react';
 
 const HiddenImportModal = React.memo(({
   isOpen,
   onClose,
   onOpenPageCsvImport,
   onOpenSalesCsvImport,
+  onExportCatalogTextCsv,
   onOpenWorkLogs
 }) => {
   if (!isOpen) return null;
@@ -44,6 +45,14 @@ const HiddenImportModal = React.memo(({
           >
             <TrendingUp size={16} />
             販売数量CSVを取り込む
+          </button>
+
+          <button
+            onClick={onExportCatalogTextCsv}
+            className="w-full m3-btn-tonal flex items-center justify-center gap-2"
+          >
+            <FileDown size={16} />
+            コマテキストCSVを出力
           </button>
 
           <button

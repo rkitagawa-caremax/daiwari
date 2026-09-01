@@ -6,12 +6,13 @@ import {
   buildPdfCropBatchPages,
   buildPdfCropPagePlans,
   DEFAULT_PDF_GRID_BOUNDS,
-  extractPdfTextInRect,
+  extractPdfCatalogTextData,
   getPdfCropRectFromGrid,
   MAX_PDF_CROP_BATCH_PAGES,
   normalizePdfCropCode,
   parsePdfCropCsv,
   pdfTextItemsContainCodeInRect,
+  resolvePdfTextExtractionRect,
   summarizePdfCropPagePlans
 } from '../../domain/pdfCropImport';
 import { calibratePdfCropGrid } from '../../domain/pdfCropGridCalibration';
@@ -498,10 +499,20 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               const pageAutoRects = new Map(pageAutoEntries.map((entry) => [entry.row.id, entry.rect]));
               for (const row of importRows) {
                 const code = normalizePdfCropCode(row.code);
-                const cropRect = pageManualRects[row.id]
-                  || pageAutoRects.get(row.id)
-                  || getPdfCropRectFromGrid(row, pageGrid);
-                const sourceTextData = extractPdfTextInRect(rendered.textItems, cropRect);
+                const manualRect = pageManualRects[row.id];
+                const cropRect = manualRect || pageAutoRects.get(row.id) || getPdfCropRectFromGrid(row, pageGrid);
+                const textExtractionRect = resolvePdfTextExtractionRect({
+                  cropRect,
+                  gridRect: getPdfCropRectFromGrid(row, pageGrid),
+                  textRect: pageTextRects.get(row.id),
+                  isManual: !!manualRect
+                });
+                const sourceTextData = extractPdfCatalogTextData({
+                  textItems: rendered.textItems,
+                  rect: textExtractionRect,
+                  code,
+                  catalogName: row.catalogName
+                });
                 const file = await cropPdfPageToFile({
                   canvas: rendered.canvas,
                   normalizedRect: cropRect,
@@ -515,8 +526,8 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                   pdfPageNumber: page.pdfPageNumber,
                   sizeType: row.sizeType,
                   cropRect,
-                  sourceText: sourceTextData.text,
-                  sourceTextTruncated: sourceTextData.truncated
+                  textExtractionRect,
+                  ...sourceTextData
                 });
                 completed++;
                 setProgress({ current: completed, total, message: `P.${page.catalogPage} ${code} を切り抜きました（${completed}/${total}）` });

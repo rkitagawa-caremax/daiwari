@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   isImageWorkedByUser,
   isSameStockImageList,
+  normalizeCloudImageDocuments,
   normalizeStockImageEntry,
   normalizeStockImages
 } from '../src/domain/images.js';
@@ -37,6 +38,28 @@ test('stock image normalization removes duplicate IDs and duplicate image data',
   ]);
 
   assert.deepEqual(normalized.map((image) => image.id), ['image-1', 'image-3']);
+});
+
+test('cloud image documents are converted into the current library format', () => {
+  const documents = [
+    {
+      id: 'cloud-1',
+      data: () => ({ name: 'E1682.jpg', code: 'E1682', data: 'data:image/jpeg;base64,one' })
+    },
+    {
+      id: 'cloud-2',
+      data: () => ({ name: 'E1690.jpg', image: 'data:image/jpeg;base64,two' })
+    }
+  ];
+
+  const normalized = normalizeCloudImageDocuments(documents);
+
+  assert.deepEqual(normalized.map((image) => image.id), ['cloud-1', 'cloud-2']);
+  assert.deepEqual(normalized.map((image) => image.name), ['E1682.jpg', 'E1690.jpg']);
+  assert.deepEqual(normalized.map((image) => image.data), [
+    'data:image/jpeg;base64,one',
+    'data:image/jpeg;base64,two'
+  ]);
 });
 
 test('stock image list comparison ignores timestamps but detects identity changes', () => {
@@ -76,7 +99,29 @@ test('PDF crop provenance is preserved and compared without affecting legacy ima
     cropRect: { x: 0.1, y: 0.06, width: 0.4, height: 0.2 },
     sourceText: 'アイソカルゼリー 261-E1957',
     sourceTextVersion: 1,
-    sourceTextTruncated: false
+    sourceTextTruncated: false,
+    textExtractionRect: { x: 0.11, y: 0.07, width: 0.38, height: 0.18 },
+    catalogCode: 'E1957',
+    productName: 'アイソカルゼリー',
+    productNameSource: 'csv',
+    priceIncludingTax: 2139,
+    priceExcludingTax: 1980,
+    priceCandidates: [{ amount: 2139, taxType: 'including', text: '¥2,139' }],
+    priceExtractionConfidence: 'high',
+    catalogTextData: {
+      version: 1,
+      itemNumber: 'ABC-123',
+      itemNumberCandidates: ['ABC-123'],
+      catchCopy: 'おいしく栄養補給。',
+      catchCopyCandidates: ['おいしく栄養補給。'],
+      availability: 'stock',
+      availabilityLabels: ['在庫商品'],
+      handlingMarkers: ['(D)'],
+      hasDemoMarker: true,
+      specifications: ['●内容量/100g'],
+      compositionDetails: [],
+      materialDetails: []
+    }
   };
   const normalized = normalizeStockImageEntry(source);
   assert.equal(normalized.sourcePdfName, 'P010.pdf');
@@ -84,6 +129,16 @@ test('PDF crop provenance is preserved and compared without affecting legacy ima
   assert.equal(normalized.sourceText, source.sourceText);
   assert.deepEqual(normalized.cropRect, source.cropRect);
   assert.notEqual(normalized.cropRect, source.cropRect);
+  assert.deepEqual(normalized.textExtractionRect, source.textExtractionRect);
+  assert.notEqual(normalized.textExtractionRect, source.textExtractionRect);
+  assert.deepEqual(normalized.priceCandidates, source.priceCandidates);
+  assert.notEqual(normalized.priceCandidates, source.priceCandidates);
+  assert.equal(normalized.productName, 'アイソカルゼリー');
+  assert.equal(normalized.productNameSource, 'csv');
+  assert.equal(normalized.priceIncludingTax, 2139);
+  assert.deepEqual(normalized.catalogTextData, source.catalogTextData);
+  assert.notEqual(normalized.catalogTextData, source.catalogTextData);
+  assert.notEqual(normalized.catalogTextData.specifications, source.catalogTextData.specifications);
   assert.equal(isSameStockImageList([source], [{ ...source }]), true);
   assert.equal(isSameStockImageList([source], [{ ...source, sourcePage: 11 }]), false);
 });

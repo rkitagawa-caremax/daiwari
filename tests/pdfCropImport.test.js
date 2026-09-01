@@ -8,7 +8,11 @@ import {
   findPdfCropGridConflicts,
   summarizePdfCropPagePlans,
   DEFAULT_PDF_GRID_BOUNDS,
+  extractPdfCatalogTextData,
+  extractPdfCatalogDetails,
   extractPdfCropText,
+  extractPdfPriceFields,
+  extractPdfTextInRect,
   getPdfCropRect,
   inferCatalogStartPage,
   MAX_PDF_CROP_BATCH_PAGES,
@@ -16,6 +20,7 @@ import {
   normalizePdfCropCode,
   parsePdfCropCsv,
   resolvePdfCropCsvColumns,
+  resolvePdfTextExtractionRect,
   pdfTextItemsContainCode,
   updatePdfCropRowSize
 } from '../src/domain/pdfCropImport.js';
@@ -258,6 +263,7 @@ test('parsePdfCropCsv reads the block-layout CSV where the code is in column I',
     rawCode: 'E1894',
     code: 'E1894',
     filename: 'E1894.jpg',
+    catalogName: 'やさしくラクケアシリーズ まるで果物のようなゼリー',
     sizeType: '1/8 横（2コマ）',
     rowSpan: 1,
     colSpan: 2,
@@ -282,6 +288,7 @@ test('resolvePdfCropCsvColumns marks absent columns instead of guessing a positi
     sizeType: 7,
     kind: 6,
     text: -1,
+    catalogName: 9,
     coordinate: -1,
     xPos: 3,
     yPos: 4
@@ -303,10 +310,101 @@ test('resolvePdfCropCsvColumns marks absent columns instead of guessing a positi
     sizeType: 5,
     kind: -1,
     text: 7,
+    catalogName: -1,
     coordinate: 8,
     xPos: 10,
     yPos: 11
   });
+});
+
+test('PDF text extraction excludes a page-wide header whose center is outside the panel', () => {
+  const rect = { x: 0.1, y: 0.1, width: 0.2, height: 0.2 };
+  const result = extractPdfTextInRect([
+    { text: 'ページ全体の校正指示', x: 0.05, y: 0.12, width: 0.9, height: 0.01 },
+    { text: '商品名', x: 0.12, y: 0.14, width: 0.08, height: 0.01 },
+    { text: '261-E1955', x: 0.12, y: 0.25, width: 0.06, height: 0.01 }
+  ], rect);
+
+  assert.equal(result.text, '商品名 261-E1955');
+});
+
+test('PDF price extraction separates tax-included and tax-excluded values and keeps candidates', () => {
+  const result = extractPdfPriceFields(
+    '明治メイバランス 261-E1955 各 ¥ 5,832 (税抜¥5,400) 参考価格 ¥6,000',
+    'E1955'
+  );
+
+  assert.equal(result.priceIncludingTax, 5832);
+  assert.equal(result.priceExcludingTax, 5400);
+  assert.equal(result.priceExtractionConfidence, 'high');
+  assert.deepEqual(result.priceCandidates, [
+    { amount: 5832, taxType: 'including', text: '¥5,832' },
+    { amount: 5400, taxType: 'excluding', text: '¥5,400' },
+    { amount: 6000, taxType: 'including', text: '¥6,000' }
+  ]);
+});
+
+test('PDF catalog text data uses the CSV catalog name and stores extraction version', () => {
+  const result = extractPdfCatalogTextData({
+    textItems: [
+      { text: '261-E1955', x: 0.12, y: 0.15, width: 0.06, height: 0.01 },
+      { text: '¥5,832', x: 0.12, y: 0.2, width: 0.04, height: 0.01 }
+    ],
+    rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+    code: '261-E1955',
+    catalogName: ' 明治メイバランスブリックゼリー '
+  });
+
+  assert.equal(result.catalogCode, 'E1955');
+  assert.equal(result.productName, '明治メイバランスブリックゼリー');
+  assert.equal(result.productNameSource, 'csv');
+  assert.equal(result.sourceTextVersion, 2);
+  assert.equal(result.priceIncludingTax, 5832);
+});
+
+test('PDF catalog details retain item numbers, handling markers, stock status and bullet specifications', () => {
+  const result = extractPdfCatalogDetails(
+    '使い捨て防水エプロン。食べこぼしを吸収するロングエプロン。 261-E0503 KN-932 10枚入 ¥1,028 (税抜¥935) ●材質/表面:パルプ、裏面:ポリエチレンラミネート ●成分/パルプ、ポリエチレン ●生産国/日本 ●50 (D) (株)ストリックスデザイン 在庫商品',
+    { code: 'E0503', productName: '使い捨て防水エプロン' }
+  );
+
+  assert.equal(result.itemNumber, 'KN-932');
+  assert.ok(result.itemNumberCandidates.includes('KN-932'));
+  assert.equal(result.availability, 'stock');
+  assert.deepEqual(result.availabilityLabels, ['在庫商品']);
+  assert.ok(result.handlingMarkers.includes('(D)'));
+  assert.equal(result.hasDemoMarker, true);
+  assert.ok(result.specifications.includes('●材質/表面:パルプ、裏面:ポリエチレンラミネート'));
+  assert.deepEqual(result.compositionDetails, ['●成分/パルプ、ポリエチレン']);
+  assert.deepEqual(result.materialDetails, ['●材質/表面:パルプ、裏面:ポリエチレンラミネート']);
+  assert.equal(result.catchCopy, '食べこぼしを吸収するロングエプロン。');
+});
+
+test('PDF catalog details preserve numeric and unhyphenated item-number candidates and direct shipping', () => {
+  const numeric = extractPdfCatalogDetails('261-E1911 92084 ¥1,408 (税抜¥1,280) メーカー直送', { code: 'E1911' });
+  const alphaNumeric = extractPdfCatalogDetails('261-S1090 SWR142SAL U型シート ¥39,600', { code: 'S1090' });
+  const copyAfterPrice = extractPdfCatalogDetails(
+    '536-050、536-051 261-S0793 各¥39,600 (税抜¥36,000) これなら邪魔にならない♪最薄クラスの折りたたみ幅15cm。',
+    { code: 'S0793' }
+  );
+
+  assert.equal(numeric.itemNumber, '92084');
+  assert.equal(numeric.availability, 'direct');
+  assert.deepEqual(numeric.availabilityLabels, ['直送']);
+  assert.ok(alphaNumeric.itemNumberCandidates.includes('SWR142SAL'));
+  assert.deepEqual(copyAfterPrice.catchCopyCandidates.slice(0, 2), [
+    'これなら邪魔にならない♪',
+    '最薄クラスの折りたたみ幅15cm。'
+  ]);
+});
+
+test('automatic text extraction rect is limited by grid and text anchors while manual stays unchanged', () => {
+  const cropRect = { x: 0.08, y: 0.04, width: 0.28, height: 0.3 };
+  const gridRect = { x: 0.1, y: 0.06, width: 0.2, height: 0.2 };
+  const textRect = { x: 0.11, y: 0.07, width: 0.18, height: 0.18 };
+
+  assert.deepEqual(resolvePdfTextExtractionRect({ cropRect, gridRect, textRect }), textRect);
+  assert.equal(resolvePdfTextExtractionRect({ cropRect, gridRect, textRect, isManual: true }), cropRect);
 });
 
 test('parsePdfCropCsv leaves blank coordinates unplaced when the CSV positions the rest of the page', () => {
