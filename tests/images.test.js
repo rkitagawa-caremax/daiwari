@@ -63,6 +63,27 @@ test('workedBy is preserved by normalization and compared as identity', () => {
   assert.equal(isSameStockImageList(base, [{ ...base[0], workedBy: ['user-a', 'user-b'] }]), false);
 });
 
+test('PDF crop provenance is preserved and compared without affecting legacy images', () => {
+  const source = {
+    id: 'image-pdf',
+    name: 'E1957.jpg',
+    data: 'data:pdf',
+    code: 'E1957',
+    sourcePdfName: 'P010.pdf',
+    sourcePage: 10,
+    pdfPageNumber: 1,
+    sizeType: '1/8 横（2コマ）',
+    cropRect: { x: 0.1, y: 0.06, width: 0.4, height: 0.2 }
+  };
+  const normalized = normalizeStockImageEntry(source);
+  assert.equal(normalized.sourcePdfName, 'P010.pdf');
+  assert.equal(normalized.sourcePage, 10);
+  assert.deepEqual(normalized.cropRect, source.cropRect);
+  assert.notEqual(normalized.cropRect, source.cropRect);
+  assert.equal(isSameStockImageList([source], [{ ...source }]), true);
+  assert.equal(isSameStockImageList([source], [{ ...source, sourcePage: 11 }]), false);
+});
+
 test('worked-by filter shows own and legacy images only', () => {
   // 未記録 (既存データ) は互換のため全員に表示
   assert.equal(isImageWorkedByUser({ id: 'legacy' }, 'user-a'), true);

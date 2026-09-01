@@ -5,6 +5,7 @@ import {
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  FileImage,
   FileSpreadsheet,
   Image as ImageIcon,
   Info,
@@ -80,6 +81,7 @@ const Sidebar = React.memo(({
   toggleOpen,
   images,
   onUpload,
+  onOpenPdfCropImport,
   onDeleteImage,
   onBulkDeleteImages,
   onSearch,
@@ -364,6 +366,16 @@ const Sidebar = React.memo(({
                 </div>
                 <input type="file" className="hidden" accept="image/*" multiple onChange={onUpload} />
               </label>
+              <button
+                type="button"
+                onClick={onOpenPdfCropImport}
+                disabled={isLocked}
+                onMouseEnter={(e) => onShowQuickHelp?.(e, 'PDF＋CSV画像取り込み', '前号PDFをCSVの介援隊コード・座標・コマサイズで切り抜き、画像ライブラリへ一括登録します。')}
+                onMouseLeave={() => onHideQuickHelp?.()}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs font-extrabold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <FileImage size={16} /> PDF＋CSVから切り抜き
+              </button>
             </div>
 
             <div className="flex justify-between items-center px-1">

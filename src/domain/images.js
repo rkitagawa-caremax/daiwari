@@ -19,6 +19,11 @@ export const normalizeStockImageEntry = (item, imageDataById = {}) => {
     name: item.name || item.originalName || item.code || `stock-${stableId}.png`,
     data: resolvedData,
     code: item.code || null,
+    sourcePdfName: item.sourcePdfName || null,
+    sourcePage: item.sourcePage || null,
+    pdfPageNumber: item.pdfPageNumber || null,
+    sizeType: item.sizeType || null,
+    cropRect: item.cropRect ? { ...item.cropRect } : null,
     freeLabels: getPanelFreeLabels(item),
     freeText: null,
     // 作業したアカウント (アップロード / コマから解除) の UID 一覧。未記録の既存画像は null。
@@ -53,6 +58,11 @@ export const isSameStockImageList = (leftItems = [], rightItems = []) => {
     if ((left?.data || null) !== (right?.data || null)) return false;
     if ((left?.name || null) !== (right?.name || null)) return false;
     if ((left?.code || null) !== (right?.code || null)) return false;
+    if ((left?.sourcePdfName || null) !== (right?.sourcePdfName || null)) return false;
+    if ((left?.sourcePage || null) !== (right?.sourcePage || null)) return false;
+    if ((left?.pdfPageNumber || null) !== (right?.pdfPageNumber || null)) return false;
+    if ((left?.sizeType || null) !== (right?.sizeType || null)) return false;
+    if (JSON.stringify(left?.cropRect || null) !== JSON.stringify(right?.cropRect || null)) return false;
     if (JSON.stringify(getPanelFreeLabels(left)) !== JSON.stringify(getPanelFreeLabels(right))) return false;
     if (JSON.stringify(left?.workedBy || null) !== JSON.stringify(right?.workedBy || null)) return false;
   }

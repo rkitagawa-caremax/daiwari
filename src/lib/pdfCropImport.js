@@ -1,0 +1,93 @@
+import * as pdfjs from 'pdfjs-dist/build/pdf.mjs';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+export const openPdfFile = async (file) => {
+  if (!file) throw new Error('PDFファイルが選択されていません。');
+  const data = new Uint8Array(await file.arrayBuffer());
+  const assetBaseUrl = new URL(import.meta.env.BASE_URL || '/', window.location.origin);
+  return pdfjs.getDocument({
+    data,
+    cMapUrl: new URL('pdfjs/cmaps/', assetBaseUrl).toString(),
+    cMapPacked: true,
+    standardFontDataUrl: new URL('pdfjs/standard_fonts/', assetBaseUrl).toString(),
+    useSystemFonts: true
+  }).promise;
+};
+
+export const renderPdfPage = async (pdfDocument, pageNumber, { scale = 1.25, canvas } = {}) => {
+  if (!pdfDocument) throw new Error('PDFが読み込まれていません。');
+  const page = await pdfDocument.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  const targetCanvas = canvas || document.createElement('canvas');
+  const context = targetCanvas.getContext('2d', { alpha: false });
+  targetCanvas.width = Math.ceil(viewport.width);
+  targetCanvas.height = Math.ceil(viewport.height);
+
+  await page.render({ canvas: targetCanvas, canvasContext: context, viewport }).promise;
+
+  const textContent = await page.getTextContent();
+  const textItems = textContent.items
+    .filter((item) => item?.str)
+    .map((item) => {
+      const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
+      return {
+        text: item.str,
+        x: x / viewport.width,
+        y: y / viewport.height
+      };
+    });
+
+  return {
+    canvas: targetCanvas,
+    pageNumber,
+    width: targetCanvas.width,
+    height: targetCanvas.height,
+    textItems
+  };
+};
+
+const canvasToBlob = (canvas, type, quality) => new Promise((resolve, reject) => {
+  canvas.toBlob((blob) => {
+    if (blob) resolve(blob);
+    else reject(new Error('切り抜き画像を生成できませんでした。'));
+  }, type, quality);
+});
+
+export const cropPdfPageToFile = async ({
+  canvas,
+  normalizedRect,
+  filename,
+  maxSize = 900,
+  quality = 0.92
+}) => {
+  if (!canvas || !normalizedRect) throw new Error('切り抜き範囲がありません。');
+
+  const sourceX = Math.max(0, Math.round(normalizedRect.x * canvas.width));
+  const sourceY = Math.max(0, Math.round(normalizedRect.y * canvas.height));
+  const sourceWidth = Math.min(canvas.width - sourceX, Math.max(1, Math.round(normalizedRect.width * canvas.width)));
+  const sourceHeight = Math.min(canvas.height - sourceY, Math.max(1, Math.round(normalizedRect.height * canvas.height)));
+  const outputScale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+
+  const outputCanvas = document.createElement('canvas');
+  outputCanvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
+  outputCanvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
+  const outputContext = outputCanvas.getContext('2d', { alpha: false });
+  outputContext.fillStyle = '#ffffff';
+  outputContext.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+  outputContext.drawImage(
+    canvas,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    outputCanvas.width,
+    outputCanvas.height
+  );
+
+  const blob = await canvasToBlob(outputCanvas, 'image/jpeg', quality);
+  return new File([blob], filename, { type: 'image/jpeg', lastModified: Date.now() });
+};

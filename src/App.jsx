@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { lazy, Suspense } from 'react';
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
@@ -168,6 +169,8 @@ import HeaderToolsMenu from './features/layout/HeaderToolsMenu';
 import ContentHeaderControls from './features/layout/ContentHeaderControls';
 import AppHeader from './features/layout/AppHeader';
 
+const PdfCropImportModal = lazy(() => import('./components/dialogs/PdfCropImportModal'));
+
 // フローティングパネルの初期位置 (右端寄せ)。従来の「右端・縦中央付近に縦積み」を再現する。
 const FLOATING_PANEL_RIGHT_MARGIN = 12;
 const FLOATING_PANEL_GAP = 8;
@@ -277,6 +280,7 @@ export default function App() {
   } = useAppDialogs();
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPdfCropImportOpen, setIsPdfCropImportOpen] = useState(false);
   const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
   const [isWorkLogDashboardOpen, setIsWorkLogDashboardOpen] = useState(false);
   const [workLogRecords, setWorkLogRecords] = useState([]);
@@ -2566,23 +2570,32 @@ export default function App() {
     });
   }, []);
 
-  const handleUploadImage = async (e) => {
-    if (isLockedRef.current) return;
-    // 認証チェックを緩和（userオブジェクトではなくフラグで判定）
-    if (!e.target.files || e.target.files.length === 0 || !isAuthenticated) return;
-    const files = Array.from(e.target.files);
-
+  const persistImageEntries = async (entries, onProgress = null) => {
+    if (!Array.isArray(entries) || entries.length === 0 || !isAuthenticated) {
+      return { successCount: 0, failCount: 0, newImages: [] };
+    }
     let successCount = 0;
     let failCount = 0;
+    let completedCount = 0;
     const newImages = [];
 
-    const uploadPromises = files.map(async (file) => {
+    const uploadEntry = async (entry) => {
+      const file = entry?.file || entry;
       try {
         const compressedDataUrl = await compressImage(file);
+        const metadata = {
+          ...(entry?.code ? { code: entry.code } : {}),
+          ...(entry?.sourcePdfName ? { sourcePdfName: entry.sourcePdfName } : {}),
+          ...(entry?.sourcePage ? { sourcePage: entry.sourcePage } : {}),
+          ...(entry?.pdfPageNumber ? { pdfPageNumber: entry.pdfPageNumber } : {}),
+          ...(entry?.sizeType ? { sizeType: entry.sizeType } : {}),
+          ...(entry?.cropRect ? { cropRect: entry.cropRect } : {})
+        };
         const newImage = {
           id: idbHelper.generateId(),
           name: file.name,
           data: compressedDataUrl,
+          ...metadata,
           workedBy: undoAccountId ? [undoAccountId] : null,
           createdAt: { seconds: Date.now() / 1000 }
         };
@@ -2593,6 +2606,7 @@ export default function App() {
           const imageDocRef = await addDoc(imagesCollection, {
             name: file.name,
             data: compressedDataUrl,
+            ...metadata,
             ...(undoAccountId ? { workedBy: [undoAccountId] } : {}),
             createdAt: serverTimestamp()
           });
@@ -2600,13 +2614,29 @@ export default function App() {
         }
         successCount++;
       } catch (err) {
-        console.error(`Failed to upload ${file.name}:`, err);
+        console.error(`Failed to upload ${file?.name || 'unknown image'}:`, err);
         failCount++;
+      } finally {
+        completedCount++;
+        onProgress?.({
+          current: completedCount,
+          total: entries.length,
+          message: `${completedCount}/${entries.length}件を画像ライブラリへ登録しています…`
+        });
       }
-    });
+    };
 
     try {
-      await Promise.all(uploadPromises);
+      let nextEntryIndex = 0;
+      const workerCount = Math.min(4, entries.length);
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (nextEntryIndex < entries.length) {
+          const entryIndex = nextEntryIndex;
+          nextEntryIndex++;
+          await uploadEntry(entries[entryIndex]);
+        }
+      });
+      await Promise.all(workers);
 
       if (newImages.length > 0) {
         const updatedImages = normalizeStockImages([...images, ...newImages]);
@@ -2615,14 +2645,38 @@ export default function App() {
         // localStorageHelper.setItem('images', updatedImages); // Auto-save handles this
       }
 
-      if (failCount > 0) {
-        showAlert(`${successCount}枚の画像をアップロードしました。${failCount}枚は失敗しました。`);
-      }
     } catch (err) {
       console.error("Batch upload error", err);
     }
 
+    return { successCount, failCount, newImages };
+  };
+
+  const handleUploadImage = async (e) => {
+    if (isLockedRef.current) return;
+    // 認証チェックを緩和（userオブジェクトではなくフラグで判定）
+    if (!e.target.files || e.target.files.length === 0 || !isAuthenticated) return;
+    const files = Array.from(e.target.files);
+
+    const { successCount, failCount } = await persistImageEntries(files);
+
+    if (failCount > 0) {
+      showAlert(`${successCount}枚の画像をアップロードしました。${failCount}枚は失敗しました。`);
+    }
+
     e.target.value = '';
+  };
+
+  const handlePdfCropImport = async (items, onProgress) => {
+    if (isLockedRef.current || !isAuthenticated) {
+      return { successCount: 0, failCount: items?.length || 0, newImages: [] };
+    }
+    const result = await persistImageEntries(items, onProgress);
+    const message = result.failCount > 0
+      ? `${result.successCount}枚を登録しました。${result.failCount}枚は登録できませんでした。`
+      : `${result.successCount}枚を介援隊コード名で画像ライブラリへ登録しました。`;
+    showAlert(message, 'PDF＋CSV画像取り込み');
+    return result;
   };
 
   const handleDeleteImage = (imgId, fallbackData = null) => {
@@ -3610,6 +3664,10 @@ export default function App() {
           images={images}
           sheets={sheets}
           onUpload={handleUploadImage}
+          onOpenPdfCropImport={() => {
+            if (isLockedRef.current) return;
+            setIsPdfCropImportOpen(true);
+          }}
           onDeleteImage={handleDeleteImage}
           onBulkDeleteImages={handleBulkDeleteImages}
           onSearch={setSearchQuery}
@@ -3769,6 +3827,18 @@ export default function App() {
       <PdfExportSurface page={pdfExportPage} imageDataById={imageDataById} />
 
       <ImagePreviewModal preview={assignedImagePreview} onClose={() => setAssignedImagePreview(null)} />
+
+      {isPdfCropImportOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/45"><Loader2 className="animate-spin text-white" size={36} /></div>}>
+          <PdfCropImportModal
+            isOpen={isPdfCropImportOpen}
+            onClose={() => setIsPdfCropImportOpen(false)}
+            onImport={handlePdfCropImport}
+            existingImages={images}
+            isLocked={isLocked}
+          />
+        </Suspense>
+      )}
 
       {/* Settings Modal */}
       <SettingsModal
