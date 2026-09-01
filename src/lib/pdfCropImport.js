@@ -37,11 +37,14 @@ export const renderPdfPage = async (pdfDocument, pageNumber, { scale = 1.25, can
   const textItems = textContent.items
     .filter((item) => item?.str)
     .map((item) => {
+      // x, y は文字の左端 / ベースライン。width, height は viewport 尺に直してから正規化する
       const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
       return {
         text: item.str,
         x: x / viewport.width,
-        y: y / viewport.height
+        y: y / viewport.height,
+        width: ((item.width || 0) * viewport.scale) / viewport.width,
+        height: ((item.height || 0) * viewport.scale) / viewport.height
       };
     });
 

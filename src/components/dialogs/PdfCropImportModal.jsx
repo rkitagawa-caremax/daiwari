@@ -15,6 +15,7 @@ import {
   summarizePdfCropPagePlans
 } from '../../domain/pdfCropImport';
 import { calibratePdfCropGrid } from '../../domain/pdfCropGridCalibration';
+import { resolvePdfCropTextRects, unionPdfCropRects } from '../../domain/pdfCropTextBounds';
 import { readFileAutoEncoding } from '../../lib/csv';
 import { cropPdfPageToFile, openPdfFile, refineCropRectToFrame, renderPdfPage } from '../../lib/pdfCropImport';
 
@@ -57,14 +58,29 @@ const destroyDocument = async (pdfDocument) => {
   }
 };
 
-// 校正済みグリッド → 境界スナップ済みの切り抜き枠 (プレビューと保存で同じ関数を使う)。
-// ラベルが十分に見つかりグリッドが校正できたページでは、探索範囲を狭めて誤検出を防ぐ。
+// 切り抜き枠の決め方 (プレビューと保存で同じ関数を使う):
+//   1. コマ左上の番号ラベルと右下のメーカー名などの目印から求めた枠 (textRect) があればそれを出発点にする
+//   2. 描画ピクセルから余白/枠線を探して外側の境界へ広げる
+//   3. 目印の枠と和を取り、文字が欠けないようにする
+// 目印が無いコマは校正済みグリッドの推定枠を出発点にする (ラベルが多いページほど探索範囲を狭める)。
 const MIN_ANCHORS_FOR_TIGHT_SEARCH = 3;
+const ANCHORED_SEARCH_TOLERANCE = 0.08;
 const CALIBRATED_SEARCH_TOLERANCE = 0.12;
 const UNCALIBRATED_SEARCH_TOLERANCE = 0.25;
-const resolveCropRect = (canvas, row, grid) => refineCropRectToFrame(canvas, getPdfCropRectFromGrid(row, grid), {
-  searchToleranceRatio: grid.anchorCount >= MIN_ANCHORS_FOR_TIGHT_SEARCH ? CALIBRATED_SEARCH_TOLERANCE : UNCALIBRATED_SEARCH_TOLERANCE
-});
+
+const resolveCropRect = (canvas, row, grid, textRects) => {
+  const textRect = textRects?.get(row.id) || null;
+  const base = textRect || getPdfCropRectFromGrid(row, grid);
+  const searchToleranceRatio = textRect
+    ? ANCHORED_SEARCH_TOLERANCE
+    : (grid.anchorCount >= MIN_ANCHORS_FOR_TIGHT_SEARCH ? CALIBRATED_SEARCH_TOLERANCE : UNCALIBRATED_SEARCH_TOLERANCE);
+  const refined = refineCropRectToFrame(canvas, base, { searchToleranceRatio });
+  return {
+    rect: unionPdfCropRects(refined.rect, textRect),
+    snappedCount: refined.snappedCount,
+    hasTextAnchor: !!textRect
+  };
+};
 
 const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], isLocked = false }) => {
   const canvasRef = useRef(null);
@@ -110,17 +126,21 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
     calibratePdfCropGrid({ rows: activeTargetRows, textItems: preview.textItems, bounds })
   ), [activeTargetRows, bounds, preview.textItems]);
 
+  // コマ左上の番号ラベル / コードラベルを目印にした切り抜き枠 (見つかったコマのみ)
+  const previewTextRects = useMemo(() => (
+    resolvePdfCropTextRects({ rows: activeTargetRows, textItems: preview.textItems, grid: previewGrid })
+  ), [activeTargetRows, preview.textItems, previewGrid]);
+
   // プレビュー上の切り抜き枠 (境界スナップ済み)。preview.version は描画完了ごとに進む
   const previewRects = useMemo(() => {
     const canvas = canvasRef.current;
     return activeTargetRows.map((row) => {
-      const base = getPdfCropRectFromGrid(row, previewGrid);
-      if (!canvas || !preview.width || preview.isLoading) return { row, rect: base, snappedCount: 0 };
-      const refined = resolveCropRect(canvas, row, previewGrid);
-      return { row, rect: refined.rect, snappedCount: refined.snappedCount };
+      const base = previewTextRects.get(row.id) || getPdfCropRectFromGrid(row, previewGrid);
+      if (!canvas || !preview.width || preview.isLoading) return { row, rect: base, snappedCount: 0, hasTextAnchor: previewTextRects.has(row.id) };
+      return { row, ...resolveCropRect(canvas, row, previewGrid, previewTextRects) };
     });
-  }, [activeTargetRows, preview, previewGrid]);
-  const previewSnappedCount = previewRects.filter((entry) => entry.snappedCount >= 2).length;
+  }, [activeTargetRows, preview, previewGrid, previewTextRects]);
+  const previewSnappedCount = previewRects.filter((entry) => entry.snappedCount >= 2 || entry.hasTextAnchor).length;
 
   useEffect(() => () => {
     renderSequenceRef.current++;
@@ -304,11 +324,12 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
             setProgress({ current: completed, total, message: `${page.filename}（P.${page.catalogPage}）を描画しています…` });
             const rendered = await renderPdfPage(sourceDocument, page.pdfPageNumber, { scale: EXPORT_SCALE });
             try {
-              // このページのグリッドを高解像度描画の文字レイヤーで校正してから切り抜く
+              // このページのグリッドを高解像度描画の文字レイヤーで校正し、目印の座標も取り直してから切り抜く
               const pageGrid = calibratePdfCropGrid({ rows: plan.targetRows, textItems: rendered.textItems, bounds });
+              const pageTextRects = resolvePdfCropTextRects({ rows: plan.targetRows, textItems: rendered.textItems, grid: pageGrid });
               for (const row of importRows) {
                 const code = normalizePdfCropCode(row.code);
-                const { rect: cropRect } = resolveCropRect(rendered.canvas, row, pageGrid);
+                const { rect: cropRect } = resolveCropRect(rendered.canvas, row, pageGrid, pageTextRects);
                 const sourceTextData = extractPdfTextInRect(rendered.textItems, cropRect);
                 const file = await cropPdfPageToFile({
                   canvas: rendered.canvas,
@@ -406,7 +427,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                 {activeBatchPage ? <>{activeBatchPage.filename} <span className="text-slate-400">→</span> P.{activeBatchPage.catalogPage}{csvFile && <span className="ml-2 font-medium text-slate-500">{activeTargetRows.length}コマ</span>}</> : 'プレビュー'}
               </p>
               {activeTargetRows.length > 0 && preview.width > 0 && (
-                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="コードラベルの座標でグリッドを校正し、余白/枠線を検出して切り抜き枠を補正したコマ数">枠を自動補正 {previewSnappedCount}/{activeTargetRows.length}{previewGrid.calibrated ? `・基準${previewGrid.anchorCount}点` : ''}</span>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="コマ左上の番号ラベルとコードラベルを目印に切り抜き枠を合わせ、さらに余白/枠線を検出して外側の境界へ広げたコマ数">枠を自動補正 {previewSnappedCount}/{activeTargetRows.length}・目印{previewTextRects.size}</span>
               )}
             </div>
             <div className="relative min-h-0 flex-1 overflow-auto bg-slate-200 p-4">
