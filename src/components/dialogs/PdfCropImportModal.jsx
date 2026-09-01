@@ -573,14 +573,13 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   ].filter(Boolean);
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-2 backdrop-blur-sm">
-      <div className="flex h-[96vh] w-[min(1480px,97vw)] flex-col overflow-hidden rounded-3xl border border-white/30 bg-slate-100 shadow-2xl" role="dialog" aria-modal="true" aria-label="PDF画像取り込み">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-2.5">
-          <div>
-            <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><Crop size={20} className="text-indigo-600" />PDF画像取り込み</h2>
-            <p className="mt-1 text-xs text-slate-500">校正PDF（最大{MAX_PDF_CROP_BATCH_PAGES}ページ）と全データCSVを選ぶと、商品コマを介援隊コード名の画像として保存します。</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={isImporting} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="閉じる"><X size={22} /></button>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-1 backdrop-blur-sm">
+      <div className="flex h-[99vh] w-[min(1480px,98vw)] flex-col overflow-hidden rounded-2xl border border-white/30 bg-slate-100 shadow-2xl" role="dialog" aria-modal="true" aria-label="PDF画像取り込み">
+        <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-1.5">
+          <h2 className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800" title={`校正PDF（最大${MAX_PDF_CROP_BATCH_PAGES}ページ）と全データCSVを選ぶと、商品コマを介援隊コード名の画像として保存します。`}>
+            <Crop size={16} className="shrink-0 text-indigo-600" />PDF画像取り込み
+          </h2>
+          <button type="button" onClick={onClose} disabled={isImporting} className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="閉じる"><X size={18} /></button>
         </header>
 
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] gap-2 p-2">
@@ -673,7 +672,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
             </div>
           </section>
 
-          <aside className="flex min-h-0 flex-col gap-2.5">
+          <aside className="flex min-h-0 flex-col gap-1.5">
             <div className="space-y-2">
               <button type="button" onClick={() => pdfInputRef.current?.click()} disabled={isBusy} className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${hasPdf ? 'border-indigo-300 bg-indigo-50' : 'border-dashed border-slate-300 bg-white hover:bg-slate-50'}`}>
                 {isReadingPdfs ? <Loader2 size={18} className="shrink-0 animate-spin text-indigo-600" /> : <FileImage size={18} className="shrink-0 text-indigo-600" />}
@@ -693,17 +692,19 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvChange} />
             </div>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-3">
-              <p className="text-[10px] font-bold text-slate-500">保存するコマ</p>
-              <p className="mt-0.5 flex items-baseline gap-1.5"><span className="text-3xl font-black text-indigo-700">{batchSummary.importCount}</span><span className="text-xs font-bold text-slate-500">コマ / {batchSummary.pageCount}ページ</span></p>
+            <section className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5">
+              <p className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] font-bold text-slate-500">保存するコマ</span>
+                <span className="text-[10px] font-bold text-slate-500"><span className="text-base font-black text-indigo-700">{batchSummary.importCount}</span>コマ / {batchSummary.pageCount}ページ</span>
+              </p>
               {batchSummary.existingCount > 0 && (
-                <label className="mt-2 flex items-start gap-2 text-[10px] font-bold text-slate-600">
+                <label className="mt-1 flex items-start gap-1.5 text-[10px] font-bold leading-snug text-slate-600">
                   <input type="checkbox" checked={skipExistingCodes} onChange={(event) => setSkipExistingCodes(event.target.checked)} disabled={isImporting} className="mt-0.5" />
-                  <span>ライブラリに同じコードがある{batchSummary.existingCount}件をスキップする（未チェックなら追加登録）</span>
+                  <span>同じコードの{batchSummary.existingCount}件をスキップ（未チェックなら追加登録）</span>
                 </label>
               )}
               {(errorMessage || warnings.length > 0) && (
-                <div className="mt-2 space-y-0.5 text-[10px] text-amber-800">
+                <div className="mt-1 space-y-0.5 text-[10px] leading-snug text-amber-800">
                   {errorMessage && <p className="font-bold text-rose-700">{errorMessage}</p>}
                   {warnings.map((warning) => <p key={warning}>・{warning}</p>)}
                 </div>
@@ -711,16 +712,15 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
             </section>
 
             {hasPdf && (
-              <section className="rounded-2xl border border-slate-200 bg-white p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] font-bold text-slate-500">コマ枠の手動調整</p>
-                  {totalManualCount > 0 && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{totalManualCount}コマ</span>}
-                </div>
-                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">枠をクリックして選び、ドラッグで移動・角や辺のつまみでサイズ変更。矢印キーで微調整（Shiftで大きく）。</p>
+              <div className="space-y-1">
+                <details className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5">
+                  <summary className="cursor-pointer text-[10px] font-bold text-slate-500">コマ枠の手動調整{totalManualCount > 0 ? `・${totalManualCount}コマ` : ''}</summary>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-500">枠をクリックして選び、ドラッグで移動・角や辺のつまみでサイズ変更。矢印キーで微調整（Shiftで大きく）。</p>
+                </details>
                 {pageManualCount > 0 && (
-                  <button type="button" onClick={resetPageFrames} disabled={isImporting} className="mt-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">このページの手動調整{pageManualCount}件を自動に戻す</button>
+                  <button type="button" onClick={resetPageFrames} disabled={isImporting} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">このページの手動調整{pageManualCount}件を自動に戻す</button>
                 )}
-              </section>
+              </div>
             )}
 
             <section className="min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white p-2">
@@ -782,7 +782,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
           </div>
         )}
 
-        <footer className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5">
+        <footer className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-2">
           <p className={`text-[11px] font-bold ${isReady ? 'text-emerald-600' : 'text-slate-500'}`}>{statusText}</p>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} disabled={isImporting} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">キャンセル</button>
