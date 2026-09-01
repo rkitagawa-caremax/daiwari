@@ -46,7 +46,6 @@ import { cropPdfPageToFile, openPdfFile, refineCropRectToFrame, renderPdfPage } 
 //   5. 保存時は PDF を 1 ファイルずつ開き直し、高解像度で描画 → 枠検出 → 切り抜き → canvas 解放 → destroy を繰り返す
 //   6. 切り抜き済み JPEG は全ページ分まとめて onImport に渡す (App 側の登録処理は 1 回呼び出し前提のため)
 
-const BOUND_LABELS = Object.freeze({ left: '左', top: '上', right: '右', bottom: '下' });
 const EMPTY_ROWS = Object.freeze([]);
 const PREVIEW_SCALE = 2;
 const EXPORT_SCALE = 3;
@@ -139,7 +138,6 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const [allRows, setAllRows] = useState([]);
   const [issues, setIssues] = useState([]);
   const [preview, setPreview] = useState({ isLoading: false, textItems: [], width: 0, height: 0, version: 0 });
-  const [bounds, setBounds] = useState({ ...DEFAULT_PDF_GRID_BOUNDS });
   const [errorMessage, setErrorMessage] = useState('');
   const [isReadingPdfs, setIsReadingPdfs] = useState(false);
   const [skipExistingCodes, setSkipExistingCodes] = useState(false);
@@ -170,8 +168,8 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
 
   // プレビュー中ページのグリッド校正 (文字レイヤーのコードラベル座標から)
   const previewGrid = useMemo(() => (
-    calibratePdfCropGrid({ rows: activeTargetRows, textItems: preview.textItems, bounds })
-  ), [activeTargetRows, bounds, preview.textItems]);
+    calibratePdfCropGrid({ rows: activeTargetRows, textItems: preview.textItems, bounds: DEFAULT_PDF_GRID_BOUNDS })
+  ), [activeTargetRows, preview.textItems]);
 
   // コマ左上の番号ラベル / コードラベルを目印にした切り抜き枠 (見つかったコマのみ)
   const previewTextRects = useMemo(() => (
@@ -486,7 +484,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
             const rendered = await renderPdfPage(sourceDocument, page.pdfPageNumber, { scale: EXPORT_SCALE });
             try {
               // このページのグリッドを高解像度描画の文字レイヤーで校正し、目印の座標も取り直してから切り抜く
-              const pageGrid = calibratePdfCropGrid({ rows: plan.targetRows, textItems: rendered.textItems, bounds });
+              const pageGrid = calibratePdfCropGrid({ rows: plan.targetRows, textItems: rendered.textItems, bounds: DEFAULT_PDF_GRID_BOUNDS });
               const pageTextRects = resolvePdfCropTextRects({ rows: plan.targetRows, textItems: rendered.textItems, grid: pageGrid });
               const pageManualRects = getPdfCropManualRects(manualRects, page.id);
               const pageAutoEntries = stabilizePdfCropPageRects({
@@ -557,14 +555,8 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const hasPdf = batchPages.length > 0;
   const isBusy = isImporting || isReadingPdfs;
   const isReady = hasPdf && !!csvFile && !isBusy && batchSummary.importCount > 0;
-  const statusText = !hasPdf
-    ? 'PDFを選択してください'
-    : !csvFile
-      ? 'CSV（全データ）を選択してください'
-      : batchSummary.importCount === 0
-        ? '保存できるコマがありません。ページ一覧で対象ページを確認してください'
-        : `${batchSummary.pageCount}ページ・${batchSummary.importCount}コマを保存できます`;
   const warnings = [
+    hasPdf && csvFile && batchSummary.importCount === 0 ? '保存できるコマがありません（ページ一覧で対象ページを確認）' : '',
     csvFile && batchSummary.pagesWithoutCsv > 0 ? `CSVに該当ページがないPDFが${batchSummary.pagesWithoutCsv}件（ページ一覧で対象ページを変更）` : '',
     batchSummary.duplicateCatalogPages > 0 ? '同じ対象ページに複数のPDFが割り当てられています' : '',
     batchSummary.unplaceableCount > 0 ? `コード・位置が読めない${batchSummary.unplaceableCount}件は除外` : '',
@@ -762,16 +754,6 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               </ul>
             </section>
 
-            <details className="shrink-0 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-              <summary className="cursor-pointer text-[10px] font-bold text-slate-500">枠が大きくずれる場合だけ余白を調整（全ページ共通）</summary>
-              <div className="mt-2 grid grid-cols-4 gap-1.5">
-                {Object.entries(BOUND_LABELS).map(([key, label]) => (
-                  <label key={key} className="text-[10px] font-bold text-slate-500">{label}（%）
-                    <input type="number" min="0" max="30" step="0.1" value={bounds[key]} onChange={(event) => setBounds((current) => ({ ...current, [key]: Math.min(30, Math.max(0, Number(event.target.value) || 0)) }))} disabled={isImporting} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-right font-mono text-[11px]" />
-                  </label>
-                ))}
-              </div>
-            </details>
           </aside>
         </div>
 
@@ -782,12 +764,9 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
           </div>
         )}
 
-        <footer className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-2">
-          <p className={`text-[11px] font-bold ${isReady ? 'text-emerald-600' : 'text-slate-500'}`}>{statusText}</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} disabled={isImporting} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">キャンセル</button>
-            <button type="button" onClick={handleImport} disabled={isLocked || !isReady} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white shadow hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{isImporting ? <Loader2 size={16} className="animate-spin" /> : <Crop size={16} />}{batchSummary.importCount}コマを保存</button>
-          </div>
+        <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 py-1.5">
+          <button type="button" onClick={onClose} disabled={isImporting} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">キャンセル</button>
+          <button type="button" onClick={handleImport} disabled={isLocked || !isReady} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-2 text-xs font-bold text-white shadow hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{isImporting ? <Loader2 size={16} className="animate-spin" /> : <Crop size={16} />}{batchSummary.importCount}コマを保存</button>
         </footer>
       </div>
     </div>
