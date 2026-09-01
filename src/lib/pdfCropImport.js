@@ -1,7 +1,13 @@
 import * as pdfjs from 'pdfjs-dist/build/pdf.mjs';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
+import { computeDarkCoverageProfiles, countSnappedEdges, snapRectToFrame } from '../domain/pdfCropFrame.js';
+
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+// 枠線検出のために期待枠の周囲をどれだけ広く読むか (辺の長さに対する比率)
+const FRAME_SEARCH_EXPANSION = 0.2;
+const NO_SNAP = Object.freeze({ top: false, bottom: false, left: false, right: false });
 
 export const openPdfFile = async (file) => {
   if (!file) throw new Error('PDFファイルが選択されていません。');
@@ -90,4 +96,50 @@ export const cropPdfPageToFile = async ({
 
   const blob = await canvasToBlob(outputCanvas, 'image/jpeg', quality);
   return new File([blob], filename, { type: 'image/jpeg', lastModified: Date.now() });
+};
+
+// 描画済みキャンバス上で、グリッドから求めた正規化矩形をコマの枠線にスナップさせる。
+// 枠線が見つからない場合は元の矩形をそのまま返す (snappedCount = 0)。
+export const refineCropRectToFrame = (canvas, normalizedRect, options = {}) => {
+  const fallback = { rect: normalizedRect, snappedEdges: NO_SNAP, snappedCount: 0 };
+  if (!canvas || !normalizedRect || !canvas.width || !canvas.height) return fallback;
+
+  const px = {
+    x: normalizedRect.x * canvas.width,
+    y: normalizedRect.y * canvas.height,
+    width: normalizedRect.width * canvas.width,
+    height: normalizedRect.height * canvas.height
+  };
+  const windowX = Math.max(0, Math.floor(px.x - px.width * FRAME_SEARCH_EXPANSION));
+  const windowY = Math.max(0, Math.floor(px.y - px.height * FRAME_SEARCH_EXPANSION));
+  const windowRight = Math.min(canvas.width, Math.ceil(px.x + px.width * (1 + FRAME_SEARCH_EXPANSION)));
+  const windowBottom = Math.min(canvas.height, Math.ceil(px.y + px.height * (1 + FRAME_SEARCH_EXPANSION)));
+  const windowWidth = windowRight - windowX;
+  const windowHeight = windowBottom - windowY;
+  if (windowWidth < 8 || windowHeight < 8) return fallback;
+
+  let imageData;
+  try {
+    imageData = canvas.getContext('2d', { willReadFrequently: true }).getImageData(windowX, windowY, windowWidth, windowHeight);
+  } catch (error) {
+    console.warn('Frame detection skipped (getImageData failed):', error);
+    return fallback;
+  }
+
+  const profiles = computeDarkCoverageProfiles(imageData.data, windowWidth, windowHeight, options.darkThreshold);
+  const snapped = snapRectToFrame({
+    profiles,
+    expected: { x: px.x - windowX, y: px.y - windowY, width: px.width, height: px.height },
+    options
+  });
+  return {
+    rect: {
+      x: (windowX + snapped.x) / canvas.width,
+      y: (windowY + snapped.y) / canvas.height,
+      width: snapped.width / canvas.width,
+      height: snapped.height / canvas.height
+    },
+    snappedEdges: snapped.snappedEdges,
+    snappedCount: countSnappedEdges(snapped.snappedEdges)
+  };
 };

@@ -410,16 +410,24 @@ export const isPdfCropRowInsideGrid = (row) => (
   && row.yPos + row.rowSpan - 1 <= 4
 );
 
+const isTextItemInRect = (item, rect) => (
+  item.x >= rect.x
+  && item.x <= rect.x + rect.width
+  && item.y >= rect.y
+  && item.y <= rect.y + rect.height
+);
+
+// 指定矩形 (正規化座標) 内に、そのコードの文字があるか
+export const pdfTextItemsContainCodeInRect = (textItems, code, rect) => (
+  !!code
+  && !!rect
+  && Array.isArray(textItems)
+  && textItems.some((item) => isTextItemInRect(item, rect) && normalizePdfCropCode(item.text) === code)
+);
+
 export const pdfTextItemsContainCode = (textItems, row, bounds = DEFAULT_PDF_GRID_BOUNDS) => {
   if (!row.code || !Array.isArray(textItems)) return false;
-  const rect = getPdfCropRect(row, bounds);
-  return textItems.some((item) => (
-    item.x >= rect.x
-    && item.x <= rect.x + rect.width
-    && item.y >= rect.y
-    && item.y <= rect.y + rect.height
-    && normalizePdfCropCode(item.text) === row.code
-  ));
+  return pdfTextItemsContainCodeInRect(textItems, row.code, getPdfCropRect(row, bounds));
 };
 
 export const MAX_PDF_CROP_TEXT_LENGTH = 4000;
@@ -432,6 +440,19 @@ const compactPdfText = (values) => values
   .replace(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])\s+(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu, '$1')
   .trim();
 
+// 指定矩形 (正規化座標) 内の文字を保存用に整形して返す
+export const extractPdfTextInRect = (textItems, rect, maxLength = MAX_PDF_CROP_TEXT_LENGTH) => {
+  if (!Array.isArray(textItems) || !rect) return { text: '', truncated: false };
+  const compacted = compactPdfText(textItems
+    .filter((item) => isTextItemInRect(item, rect))
+    .map((item) => item.text));
+  const safeMaxLength = Math.max(0, Number.parseInt(maxLength, 10) || 0);
+  if (!safeMaxLength || compacted.length <= safeMaxLength) {
+    return { text: compacted, truncated: false };
+  }
+  return { text: compacted.slice(0, safeMaxLength), truncated: true };
+};
+
 export const extractPdfCropText = (
   textItems,
   row,
@@ -441,18 +462,5 @@ export const extractPdfCropText = (
   if (!Array.isArray(textItems) || !isPdfCropRowInsideGrid(row)) {
     return { text: '', truncated: false };
   }
-  const rect = getPdfCropRect(row, bounds);
-  const compacted = compactPdfText(textItems
-    .filter((item) => (
-      item.x >= rect.x
-      && item.x <= rect.x + rect.width
-      && item.y >= rect.y
-      && item.y <= rect.y + rect.height
-    ))
-    .map((item) => item.text));
-  const safeMaxLength = Math.max(0, Number.parseInt(maxLength, 10) || 0);
-  if (!safeMaxLength || compacted.length <= safeMaxLength) {
-    return { text: compacted, truncated: false };
-  }
-  return { text: compacted.slice(0, safeMaxLength), truncated: true };
+  return extractPdfTextInRect(textItems, getPdfCropRect(row, bounds), maxLength);
 };
