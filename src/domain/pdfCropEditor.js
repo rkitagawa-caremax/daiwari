@@ -24,6 +24,23 @@ export const fitPdfPreviewSize = (page, stage) => {
   };
 };
 
+// 表示倍率 (1 = 表示領域にちょうど収まる大きさ)
+export const PDF_PREVIEW_ZOOM_MIN = 1;
+export const PDF_PREVIEW_ZOOM_MAX = 4;
+export const PDF_PREVIEW_ZOOM_STEP = 0.25;
+
+export const clampPdfPreviewZoom = (value) => {
+  const zoom = Number(value);
+  if (!Number.isFinite(zoom)) return PDF_PREVIEW_ZOOM_MIN;
+  return Math.min(PDF_PREVIEW_ZOOM_MAX, Math.max(PDF_PREVIEW_ZOOM_MIN, Math.round(zoom * 100) / 100));
+};
+
+export const zoomPdfPreviewSize = (fit, zoom) => {
+  if (!(fit?.width > 0) || !(fit?.height > 0)) return { width: 0, height: 0 };
+  const scale = clampPdfPreviewZoom(zoom);
+  return { width: Math.round(fit.width * scale), height: Math.round(fit.height * scale) };
+};
+
 // 枠ごと平行移動する (サイズは変えず、ページ内に収める)
 export const movePdfCropRect = (rect, dx, dy) => ({
   x: round(clamp(rect.x + dx, 0, Math.max(0, 1 - rect.width))),

@@ -21,11 +21,16 @@ import {
   clearPdfCropManualRect,
   countPdfCropManualRects,
   EMPTY_PDF_CROP_MANUAL_RECTS,
+  clampPdfPreviewZoom,
   fitPdfPreviewSize,
   getPdfCropManualRects,
   movePdfCropRect,
   PDF_CROP_RESIZE_HANDLES,
-  setPdfCropManualRect
+  PDF_PREVIEW_ZOOM_MAX,
+  PDF_PREVIEW_ZOOM_MIN,
+  PDF_PREVIEW_ZOOM_STEP,
+  setPdfCropManualRect,
+  zoomPdfPreviewSize
 } from '../../domain/pdfCropEditor';
 import { resolvePdfCropTextRects, unionPdfCropRects } from '../../domain/pdfCropTextBounds';
 import { readFileAutoEncoding } from '../../lib/csv';
@@ -142,6 +147,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const [selectedRowId, setSelectedRowId] = useState('');
   const [isDraggingFrame, setIsDraggingFrame] = useState(false);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [zoom, setZoom] = useState(PDF_PREVIEW_ZOOM_MIN);
 
   const existingCodes = useMemo(() => getExistingCodeSet(existingImages), [existingImages]);
   const batchPages = useMemo(() => (
@@ -203,6 +209,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
     return () => observer.disconnect();
   }, []);
   const stageFit = useMemo(() => fitPdfPreviewSize(preview, stageSize), [preview, stageSize]);
+  const stageDisplay = useMemo(() => zoomPdfPreviewSize(stageFit, zoom), [stageFit, zoom]);
 
   // ページを切り替えたら選択を外す (枠は手動調整ぶんを残したまま)
   useEffect(() => setSelectedRowId(''), [activeBatchPage?.id]);
@@ -552,26 +559,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
           <button type="button" onClick={onClose} disabled={isImporting} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="閉じる"><X size={22} /></button>
         </header>
 
-        <div className="grid grid-cols-2 gap-2 border-b border-slate-200 bg-white px-3 py-2">
-          <button type="button" onClick={() => pdfInputRef.current?.click()} disabled={isBusy} className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${hasPdf ? 'border-indigo-300 bg-indigo-50' : 'border-dashed border-slate-300 hover:bg-slate-50'}`}>
-            {isReadingPdfs ? <Loader2 size={20} className="shrink-0 animate-spin text-indigo-600" /> : <FileImage size={20} className="shrink-0 text-indigo-600" />}
-            <span className="min-w-0">
-              <span className="block text-sm font-black text-slate-700">{hasPdf ? `PDF ${pdfSources.length}ファイル / ${batchPages.length}ページ` : 'PDFを選択（複数可）'}</span>
-              <span className="block truncate text-[11px] text-slate-500">{isReadingPdfs ? 'PDFを確認しています…' : hasPdf ? 'クリックで選び直し' : `P010.pdf のような校正PDFを最大${MAX_PDF_CROP_BATCH_PAGES}ページ`}</span>
-            </span>
-          </button>
-          <button type="button" onClick={() => csvInputRef.current?.click()} disabled={isBusy} className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${csvFile ? 'border-emerald-300 bg-emerald-50' : 'border-dashed border-slate-300 hover:bg-slate-50'}`}>
-            <FileSpreadsheet size={20} className="shrink-0 text-emerald-600" />
-            <span className="min-w-0">
-              <span className="block text-sm font-black text-slate-700">{csvFile ? 'CSV 選択済み' : 'CSV（全データ）を選択'}</span>
-              <span className="block truncate text-[11px] text-slate-500">{csvFile?.name || '台割の出力CSV'}</span>
-            </span>
-          </button>
-          <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" onChange={handlePdfChange} />
-          <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvChange} />
-        </div>
-
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_280px] gap-3 p-3">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] gap-2 p-2">
           <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
             <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
               <p className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700">
@@ -588,61 +576,99 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               )}
             </div>
             {/* ページを表示領域いっぱいに収め、その上に切り抜き枠を重ねる (枠はドラッグで調整できる) */}
-            <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-300 p-2">
-              {!hasPdf && <p className="text-sm font-bold text-slate-500">PDFを選択するとプレビューが表示されます</p>}
-              {hasPdf && (
-                <div
-                  className="relative shadow-xl"
-                  style={stageFit.width > 0 ? { width: `${stageFit.width}px`, height: `${stageFit.height}px` } : { width: '100%', height: '100%' }}
-                >
-                  <canvas ref={canvasRef} className="block h-full w-full bg-white" />
+            <div ref={stageRef} className="relative min-h-0 flex-1 overflow-hidden bg-slate-300 p-1">
+              <div className="flex h-full w-full overflow-auto">
+                {!hasPdf && <p className="m-auto text-sm font-bold text-slate-500">PDFを選択するとプレビューが表示されます</p>}
+                {hasPdf && (
                   <div
-                    ref={frameLayerRef}
-                    className="absolute inset-0"
-                    onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedRowId(''); }}
+                    className="relative m-auto shadow-xl"
+                    style={stageDisplay.width > 0 ? { width: `${stageDisplay.width}px`, height: `${stageDisplay.height}px` } : { width: '100%', height: '100%' }}
                   >
-                    {preview.width > 0 && previewRects.map((entry) => {
-                      const { row, rect, isManual } = entry;
-                      const code = normalizePdfCropCode(row.code);
-                      const hasCode = pdfTextItemsContainCodeInRect(preview.textItems, code, rect);
-                      const isSelected = row.id === selectedRowId;
-                      const tone = isManual
-                        ? 'border-indigo-500 bg-indigo-400/10'
-                        : hasCode ? 'border-emerald-500 bg-emerald-400/10' : 'border-amber-500 bg-amber-400/10';
-                      // 枠線は手動かどうか、ラベルはコードが枠内にあるかを示す (手動調整でもコードの入り具合が分かるように)
-                      const badgeTone = hasCode ? 'bg-emerald-600' : 'bg-amber-500';
-                      return (
-                        <div
-                          key={row.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`${code} の切り抜き枠`}
-                          title={`${code}｜ドラッグで移動・つまみでサイズ変更・矢印キーで微調整`}
-                          onPointerDown={(event) => startFrameDrag(event, entry, 'move')}
-                          onKeyDown={(event) => handleFrameKeyDown(event, entry)}
-                          className={`absolute touch-none select-none border-2 focus:outline-none ${tone} ${isSelected ? 'z-20 cursor-move ring-2 ring-indigo-400' : 'z-10 cursor-pointer'}`}
-                          style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }}
-                        >
-                          <span className={`pointer-events-none absolute left-0.5 top-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-black text-white shadow ${badgeTone}`}>{code}{isManual ? '・手動' : ''}</span>
-                          {isSelected && PDF_CROP_RESIZE_HANDLES.map((handle) => (
-                            <span
-                              key={handle}
-                              role="presentation"
-                              onPointerDown={(event) => startFrameDrag(event, entry, handle)}
-                              className={`absolute h-3 w-3 rounded-full border-2 border-white bg-indigo-600 shadow ${HANDLE_POSITION[handle]}`}
-                            />
-                          ))}
-                        </div>
-                      );
-                    })}
+                    <canvas ref={canvasRef} className="block h-full w-full bg-white" />
+                    <div
+                      ref={frameLayerRef}
+                      className="absolute inset-0"
+                      onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedRowId(''); }}
+                    >
+                      {preview.width > 0 && previewRects.map((entry) => {
+                        const { row, rect, isManual } = entry;
+                        const code = normalizePdfCropCode(row.code);
+                        const hasCode = pdfTextItemsContainCodeInRect(preview.textItems, code, rect);
+                        const isSelected = row.id === selectedRowId;
+                        const tone = isManual
+                          ? 'border-indigo-500 bg-indigo-400/10'
+                          : hasCode ? 'border-emerald-500 bg-emerald-400/10' : 'border-amber-500 bg-amber-400/10';
+                        // 枠線は手動かどうか、ラベルはコードが枠内にあるかを示す (手動調整でもコードの入り具合が分かるように)
+                        const badgeTone = hasCode ? 'bg-emerald-600' : 'bg-amber-500';
+                        return (
+                          <div
+                            key={row.id}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`${code} の切り抜き枠`}
+                            title={`${code}｜ドラッグで移動・つまみでサイズ変更・矢印キーで微調整`}
+                            onPointerDown={(event) => startFrameDrag(event, entry, 'move')}
+                            onKeyDown={(event) => handleFrameKeyDown(event, entry)}
+                            className={`absolute touch-none select-none border-2 focus:outline-none ${tone} ${isSelected ? 'z-20 cursor-move ring-2 ring-indigo-400' : 'z-10 cursor-pointer'}`}
+                            style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }}
+                          >
+                            <span className={`pointer-events-none absolute left-0.5 top-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-black text-white shadow ${badgeTone}`}>{code}{isManual ? '・手動' : ''}</span>
+                            {isSelected && PDF_CROP_RESIZE_HANDLES.map((handle) => (
+                              <span
+                                key={handle}
+                                role="presentation"
+                                onPointerDown={(event) => startFrameDrag(event, entry, handle)}
+                                className={`absolute h-3 w-3 rounded-full border-2 border-white bg-indigo-600 shadow ${HANDLE_POSITION[handle]}`}
+                              />
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {(preview.isLoading || !pdfDocument) && <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/75"><Loader2 className="animate-spin text-indigo-600" size={30} /></div>}
                   </div>
-                  {(preview.isLoading || !pdfDocument) && <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/75"><Loader2 className="animate-spin text-indigo-600" size={30} /></div>}
+                )}
+              </div>
+              {hasPdf && (
+                <div className="absolute bottom-2 right-2 z-40 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 py-1 pl-2 pr-1 shadow-lg backdrop-blur">
+                  <button type="button" onClick={() => setZoom((current) => clampPdfPreviewZoom(current - PDF_PREVIEW_ZOOM_STEP))} disabled={zoom <= PDF_PREVIEW_ZOOM_MIN} className="rounded-full px-1.5 text-sm font-black text-slate-600 hover:bg-slate-100 disabled:opacity-30" aria-label="縮小">−</button>
+                  <input
+                    type="range"
+                    min={PDF_PREVIEW_ZOOM_MIN}
+                    max={PDF_PREVIEW_ZOOM_MAX}
+                    step="0.05"
+                    value={zoom}
+                    onChange={(event) => setZoom(clampPdfPreviewZoom(event.target.value))}
+                    className="w-28 accent-indigo-600"
+                    aria-label="ページの表示倍率"
+                  />
+                  <button type="button" onClick={() => setZoom((current) => clampPdfPreviewZoom(current + PDF_PREVIEW_ZOOM_STEP))} disabled={zoom >= PDF_PREVIEW_ZOOM_MAX} className="rounded-full px-1.5 text-sm font-black text-slate-600 hover:bg-slate-100 disabled:opacity-30" aria-label="拡大">＋</button>
+                  <button type="button" onClick={() => setZoom(PDF_PREVIEW_ZOOM_MIN)} className="w-14 rounded-full bg-slate-100 py-0.5 text-[10px] font-black text-slate-600 hover:bg-slate-200" title="クリックで全体表示に戻す">{Math.round(zoom * 100)}%</button>
                 </div>
               )}
             </div>
           </section>
 
           <aside className="flex min-h-0 flex-col gap-2.5">
+            <div className="space-y-2">
+              <button type="button" onClick={() => pdfInputRef.current?.click()} disabled={isBusy} className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${hasPdf ? 'border-indigo-300 bg-indigo-50' : 'border-dashed border-slate-300 bg-white hover:bg-slate-50'}`}>
+                {isReadingPdfs ? <Loader2 size={18} className="shrink-0 animate-spin text-indigo-600" /> : <FileImage size={18} className="shrink-0 text-indigo-600" />}
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-black text-slate-700">{hasPdf ? `PDF ${pdfSources.length}ファイル / ${batchPages.length}ページ` : 'PDFを選択（複数可）'}</span>
+                  <span className="block truncate text-[10px] text-slate-500">{isReadingPdfs ? 'PDFを確認しています…' : hasPdf ? 'クリックで選び直し' : `最大${MAX_PDF_CROP_BATCH_PAGES}ページ`}</span>
+                </span>
+              </button>
+              <button type="button" onClick={() => csvInputRef.current?.click()} disabled={isBusy} className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${csvFile ? 'border-emerald-300 bg-emerald-50' : 'border-dashed border-slate-300 bg-white hover:bg-slate-50'}`}>
+                <FileSpreadsheet size={18} className="shrink-0 text-emerald-600" />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-black text-slate-700">{csvFile ? 'CSV 選択済み' : 'CSV（全データ）を選択'}</span>
+                  <span className="block truncate text-[10px] text-slate-500">{csvFile?.name || '台割の出力CSV'}</span>
+                </span>
+              </button>
+              <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" onChange={handlePdfChange} />
+              <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvChange} />
+            </div>
+
             <section className="rounded-2xl border border-slate-200 bg-white p-3">
               <p className="text-[10px] font-bold text-slate-500">保存するコマ</p>
               <p className="mt-0.5 flex items-baseline gap-1.5"><span className="text-3xl font-black text-indigo-700">{batchSummary.importCount}</span><span className="text-xs font-bold text-slate-500">コマ / {batchSummary.pageCount}ページ</span></p>
@@ -732,7 +758,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
           </div>
         )}
 
-        <footer className="flex items-center justify-between border-t border-slate-200 bg-white px-6 py-4">
+        <footer className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5">
           <p className={`text-[11px] font-bold ${isReady ? 'text-emerald-600' : 'text-slate-500'}`}>{statusText}</p>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} disabled={isImporting} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">キャンセル</button>

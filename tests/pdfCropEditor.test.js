@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   applyPdfCropDrag,
+  clampPdfPreviewZoom,
   clearPdfCropManualPage,
   clearPdfCropManualRect,
   countPdfCropManualRects,
@@ -10,8 +11,11 @@ import {
   getPdfCropManualRects,
   MIN_PDF_CROP_SIZE,
   movePdfCropRect,
+  PDF_PREVIEW_ZOOM_MAX,
+  PDF_PREVIEW_ZOOM_MIN,
   resizePdfCropRect,
-  setPdfCropManualRect
+  setPdfCropManualRect,
+  zoomPdfPreviewSize
 } from '../src/domain/pdfCropEditor.js';
 
 const RECT = { x: 0.2, y: 0.3, width: 0.25, height: 0.2 };
@@ -24,6 +28,16 @@ test('fitPdfPreviewSize scales the page to fill the stage without distorting it'
   // 測定前 / 未描画は 0
   assert.deepEqual(fitPdfPreviewSize({ width: 800, height: 1000 }, { width: 0, height: 0 }), { width: 0, height: 0 });
   assert.deepEqual(fitPdfPreviewSize(null, { width: 400, height: 900 }), { width: 0, height: 0 });
+});
+
+test('preview zoom stays within range and scales the fitted size', () => {
+  assert.equal(clampPdfPreviewZoom(2.5), 2.5);
+  assert.equal(clampPdfPreviewZoom(0.2), PDF_PREVIEW_ZOOM_MIN, '等倍より小さくはしない');
+  assert.equal(clampPdfPreviewZoom(99), PDF_PREVIEW_ZOOM_MAX);
+  assert.equal(clampPdfPreviewZoom('x'), PDF_PREVIEW_ZOOM_MIN);
+  assert.deepEqual(zoomPdfPreviewSize({ width: 400, height: 500 }, 1), { width: 400, height: 500 });
+  assert.deepEqual(zoomPdfPreviewSize({ width: 400, height: 500 }, 2.5), { width: 1000, height: 1250 });
+  assert.deepEqual(zoomPdfPreviewSize({ width: 0, height: 0 }, 2), { width: 0, height: 0 });
 });
 
 test('movePdfCropRect keeps the size and stops at the page edge', () => {
