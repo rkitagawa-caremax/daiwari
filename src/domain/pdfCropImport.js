@@ -12,6 +12,8 @@ export const DEFAULT_PDF_GRID_BOUNDS = Object.freeze({
   bottom: 8.7
 });
 
+export const MAX_PDF_CROP_BATCH_PAGES = 10;
+
 export const PDF_CROP_SIZE_OPTIONS = Object.freeze([
   '1/16（1コマ）',
   '1/8 縦（2コマ）',
@@ -106,6 +108,101 @@ export const inferCatalogStartPage = (filename = '') => {
   const match = normalized.match(/(?:^|[^A-Z0-9])P\s*0*(\d{1,4})(?:[^0-9]|$)/i);
   return match ? Math.max(1, Number.parseInt(match[1], 10)) : 1;
 };
+
+export const buildPdfCropBatchPages = (sources = []) => sources.flatMap((source, sourceIndex) => {
+  const numPages = Math.max(1, Number.parseInt(source?.numPages, 10) || 1);
+  const catalogStartPage = inferCatalogStartPage(source?.file?.name || source?.name || '');
+  return Array.from({ length: numPages }, (_, pageIndex) => ({
+    id: `${sourceIndex + 1}-${pageIndex + 1}`,
+    sourceIndex,
+    file: source?.file || source,
+    filename: source?.file?.name || source?.name || '',
+    pdfPageNumber: pageIndex + 1,
+    catalogPage: catalogStartPage + pageIndex
+  }));
+});
+
+// 一括処理のページ一覧に、ユーザーが手動で変更した対象ページ (catalogPage) を反映する。
+export const applyPdfCropCatalogPageOverrides = (batchPages = [], overrides = {}) => batchPages.map((page) => {
+  const override = Number.parseInt(overrides?.[page.id], 10);
+  return Number.isInteger(override) && override >= 1 ? { ...page, catalogPage: override } : page;
+});
+
+// 同一ページ内で座標が重なるコマ (およびグリッド外のコマ) の id を返す。
+export const findPdfCropGridConflicts = (rows = []) => {
+  const conflicts = new Set();
+  const occupied = new Map();
+  rows.forEach((row) => {
+    if (!isPdfCropRowInsideGrid({ ...row, layoutStatus: 'ready' })) {
+      conflicts.add(row.id);
+      return;
+    }
+    for (let y = row.yPos; y < row.yPos + row.rowSpan; y++) {
+      for (let x = row.xPos; x < row.xPos + row.colSpan; x++) {
+        const key = `${x}:${y}`;
+        if (occupied.has(key)) {
+          conflicts.add(row.id);
+          conflicts.add(occupied.get(key));
+        } else {
+          occupied.set(key, row.id);
+        }
+      }
+    }
+  });
+  return conflicts;
+};
+
+const sortPdfCropRows = (rows) => [...rows].sort((left, right) => (
+  (left.frameNumber || left.order || left.csvRow) - (right.frameNumber || right.order || right.csvRow)
+));
+
+// 一括処理の各ページについて「CSV 上の対象コマ」「実際に保存するコマ」を決める。
+// 保存対象から除外: コード不明 / 座標衝突 / 既存画像と同じコード / バッチ内で既に登場したコード。
+// 同じ対象ページに複数の PDF ページが割り当たっている場合は isDuplicateCatalogPage を立てる。
+export const buildPdfCropPagePlans = ({ batchPages = [], rows = [], existingCodes = new Set() } = {}) => {
+  const seenCodes = new Set();
+  const catalogPageCounts = new Map();
+  batchPages.forEach((page) => {
+    catalogPageCounts.set(page.catalogPage, (catalogPageCounts.get(page.catalogPage) || 0) + 1);
+  });
+
+  return batchPages.map((page) => {
+    const targetRows = sortPdfCropRows(rows.filter((row) => row.pageNumber === page.catalogPage));
+    const conflictIds = findPdfCropGridConflicts(targetRows);
+    let existingCount = 0;
+    const importRows = targetRows.filter((row) => {
+      const code = normalizePdfCropCode(row.code);
+      if (!code || conflictIds.has(row.id)) return false;
+      if (existingCodes.has(code)) {
+        existingCount++;
+        return false;
+      }
+      if (seenCodes.has(code)) return false;
+      seenCodes.add(code);
+      return true;
+    });
+    return {
+      page,
+      targetRows,
+      conflictIds,
+      importRows,
+      existingCount,
+      skippedCount: Math.max(0, targetRows.length - importRows.length),
+      hasCsvRows: targetRows.length > 0,
+      isDuplicateCatalogPage: (catalogPageCounts.get(page.catalogPage) || 0) > 1
+    };
+  });
+};
+
+export const summarizePdfCropPagePlans = (plans = []) => plans.reduce((summary, plan) => ({
+  pageCount: summary.pageCount + 1,
+  targetCount: summary.targetCount + plan.targetRows.length,
+  importCount: summary.importCount + plan.importRows.length,
+  skippedCount: summary.skippedCount + plan.skippedCount,
+  conflictCount: summary.conflictCount + plan.conflictIds.size,
+  pagesWithoutCsv: summary.pagesWithoutCsv + (plan.hasCsvRows ? 0 : 1),
+  duplicateCatalogPages: summary.duplicateCatalogPages + (plan.isDuplicateCatalogPage ? 1 : 0)
+}), { pageCount: 0, targetCount: 0, importCount: 0, skippedCount: 0, conflictCount: 0, pagesWithoutCsv: 0, duplicateCatalogPages: 0 });
 
 const isSupportedSizeType = (value = '') => {
   const normalized = String(value).normalize('NFKC').toLowerCase().replace(/\s+/g, '');
@@ -289,4 +386,39 @@ export const pdfTextItemsContainCode = (textItems, row, bounds = DEFAULT_PDF_GRI
     && item.y <= rect.y + rect.height
     && normalizePdfCropCode(item.text) === row.code
   ));
+};
+
+export const MAX_PDF_CROP_TEXT_LENGTH = 4000;
+
+const compactPdfText = (values) => values
+  .map((value) => String(value || '').normalize('NFKC').trim())
+  .filter(Boolean)
+  .join(' ')
+  .replace(/\s+/g, ' ')
+  .replace(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])\s+(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu, '$1')
+  .trim();
+
+export const extractPdfCropText = (
+  textItems,
+  row,
+  bounds = DEFAULT_PDF_GRID_BOUNDS,
+  maxLength = MAX_PDF_CROP_TEXT_LENGTH
+) => {
+  if (!Array.isArray(textItems) || !isPdfCropRowInsideGrid(row)) {
+    return { text: '', truncated: false };
+  }
+  const rect = getPdfCropRect(row, bounds);
+  const compacted = compactPdfText(textItems
+    .filter((item) => (
+      item.x >= rect.x
+      && item.x <= rect.x + rect.width
+      && item.y >= rect.y
+      && item.y <= rect.y + rect.height
+    ))
+    .map((item) => item.text));
+  const safeMaxLength = Math.max(0, Number.parseInt(maxLength, 10) || 0);
+  if (!safeMaxLength || compacted.length <= safeMaxLength) {
+    return { text: compacted, truncated: false };
+  }
+  return { text: compacted.slice(0, safeMaxLength), truncated: true };
 };

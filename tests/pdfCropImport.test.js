@@ -2,9 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyPdfCropCatalogPageOverrides,
+  buildPdfCropBatchPages,
+  buildPdfCropPagePlans,
+  findPdfCropGridConflicts,
+  summarizePdfCropPagePlans,
   DEFAULT_PDF_GRID_BOUNDS,
+  extractPdfCropText,
   getPdfCropRect,
   inferCatalogStartPage,
+  MAX_PDF_CROP_BATCH_PAGES,
   isPdfCropRowInsideGrid,
   normalizePdfCropCode,
   parsePdfCropCsv,
@@ -24,6 +31,23 @@ test('normalizePdfCropCode removes catalog prefixes and proof suffixes', () => {
 test('inferCatalogStartPage reads the P number from a proof PDF filename', () => {
   assert.equal(inferCatalogStartPage('P010_介援隊vol.26.pdf'), 10);
   assert.equal(inferCatalogStartPage('catalog.pdf'), 1);
+});
+
+test('buildPdfCropBatchPages maps selected PDFs to consecutive catalog pages', () => {
+  const pages = buildPdfCropBatchPages([
+    { file: { name: 'P010_proof.pdf' }, numPages: 1 },
+    { file: { name: 'P020_21.pdf' }, numPages: 2 }
+  ]);
+  assert.equal(MAX_PDF_CROP_BATCH_PAGES, 10);
+  assert.deepEqual(pages.map(({ filename, pdfPageNumber, catalogPage }) => ({
+    filename,
+    pdfPageNumber,
+    catalogPage
+  })), [
+    { filename: 'P010_proof.pdf', pdfPageNumber: 1, catalogPage: 10 },
+    { filename: 'P020_21.pdf', pdfPageNumber: 1, catalogPage: 20 },
+    { filename: 'P020_21.pdf', pdfPageNumber: 2, catalogPage: 21 }
+  ]);
 });
 
 test('parsePdfCropCsv reads code, size, page and explicit grid coordinates', () => {
@@ -100,4 +124,78 @@ test('row size edits update spans and text verification is limited to its crop',
     { text: 'E1957', x: 0.8, y: 0.8 }
   ], resized, DEFAULT_PDF_GRID_BOUNDS), true);
   assert.equal(pdfTextItemsContainCode([{ text: 'E1957', x: 0.8, y: 0.8 }], resized), false);
+});
+
+test('extractPdfCropText keeps only text inside the crop and compacts it for storage', () => {
+  const row = { code: 'E1957', xPos: 1, yPos: 1, rowSpan: 1, colSpan: 2, layoutStatus: 'ready' };
+  const result = extractPdfCropText([
+    { text: 'アイソカル', x: 0.12, y: 0.12 },
+    { text: ' ゼリー ', x: 0.2, y: 0.13 },
+    { text: '261-E1957', x: 0.3, y: 0.2 },
+    { text: '別コマ', x: 0.8, y: 0.8 }
+  ], row);
+  assert.equal(result.text, 'アイソカルゼリー 261-E1957');
+  assert.equal(result.truncated, false);
+});
+
+test('extractPdfCropText caps long text and records truncation', () => {
+  const row = { code: 'E1957', xPos: 1, yPos: 1, rowSpan: 1, colSpan: 2, layoutStatus: 'ready' };
+  assert.deepEqual(extractPdfCropText([{ text: '123456789', x: 0.2, y: 0.2 }], row, DEFAULT_PDF_GRID_BOUNDS, 5), {
+    text: '12345',
+    truncated: true
+  });
+});
+
+test('applyPdfCropCatalogPageOverrides replaces only valid overrides', () => {
+  const pages = buildPdfCropBatchPages([{ file: { name: 'P010.pdf' }, numPages: 1 }, { file: { name: 'scan.pdf' }, numPages: 1 }]);
+  const overridden = applyPdfCropCatalogPageOverrides(pages, { '2-1': 12, '1-1': 'abc' });
+  assert.deepEqual(overridden.map((page) => page.catalogPage), [10, 12]);
+  assert.equal(overridden[0], pages[0], 'pages without a valid override keep their identity');
+});
+
+test('buildPdfCropPagePlans dedupes codes across pages and flags duplicate targets', () => {
+  const rows = parsePdfCropCsv([
+    HEADER,
+    '食事関連,10,1,1,E1001,1/8 横（2コマ）,,,X1Y1,,1,1',
+    '食事関連,10,2,2,E1002,1/8 横（2コマ）,,,X3Y1,,3,1',
+    '食事関連,11,1,1,E1002,1/16（1コマ）,,,X1Y1,,1,1',
+    '食事関連,11,2,2,E1003,1/16（1コマ）,,,X2Y1,,2,1'
+  ].join('\n')).rows;
+  const batchPages = buildPdfCropBatchPages([
+    { file: { name: 'P010.pdf' }, numPages: 1 },
+    { file: { name: 'P011.pdf' }, numPages: 1 },
+    { file: { name: 'P011_copy.pdf' }, numPages: 1 },
+    { file: { name: 'P099.pdf' }, numPages: 1 }
+  ]);
+  const plans = buildPdfCropPagePlans({ batchPages, rows, existingCodes: new Set(['E1001']) });
+
+  assert.deepEqual(plans.map((plan) => plan.importRows.map((row) => row.code)), [
+    ['E1002'],   // E1001 は既存画像なので除外
+    ['E1003'],   // E1002 は P.10 で保存済みなので除外
+    [],          // 同じ P.11 の重複 PDF: コードは全て登場済み
+    []           // CSV に P.99 がない
+  ]);
+  assert.equal(plans[0].existingCount, 1);
+  assert.equal(plans[1].isDuplicateCatalogPage, true);
+  assert.equal(plans[3].hasCsvRows, false);
+
+  assert.deepEqual(summarizePdfCropPagePlans(plans), {
+    pageCount: 4,
+    targetCount: 6,
+    importCount: 2,
+    skippedCount: 4,
+    conflictCount: 0,
+    pagesWithoutCsv: 1,
+    duplicateCatalogPages: 2
+  });
+});
+
+test('findPdfCropGridConflicts marks overlapping and out-of-grid rows', () => {
+  const conflicts = findPdfCropGridConflicts([
+    { id: 'a', xPos: 1, yPos: 1, rowSpan: 1, colSpan: 2 },
+    { id: 'b', xPos: 2, yPos: 1, rowSpan: 1, colSpan: 1 },
+    { id: 'c', xPos: 4, yPos: 4, rowSpan: 1, colSpan: 2 },
+    { id: 'd', xPos: 3, yPos: 3, rowSpan: 1, colSpan: 1 }
+  ]);
+  assert.deepEqual([...conflicts].sort(), ['a', 'b', 'c']);
 });

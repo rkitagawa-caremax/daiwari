@@ -73,11 +73,15 @@ test('PDF crop provenance is preserved and compared without affecting legacy ima
     sourcePage: 10,
     pdfPageNumber: 1,
     sizeType: '1/8 横（2コマ）',
-    cropRect: { x: 0.1, y: 0.06, width: 0.4, height: 0.2 }
+    cropRect: { x: 0.1, y: 0.06, width: 0.4, height: 0.2 },
+    sourceText: 'アイソカルゼリー 261-E1957',
+    sourceTextVersion: 1,
+    sourceTextTruncated: false
   };
   const normalized = normalizeStockImageEntry(source);
   assert.equal(normalized.sourcePdfName, 'P010.pdf');
   assert.equal(normalized.sourcePage, 10);
+  assert.equal(normalized.sourceText, source.sourceText);
   assert.deepEqual(normalized.cropRect, source.cropRect);
   assert.notEqual(normalized.cropRect, source.cropRect);
   assert.equal(isSameStockImageList([source], [{ ...source }]), true);

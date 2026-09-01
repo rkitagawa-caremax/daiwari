@@ -24,6 +24,9 @@ export const normalizeStockImageEntry = (item, imageDataById = {}) => {
     pdfPageNumber: item.pdfPageNumber || null,
     sizeType: item.sizeType || null,
     cropRect: item.cropRect ? { ...item.cropRect } : null,
+    sourceText: typeof item.sourceText === 'string' ? item.sourceText : '',
+    sourceTextVersion: item.sourceTextVersion || null,
+    sourceTextTruncated: item.sourceTextTruncated === true,
     freeLabels: getPanelFreeLabels(item),
     freeText: null,
     // 作業したアカウント (アップロード / コマから解除) の UID 一覧。未記録の既存画像は null。
@@ -63,6 +66,9 @@ export const isSameStockImageList = (leftItems = [], rightItems = []) => {
     if ((left?.pdfPageNumber || null) !== (right?.pdfPageNumber || null)) return false;
     if ((left?.sizeType || null) !== (right?.sizeType || null)) return false;
     if (JSON.stringify(left?.cropRect || null) !== JSON.stringify(right?.cropRect || null)) return false;
+    if ((left?.sourceText || '') !== (right?.sourceText || '')) return false;
+    if ((left?.sourceTextVersion || null) !== (right?.sourceTextVersion || null)) return false;
+    if ((left?.sourceTextTruncated === true) !== (right?.sourceTextTruncated === true)) return false;
     if (JSON.stringify(getPanelFreeLabels(left)) !== JSON.stringify(getPanelFreeLabels(right))) return false;
     if (JSON.stringify(left?.workedBy || null) !== JSON.stringify(right?.workedBy || null)) return false;
   }

@@ -2589,7 +2589,9 @@ export default function App() {
           ...(entry?.sourcePage ? { sourcePage: entry.sourcePage } : {}),
           ...(entry?.pdfPageNumber ? { pdfPageNumber: entry.pdfPageNumber } : {}),
           ...(entry?.sizeType ? { sizeType: entry.sizeType } : {}),
-          ...(entry?.cropRect ? { cropRect: entry.cropRect } : {})
+          ...(entry?.cropRect ? { cropRect: entry.cropRect } : {}),
+          ...(entry?.sourceText ? { sourceText: entry.sourceText, sourceTextVersion: 1 } : {}),
+          ...(entry?.sourceTextTruncated ? { sourceTextTruncated: true } : {})
         };
         const newImage = {
           id: idbHelper.generateId(),
