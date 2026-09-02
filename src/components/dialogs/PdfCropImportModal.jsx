@@ -31,7 +31,7 @@ import {
   PDF_PREVIEW_ZOOM_MAX,
   PDF_PREVIEW_ZOOM_MIN,
   PDF_PREVIEW_ZOOM_STEP,
-  setPdfCropManualRect,
+  setPdfCropManualRects,
   zoomPdfPreviewSize
 } from '../../domain/pdfCropEditor';
 import { mergePdfCropRects, resolvePdfCropTextRects } from '../../domain/pdfCropTextBounds';
@@ -145,7 +145,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
   // 手で調整した切り抜き枠 { [ページid]: { [コマid]: rect } }
   const [manualRects, setManualRects] = useState(EMPTY_PDF_CROP_MANUAL_RECTS);
-  const [selectedRowId, setSelectedRowId] = useState('');
+  const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [isDraggingFrame, setIsDraggingFrame] = useState(false);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(PDF_PREVIEW_ZOOM_MIN);
@@ -195,7 +195,8 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
     return manualRect ? { ...entry, rect: manualRect, snappedCount: 0, hasTextAnchor: false, isManual: true } : entry;
   }), [activePageManualRects, autoPreviewRects]);
   const previewSnappedCount = previewRects.filter((entry) => entry.snappedCount >= 2 || entry.hasTextAnchor || entry.isManual).length;
-  const selectedEntry = previewRects.find((entry) => entry.row.id === selectedRowId) || null;
+  const selectedEntries = previewRects.filter((entry) => selectedRowIds.has(entry.row.id));
+  const selectedManualCount = selectedEntries.filter((entry) => entry.isManual).length;
   const pageManualCount = Object.keys(activePageManualRects).length;
   const totalManualCount = countPdfCropManualRects(manualRects);
 
@@ -214,9 +215,10 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
   const stageDisplay = useMemo(() => zoomPdfPreviewSize(stageFit, zoom), [stageFit, zoom]);
 
   // ページを切り替えたら選択を外す (枠は手動調整ぶんを残したまま)
-  useEffect(() => setSelectedRowId(''), [activeBatchPage?.id]);
+  useEffect(() => setSelectedRowIds(new Set()), [activeBatchPage?.id]);
 
   // --- コマ枠の手動調整 ---
+  // Ctrl (Mac は ⌘) + クリックで複数選択でき、移動・変形・矢印キーは選択中の全枠へ同時にかかる。
   const startFrameDrag = (event, entry, handle) => {
     const layer = frameLayerRef.current;
     if (!layer || isImporting) return;
@@ -227,15 +229,32 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
       event.preventDefault();
       event.stopPropagation();
     }
-    setSelectedRowId(entry.row.id);
+
+    // Ctrl+クリックは選択のトグルだけ行い、ドラッグは開始しない
+    if (handle === 'move' && (event.ctrlKey || event.metaKey)) {
+      setSelectedRowIds((current) => {
+        const next = new Set(current);
+        if (next.has(entry.row.id)) next.delete(entry.row.id);
+        else next.add(entry.row.id);
+        return next;
+      });
+      return;
+    }
+
+    // 選択中の枠を掴んだらグループごと、未選択の枠を掴んだらその枠だけの選択にする
+    const nextSelected = selectedRowIds.has(entry.row.id) ? selectedRowIds : new Set([entry.row.id]);
+    if (nextSelected !== selectedRowIds) setSelectedRowIds(nextSelected);
+    const items = previewRects
+      .filter((candidate) => nextSelected.has(candidate.row.id))
+      .map((candidate) => ({ rowId: candidate.row.id, rect: candidate.rect }));
+
     dragRef.current = {
       pointerId: event.pointerId,
       pageId: activeBatchPage?.id,
-      rowId: entry.row.id,
       handle,
       startX: event.clientX,
       startY: event.clientY,
-      rect: entry.rect,
+      items,
       width: bounds.width,
       height: bounds.height
     };
@@ -247,13 +266,12 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
     const handleMove = (event) => {
       const drag = dragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
-      const next = applyPdfCropDrag(
-        drag.rect,
-        drag.handle,
-        (event.clientX - drag.startX) / drag.width,
-        (event.clientY - drag.startY) / drag.height
-      );
-      setManualRects((current) => setPdfCropManualRect(current, drag.pageId, drag.rowId, next));
+      const dx = (event.clientX - drag.startX) / drag.width;
+      const dy = (event.clientY - drag.startY) / drag.height;
+      const rectsById = Object.fromEntries(drag.items.map(({ rowId, rect }) => (
+        [rowId, applyPdfCropDrag(rect, drag.handle, dx, dy)]
+      )));
+      setManualRects((current) => setPdfCropManualRects(current, drag.pageId, rectsById));
     };
     const handleEnd = () => {
       dragRef.current = null;
@@ -271,7 +289,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
 
   const handleFrameKeyDown = (event, entry) => {
     if (event.key === 'Escape') {
-      setSelectedRowId('');
+      setSelectedRowIds(new Set());
       return;
     }
     const step = event.shiftKey ? NUDGE_STEP_LARGE : NUDGE_STEP;
@@ -283,18 +301,22 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
     }[event.key];
     if (!nudge || isImporting) return;
     event.preventDefault();
-    setSelectedRowId(entry.row.id);
-    setManualRects((current) => setPdfCropManualRect(
-      current,
-      activeBatchPage?.id,
-      entry.row.id,
-      movePdfCropRect(entry.rect, nudge[0], nudge[1])
-    ));
+    const isGrouped = selectedRowIds.has(entry.row.id);
+    const targets = isGrouped
+      ? previewRects.filter((candidate) => selectedRowIds.has(candidate.row.id))
+      : [entry];
+    if (!isGrouped) setSelectedRowIds(new Set([entry.row.id]));
+    const rectsById = Object.fromEntries(targets.map((candidate) => (
+      [candidate.row.id, movePdfCropRect(candidate.rect, nudge[0], nudge[1])]
+    )));
+    setManualRects((current) => setPdfCropManualRects(current, activeBatchPage?.id, rectsById));
   };
 
-  const resetSelectedFrame = () => {
-    if (!selectedRowId) return;
-    setManualRects((current) => clearPdfCropManualRect(current, activeBatchPage?.id, selectedRowId));
+  const resetSelectedFrames = () => {
+    if (selectedRowIds.size === 0) return;
+    setManualRects((current) => (
+      [...selectedRowIds].reduce((acc, rowId) => clearPdfCropManualRect(acc, activeBatchPage?.id, rowId), current)
+    ));
   };
 
   const resetPageFrames = () => setManualRects((current) => clearPdfCropManualPage(current, activeBatchPage?.id));
@@ -580,11 +602,11 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               <p className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700">
                 {activeBatchPage ? <>{activeBatchPage.filename} <span className="text-slate-400">→</span> P.{activeBatchPage.catalogPage}{csvFile && <span className="ml-2 font-medium text-slate-500">{activeTargetRows.length}コマ</span>}</> : 'プレビュー'}
               </p>
-              {selectedEntry && (
-                <span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700">選択中 {normalizePdfCropCode(selectedEntry.row.code)}</span>
+              {selectedEntries.length > 0 && (
+                <span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700">選択中 {selectedEntries.length === 1 ? normalizePdfCropCode(selectedEntries[0].row.code) : `${selectedEntries.length}コマ`}</span>
               )}
-              {selectedEntry?.isManual && (
-                <button type="button" onClick={resetSelectedFrame} disabled={isImporting} className="shrink-0 rounded-full border border-indigo-200 px-2.5 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40">この枠を自動に戻す</button>
+              {selectedManualCount > 0 && (
+                <button type="button" onClick={resetSelectedFrames} disabled={isImporting} className="shrink-0 rounded-full border border-indigo-200 px-2.5 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40">{selectedEntries.length === 1 ? 'この枠を自動に戻す' : `選択${selectedManualCount}件を自動に戻す`}</button>
               )}
               {activeTargetRows.length > 0 && preview.width > 0 && (
                 <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600" title="自動＝罫線や余白から境界を決めた枠。目印＝コマ番号やコードを見つけた枠。手動＝自分で調整した枠。（境界はページ全体で突き合わせて外れ値を除いています）">枠 自動{previewSnappedCount}/{activeTargetRows.length}・目印{previewTextRects.size}{pageManualCount > 0 ? `・手動${pageManualCount}` : ''}</span>
@@ -603,13 +625,13 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                     <div
                       ref={frameLayerRef}
                       className="absolute inset-0"
-                      onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedRowId(''); }}
+                      onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedRowIds(new Set()); }}
                     >
                       {preview.width > 0 && previewRects.map((entry) => {
                         const { row, rect, isManual } = entry;
                         const code = normalizePdfCropCode(row.code);
                         const hasCode = pdfTextItemsContainCodeInRect(preview.textItems, code, rect);
-                        const isSelected = row.id === selectedRowId;
+                        const isSelected = selectedRowIds.has(row.id);
                         const tone = isManual
                           ? 'border-indigo-500 bg-indigo-400/10'
                           : hasCode ? 'border-emerald-500 bg-emerald-400/10' : 'border-amber-500 bg-amber-400/10';
@@ -621,7 +643,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
                             role="button"
                             tabIndex={0}
                             aria-label={`${code} の切り抜き枠`}
-                            title={`${code}｜ドラッグで移動・つまみでサイズ変更・矢印キーで微調整`}
+                            title={`${code}｜ドラッグで移動・つまみでサイズ変更・Ctrl+クリックで複数選択`}
                             onPointerDown={(event) => startFrameDrag(event, entry, 'move')}
                             onKeyDown={(event) => handleFrameKeyDown(event, entry)}
                             className={`absolute touch-none select-none border-2 focus:outline-none ${tone} ${isSelected ? 'z-20 cursor-move ring-2 ring-indigo-400' : 'z-10 cursor-pointer'}`}
@@ -707,7 +729,7 @@ const PdfCropImportModal = ({ isOpen, onClose, onImport, existingImages = [], is
               <div className="space-y-1">
                 <details className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5">
                   <summary className="cursor-pointer text-[10px] font-bold text-slate-500">コマ枠の手動調整{totalManualCount > 0 ? `・${totalManualCount}コマ` : ''}</summary>
-                  <p className="mt-1 text-[10px] leading-snug text-slate-500">枠をクリック → ドラッグで移動、つまみでサイズ変更、矢印キーで微調整（Shiftで大きく）</p>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-500">枠をクリック → ドラッグで移動、つまみでサイズ変更、矢印キーで微調整（Shiftで大きく）。Ctrl＋クリックで複数選択して、まとめて動かせます</p>
                 </details>
                 {pageManualCount > 0 && (
                   <button type="button" onClick={resetPageFrames} disabled={isImporting} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">このページの{pageManualCount}件を自動に戻す</button>

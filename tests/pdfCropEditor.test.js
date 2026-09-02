@@ -15,6 +15,7 @@ import {
   PDF_PREVIEW_ZOOM_MIN,
   resizePdfCropRect,
   setPdfCropManualRect,
+  setPdfCropManualRects,
   zoomPdfPreviewSize
 } from '../src/domain/pdfCropEditor.js';
 
@@ -88,4 +89,16 @@ test('manual rect overrides are stored per page and per frame', () => {
   assert.equal(clearPdfCropManualPage(withoutPage, 'page-1'), withoutPage);
   // 元の状態は書き換えない
   assert.equal(countPdfCropManualRects(third), 3);
+});
+
+test('setPdfCropManualRects writes several frames at once without touching others', () => {
+  const base = setPdfCropManualRect({}, 'page-1', 'row-a', RECT);
+  const moved = { ...RECT, x: 0.5 };
+  const next = setPdfCropManualRects(base, 'page-1', { 'row-b': moved, 'row-c': moved });
+  assert.deepEqual(Object.keys(getPdfCropManualRects(next, 'page-1')).sort(), ['row-a', 'row-b', 'row-c']);
+  assert.deepEqual(getPdfCropManualRects(next, 'page-1')['row-a'], RECT);
+  assert.deepEqual(getPdfCropManualRects(next, 'page-1')['row-b'], moved);
+  // 空の更新やページ未指定は同じ参照を返す
+  assert.equal(setPdfCropManualRects(base, 'page-1', {}), base);
+  assert.equal(setPdfCropManualRects(base, undefined, { 'row-b': moved }), base);
 });

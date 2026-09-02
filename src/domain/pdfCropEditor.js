@@ -73,6 +73,16 @@ export const setPdfCropManualRect = (overrides = {}, pageId, rowId, rect) => {
   return { ...overrides, [pageId]: { ...getPdfCropManualRects(overrides, pageId), [rowId]: rect } };
 };
 
+// 複数の枠を一括で上書きする (Ctrl+クリックの複数選択でまとめて移動・変形するときに使う)
+export const setPdfCropManualRects = (overrides = {}, pageId, rectsById = {}) => {
+  const entries = Object.entries(rectsById).filter(([rowId, rect]) => rowId && rect);
+  if (!pageId || entries.length === 0) return overrides;
+  return {
+    ...overrides,
+    [pageId]: { ...getPdfCropManualRects(overrides, pageId), ...Object.fromEntries(entries) }
+  };
+};
+
 export const clearPdfCropManualRect = (overrides = {}, pageId, rowId) => {
   const page = overrides?.[pageId];
   if (!page || !(rowId in page)) return overrides;
