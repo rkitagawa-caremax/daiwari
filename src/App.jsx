@@ -86,6 +86,9 @@ import {
   stagePanelArrangeDropAcrossSheets
 } from './domain/panelArrange';
 import {
+  buildImageDeletionIdentity,
+  collectSheetImageKeys,
+  createImageDeletionFilter,
   isSameStockImageList,
   normalizeCloudImageDocuments,
   normalizeStockImages
@@ -2706,35 +2709,33 @@ export default function App() {
     return result;
   };
 
+  // 削除は id・画像データだけでなく、同じ介援隊コードの未配置な複製 (再取込などで溜まったもの) も
+  // まとめて対象にする。1件でも残ると台割CSVの流し込みで再度割り付けられてしまうため。
   const handleDeleteImage = (imgId, fallbackData = null) => {
     if (isLockedRef.current) return;
+    const identity = buildImageDeletionIdentity([{ id: imgId || null, data: fallbackData }], images);
+    const deletionKindOf = createImageDeletionFilter({ identity, sheetKeys: collectSheetImageKeys(sheets) });
+    const duplicateCount = images.filter((img) => deletionKindOf(img) === 'code').length;
     requestConfirm(
-      "画像をストックから削除しますか？",
+      duplicateCount > 0
+        ? `画像をストックから削除しますか？\n同じコードの画像${duplicateCount}件もまとめて削除します。`
+        : "画像をストックから削除しますか？",
       async () => {
         if (USE_LOCAL_STORAGE) {
-          const newImages = images.filter(img => {
-            if (imgId) return img.id !== imgId;
-            if (fallbackData) return img.data !== fallbackData;
-            return true;
-          });
+          const newImages = images.filter((img) => !deletionKindOf(img));
           setImages(newImages);
           // localStorageHelper.setItem('images', newImages); // Auto-save handles this
           return;
         }
         try {
-          const deleteIdSet = new Set();
+          // 画面は同一データの複製を隠すため、Firestore を直接走査して同じ id・データ・コードの文書を集める
+          const snapshot = await getDocs(imagesCollection);
+          const deleteIdSet = new Set(
+            snapshot.docs
+              .filter((imageDoc) => deletionKindOf({ id: imageDoc.id, ...(imageDoc.data() || {}) }))
+              .map((imageDoc) => imageDoc.id)
+          );
           if (imgId) deleteIdSet.add(imgId);
-
-          if (fallbackData) {
-            const snapshot = await getDocs(imagesCollection);
-            snapshot.docs.forEach((imageDoc) => {
-              const data = imageDoc.data() || {};
-              const resolved = data.data || data.image || null;
-              if (resolved && resolved === fallbackData) {
-                deleteIdSet.add(imageDoc.id);
-              }
-            });
-          }
 
           const deleteIds = Array.from(deleteIdSet).filter(Boolean);
           if (deleteIds.length === 0) {
@@ -2748,11 +2749,7 @@ export default function App() {
           });
           await runCloudWrite(() => batch.commit(), { key: 'images' });
           const deleteIdLookup = new Set(deleteIds);
-          const newImages = images.filter((img) => {
-            if (img.id && deleteIdLookup.has(img.id)) return false;
-            if (fallbackData && img.data === fallbackData) return false;
-            return true;
-          });
+          const newImages = images.filter((img) => !deletionKindOf(img) && !(img.id && deleteIdLookup.has(img.id)));
           setImages(newImages);
           persistCloudImagesCache(newImages);
         } catch (error) {
@@ -2767,43 +2764,30 @@ export default function App() {
     if (isLockedRef.current) return;
     if (!imageTargets || imageTargets.length === 0) return;
 
+    const identity = buildImageDeletionIdentity(imageTargets, images);
+    const deletionKindOf = createImageDeletionFilter({ identity, sheetKeys: collectSheetImageKeys(sheets) });
+    const duplicateCount = images.filter((img) => deletionKindOf(img) === 'code').length;
+
     requestConfirm(
-      `${imageTargets.length}枚の画像を削除しますか？`,
+      duplicateCount > 0
+        ? `${imageTargets.length}枚の画像を削除しますか？\n同じコードの画像${duplicateCount}件もまとめて削除します。`
+        : `${imageTargets.length}枚の画像を削除しますか？`,
       async () => {
-        const idSet = new Set();
-        const dataSet = new Set();
-
-        imageTargets.forEach((target) => {
-          if (!target) return;
-          if (typeof target === 'string') {
-            if (target) idSet.add(target);
-            return;
-          }
-          if (target.id) idSet.add(target.id);
-          else if (target.data) dataSet.add(target.data);
-        });
-
         if (USE_LOCAL_STORAGE) {
-          const newImages = images.filter(img => {
-            if (img.id) return !idSet.has(img.id);
-            if (img.data) return !dataSet.has(img.data);
-            return true;
-          });
+          const newImages = images.filter((img) => !deletionKindOf(img));
           setImages(newImages);
           // localStorageHelper.setItem('images', newImages); // Auto-save handles this
           return;
         }
 
-        if (dataSet.size > 0) {
-          const snapshot = await getDocs(imagesCollection);
-          snapshot.docs.forEach((imageDoc) => {
-            const data = imageDoc.data() || {};
-            const resolved = data.data || data.image || null;
-            if (resolved && dataSet.has(resolved)) {
-              idSet.add(imageDoc.id);
-            }
-          });
-        }
+        // 画面は同一データの複製を隠すため、Firestore を直接走査して同じ id・データ・コードの文書を集める
+        const snapshot = await getDocs(imagesCollection);
+        const idSet = new Set(
+          snapshot.docs
+            .filter((imageDoc) => deletionKindOf({ id: imageDoc.id, ...(imageDoc.data() || {}) }))
+            .map((imageDoc) => imageDoc.id)
+        );
+        identity.ids.forEach((id) => idSet.add(id));
 
         const imageIds = Array.from(idSet).filter(Boolean);
         if (imageIds.length === 0) {
@@ -2823,11 +2807,7 @@ export default function App() {
             await runCloudWrite(() => batch.commit(), { key: 'images' });
           }
           const deleteIdLookup = new Set(imageIds);
-          const newImages = images.filter((img) => {
-            if (img.id && deleteIdLookup.has(img.id)) return false;
-            if (img.data && dataSet.has(img.data)) return false;
-            return true;
-          });
+          const newImages = images.filter((img) => !deletionKindOf(img) && !(img.id && deleteIdLookup.has(img.id)));
           setImages(newImages);
           persistCloudImagesCache(newImages);
         } catch (err) {

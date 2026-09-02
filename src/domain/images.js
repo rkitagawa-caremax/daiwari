@@ -1,4 +1,5 @@
 import { getPanelFreeLabels } from './panels.js';
+import { normalizeCode } from './productCodes.js';
 
 const cloneCatalogTextData = (value) => {
   if (!value || typeof value !== 'object') return null;
@@ -123,6 +124,86 @@ export const isSameStockImageList = (leftItems = [], rightItems = []) => {
     if (JSON.stringify(left?.workedBy || null) !== JSON.stringify(right?.workedBy || null)) return false;
   }
   return true;
+};
+
+// --- 画像削除の同一性判定 ---
+// ライブラリには同じ介援隊コードの画像が複数たまりうる (PDF切り抜きの再取込は既定で追加登録)。
+// 同一バイト列の重複は normalizeStockImages が画面から隠すため、見えている 1 件を消しても
+// 隠れた同código・同データの複製が残り、台割CSVの流し込み (コード名の完全一致マッチ) で復活する。
+// そこで削除時は「id・画像データ・介援隊コード」のいずれかが一致する複製もまとめて対象にする。
+// コードは商品コードの形 (英1-2字+数字3-5桁) に見えるものだけ使い、logo.png のような
+// 一般名のファイルを巻き込まないようにする。
+
+const PRODUCT_CODE_PATTERN = /^[A-Z]{1,2}\d{3,5}$/;
+
+export const getStockImageCode = (image) => {
+  const name = String(image?.name || image?.originalName || '');
+  const stem = name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+  // code フィールド → ファイル名の語幹 → カタログ番号の前置き (261- など) を外した語幹、の順に試す
+  const candidates = [image?.code, stem, stem.replace(/^\d+[-_\s]*/, '')];
+  for (const candidate of candidates) {
+    const normalized = normalizeCode(String(candidate || ''));
+    if (PRODUCT_CODE_PATTERN.test(normalized)) return normalized;
+  }
+  return '';
+};
+
+// 削除対象 (id 文字列 or {id, data} など) から同一性キーを作る。
+// id しか無い対象は images から現物を引いて code / data を補う。
+export const buildImageDeletionIdentity = (targets = [], images = []) => {
+  const ids = new Set();
+  const data = new Set();
+  const codes = new Set();
+  const imagesById = new Map(images.filter((image) => image?.id).map((image) => [image.id, image]));
+
+  targets.forEach((target) => {
+    if (!target) return;
+    const entry = typeof target === 'string' ? { id: target } : target;
+    const resolved = entry.id && imagesById.has(entry.id) ? { ...imagesById.get(entry.id), ...entry } : entry;
+    if (resolved.id) ids.add(resolved.id);
+    const resolvedData = resolved.data || resolved.image || null;
+    if (resolvedData) data.add(resolvedData);
+    const code = getStockImageCode(resolved);
+    if (code) codes.add(code);
+  });
+
+  return { ids, data, codes };
+};
+
+// 一致の種類を返す: 'direct' = id か画像データの一致 / 'code' = 介援隊コードだけの一致 / null = 不一致
+export const getImageDeletionMatchKind = (image, identity) => {
+  if (!image || !identity) return null;
+  if (image.id && identity.ids.has(image.id)) return 'direct';
+  const resolvedData = image.data || image.image || null;
+  if (resolvedData && identity.data.has(resolvedData)) return 'direct';
+  const code = getStockImageCode(image);
+  if (code && identity.codes.has(code)) return 'code';
+  return null;
+};
+
+// ページに配置中の画像キー (imageId / 画像データ)。コード一致だけの複製でも、
+// どこかのコマが参照しているものは削除しない (コマの表示が壊れるため)。
+export const collectSheetImageKeys = (sheets = []) => {
+  const ids = new Set();
+  const data = new Set();
+  (Array.isArray(sheets) ? sheets : []).forEach((sheet) => {
+    (Array.isArray(sheet?.panels) ? sheet.panels : []).forEach((panel) => {
+      if (!panel) return;
+      if (panel.imageId) ids.add(panel.imageId);
+      if (panel.image) data.add(panel.image);
+    });
+  });
+  return { ids, data };
+};
+
+// 削除してよいかの判定を返す。direct は常に削除、code 一致は未配置のものだけ削除する。
+export const createImageDeletionFilter = ({ identity, sheetKeys = { ids: new Set(), data: new Set() } }) => (image) => {
+  const kind = getImageDeletionMatchKind(image, identity);
+  if (!kind) return null;
+  if (kind === 'direct') return kind;
+  const resolvedData = image.data || image.image || null;
+  const isPlaced = (image.id && sheetKeys.ids.has(image.id)) || (resolvedData && sheetKeys.data.has(resolvedData));
+  return isPlaced ? null : kind;
 };
 
 // 作業者フィルタ: workedBy 未記録の既存画像は全員に表示し、記録済みは本人のみに表示する。

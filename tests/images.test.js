@@ -154,3 +154,63 @@ test('worked-by filter shows own and legacy images only', () => {
   // ユーザー未確定時は隠さない
   assert.equal(isImageWorkedByUser({ workedBy: ['user-b'] }, null), true);
 });
+
+// --- 画像削除の同一性判定 ---
+import {
+  buildImageDeletionIdentity,
+  collectSheetImageKeys,
+  createImageDeletionFilter,
+  getImageDeletionMatchKind,
+  getStockImageCode
+} from '../src/domain/images.js';
+
+test('getStockImageCode reads the product code from the code field or filename stem', () => {
+  assert.equal(getStockImageCode({ code: 'B0867' }), 'B0867');
+  assert.equal(getStockImageCode({ name: 'B0867.jpg' }), 'B0867');
+  assert.equal(getStockImageCode({ name: '261-B0867.jpg' }), 'B0867');
+  assert.equal(getStockImageCode({ originalName: 'ｅ１９３１.png' }), 'E1931');
+  // 商品コードに見えない名前は空 (一般名のファイルを同一視しない)
+  assert.equal(getStockImageCode({ name: 'logo.png' }), '');
+  assert.equal(getStockImageCode({ name: '集合写真.jpg' }), '');
+  assert.equal(getStockImageCode({}), '');
+});
+
+test('buildImageDeletionIdentity resolves code and data from the library entry by id', () => {
+  const images = [
+    { id: 'img-1', name: 'B0867.jpg', code: 'B0867', data: 'data:a' },
+    { id: 'img-2', name: 'E1931.jpg', data: 'data:b' }
+  ];
+  const identity = buildImageDeletionIdentity(['img-1', { id: 'img-2' }], images);
+  assert.deepEqual([...identity.ids], ['img-1', 'img-2']);
+  assert.deepEqual([...identity.data], ['data:a', 'data:b']);
+  assert.deepEqual([...identity.codes], ['B0867', 'E1931']);
+});
+
+test('getImageDeletionMatchKind distinguishes direct hits from code-only duplicates', () => {
+  const identity = buildImageDeletionIdentity([{ id: 'img-1', data: 'data:a', name: 'B0867.jpg' }], []);
+  assert.equal(getImageDeletionMatchKind({ id: 'img-1' }, identity), 'direct');
+  // 隠れた同一データの複製 (id 違い) も直接扱い
+  assert.equal(getImageDeletionMatchKind({ id: 'twin', data: 'data:a' }, identity), 'direct');
+  // 同じコードで別バイトの複製はコード一致
+  assert.equal(getImageDeletionMatchKind({ id: 'other', name: 'B0867.jpg', data: 'data:z' }, identity), 'code');
+  assert.equal(getImageDeletionMatchKind({ id: 'x', name: 'E9999.jpg', data: 'data:y' }, identity), null);
+});
+
+test('createImageDeletionFilter keeps code-only duplicates that are placed on a sheet', () => {
+  const identity = buildImageDeletionIdentity([{ id: 'img-1', data: 'data:a', name: 'B0867.jpg' }], []);
+  const sheetKeys = collectSheetImageKeys([
+    { panels: [{ imageId: 'placed-twin' }, { image: 'data:placed' }, null] }
+  ]);
+  assert.deepEqual([...sheetKeys.ids], ['placed-twin']);
+  assert.deepEqual([...sheetKeys.data], ['data:placed']);
+
+  const kindOf = createImageDeletionFilter({ identity, sheetKeys });
+  // 未配置のコード一致複製は削除対象
+  assert.equal(kindOf({ id: 'free-twin', name: 'B0867.jpg', data: 'data:z' }), 'code');
+  // 配置中のコード一致複製は守る (コマの表示が壊れるため)
+  assert.equal(kindOf({ id: 'placed-twin', name: 'B0867.jpg', data: 'data:w' }), null);
+  assert.equal(kindOf({ id: 'p2', name: 'B0867.jpg', data: 'data:placed' }), null);
+  // 直接指定は配置中でも削除 (ユーザーが明示的に選んだもの)
+  assert.equal(kindOf({ id: 'img-1' }), 'direct');
+  assert.equal(kindOf({ id: 'unrelated', name: 'E1.png', data: 'data:u' }), null);
+});
