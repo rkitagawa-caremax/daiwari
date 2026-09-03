@@ -12,6 +12,78 @@ let activeNativeDragPayload = null;
 let activePanelMovePayload = null;
 let isNativeDragSessionActive = false;
 
+export const buildPanelDragConfig = ({
+  sheetId,
+  panelIndex,
+  textData = '',
+  arrangeMode = false,
+  arrangeSheetId = '',
+  arrangeTokenId = '',
+  previewImage = null,
+  previewLabel = null,
+  previewCode = null,
+  previewText = ''
+} = {}) => ({
+  payload: {
+    moveSourceType: 'panel',
+    sourceSheetId: sheetId,
+    sourceIndex: panelIndex,
+    textData: textData || '',
+    arrangeMode,
+    arrangeSheetId,
+    arrangeTokenId
+  },
+  preview: {
+    image: previewImage || null,
+    label: previewLabel || null,
+    code: previewCode || null,
+    text: previewText || ''
+  }
+});
+
+export const buildLibraryImageDragConfig = (image = {}) => ({
+  payload: {
+    src: image.data,
+    imageId: image.id || '',
+    type: 'image',
+    name: image.name || '',
+    code: image.code || '',
+    freeLabels: image.freeLabels || [],
+    freeText: image.freeText || ''
+  },
+  preview: {
+    image: image.data,
+    code: image.code || image.name || ''
+  }
+});
+
+export const buildExcludedItemDragConfig = (item = {}, resolvedImage = null) => {
+  const payloadText = typeof item.text === 'string' ? item.text : '';
+  return {
+    payload: {
+      src: resolvedImage || '',
+      type: 'image',
+      name: item.originalName || 'excluded',
+      label: item.label || '',
+      code: item.code || '',
+      isText: item.isText ? 'true' : 'false',
+      hasTextPayload: '1',
+      textPayload: payloadText,
+      text: payloadText,
+      freeLabels: item.freeLabels || [],
+      freeText: item.freeText || '',
+      fromExcludedId: item.id,
+      imageId: item.imageId || ''
+    },
+    preview: {
+      image: resolvedImage || null,
+      label: item.label || null,
+      code: item.code || null,
+      text: item.isText ? payloadText : ''
+    }
+  };
+};
+
 const DAIWARI_DRAG_FIELDS = [
   'moveSourceType',
   'sourceSheetId',

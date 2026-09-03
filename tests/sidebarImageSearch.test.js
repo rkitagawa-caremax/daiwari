@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSidebarImageResults } from '../src/domain/sidebarImageSearch.js';
+import {
+  buildSidebarImageResults,
+  buildSidebarImageResultsForUser
+} from '../src/domain/sidebarImageSearch.js';
 
 const images = [
   { id: 'assigned-image', name: 'E1931.png', data: 'data:assigned' },
@@ -100,4 +103,22 @@ test('sidebar image filter narrows unassigned list but keeps assigned search res
   });
   assert.equal(searched.length, 1);
   assert.equal(searched[0].id, 'assigned-image');
+});
+
+test('sidebar user filter keeps own and legacy images unless ALL is enabled', () => {
+  const workImages = [
+    { id: 'mine', name: 'mine.png', data: 'data:mine', workedBy: ['user-a'] },
+    { id: 'others', name: 'others.png', data: 'data:others', workedBy: ['user-b'] },
+    { id: 'legacy', name: 'legacy.png', data: 'data:legacy' }
+  ];
+
+  const own = buildSidebarImageResultsForUser({ images: workImages, currentUserUid: 'user-a' });
+  assert.deepEqual(own.map((image) => image.id), ['mine', 'legacy']);
+
+  const all = buildSidebarImageResultsForUser({
+    images: workImages,
+    currentUserUid: 'user-a',
+    showAllImages: true
+  });
+  assert.deepEqual(all.map((image) => image.id), ['mine', 'others', 'legacy']);
 });

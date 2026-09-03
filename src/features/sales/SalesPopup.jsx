@@ -5,7 +5,9 @@ const SalesPopup = React.memo(({ data, position, onMouseEnter, onMouseLeave }) =
   const [offset, setOffset] = useState({ x: 10, y: 10 });
 
   useEffect(() => {
-    if (popupRef.current && position) {
+    if (!position) return undefined;
+    const frameId = window.requestAnimationFrame(() => {
+      if (!popupRef.current) return;
       const rect = popupRef.current.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
@@ -20,7 +22,8 @@ const SalesPopup = React.memo(({ data, position, onMouseEnter, onMouseLeave }) =
         nextY = viewportHeight - (position.y + rect.height + 20);
       }
       setOffset({ x: nextX, y: nextY });
-    }
+    });
+    return () => window.cancelAnimationFrame(frameId);
   }, [position, data]);
 
   if (!data || !position) return null;

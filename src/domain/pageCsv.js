@@ -1,5 +1,6 @@
 import { getPanelCsvCode } from './panels.js';
 import { getSizeType } from './panelLayout.js';
+import { buildBomCsvContent, escapeCsvCell } from '../lib/csv.js';
 
 // 台割ページ CSV (出力側) のカラム定義。
 // 「追番」と結合済みの「座標」(X{n}Y{m}) は内部データとして扱い、CSVには出力しない。
@@ -10,14 +11,8 @@ export const PAGE_CSV_HEADERS = Object.freeze([
 
 export const EXCLUDED_ITEMS_CSV_HEADERS = Object.freeze(['介援隊コード', '画像名', 'ラベル', '登録日時']);
 
-const CSV_BOM = '﻿';
-
-const escapeCsvText = (value) => {
-  const text = value || '';
-  return /[,"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-};
-
-const joinCsvLines = (headers, rows) => CSV_BOM + [headers.join(','), ...rows].join('\n');
+// 既存の台割CSVは単独のCRを引用条件に含めないため、その出力互換性を維持する。
+const escapePageCsvText = (value) => escapeCsvCell(value || '', { quoteCarriageReturn: false });
 
 // 1ページ分のコマを CSV 行 (文字列) の配列にする。
 export const buildPageCsvRowsForSheet = (sheet, { pageNum, genreLabel }) => {
@@ -29,7 +24,7 @@ export const buildPageCsvRowsForSheet = (sheet, { pageNum, genreLabel }) => {
     frameCounter++;
     const codeVal = getPanelCsvCode(panel);
     const sizeVal = panel.sizeType || getSizeType(panel.rowSpan || 1, panel.colSpan || 1);
-    const textVal = escapeCsvText(panel.text || '');
+    const textVal = escapePageCsvText(panel.text || '');
 
     const gridRow = Math.floor(panelIndex / 4) + 1; // 1始まり
     const gridCol = (panelIndex % 4) + 1;           // 1始まり
@@ -58,7 +53,7 @@ export const buildPageCsvContent = ({ sheets = [], genres = [] } = {}) => {
     const genreLabel = genres.find((g) => g.id === sheet.genre)?.label || '未設定';
     rows.push(...buildPageCsvRowsForSheet(sheet, { pageNum: sheetIndex + 1, genreLabel }));
   });
-  return joinCsvLines(PAGE_CSV_HEADERS, rows);
+  return buildBomCsvContent(PAGE_CSV_HEADERS, rows);
 };
 
 const formatExcludedItemDate = (createdAt, now) => {
@@ -75,7 +70,7 @@ export const buildExcludedItemsCsvContent = (excludedItems = [], { now = new Dat
     item.label || '',
     formatExcludedItemDate(item.createdAt, now)
   ].join(','));
-  return joinCsvLines(EXCLUDED_ITEMS_CSV_HEADERS, rows);
+  return buildBomCsvContent(EXCLUDED_ITEMS_CSV_HEADERS, rows);
 };
 
 export const buildDatedCsvFilename = (prefix, date = new Date()) => (

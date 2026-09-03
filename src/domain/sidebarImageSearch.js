@@ -1,3 +1,5 @@
+import { isImageWorkedByUser } from './images.js';
+
 const normalizeSearchText = (value) => String(value || '').trim().toLowerCase();
 
 const matchesSearch = (query, ...values) => (
@@ -119,3 +121,14 @@ export const buildSidebarImageResults = ({
 
   return query ? [...assignedMatches, ...availableImages] : availableImages;
 };
+
+export const buildSidebarImageResultsForUser = ({
+  showAllImages = false,
+  currentUserUid = null,
+  ...searchOptions
+} = {}) => buildSidebarImageResults({
+  ...searchOptions,
+  imageFilter: showAllImages
+    ? null
+    : (image) => isImageWorkedByUser(image, currentUserUid)
+});

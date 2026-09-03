@@ -4,10 +4,15 @@ import { CheckSquare, GripVertical, Search, Square, X } from 'lucide-react';
 import { normalizeCode } from '../../domain/productCodes';
 import { clamp } from '../../lib/math';
 
-const SalesCodeLookupModal = React.memo(({ isOpen, onClose, salesData, visibleCodes = null }) => {
+const getInitialPopupPosition = () => ({
+  x: Math.max(12, window.innerWidth - 392),
+  y: 92
+});
+
+const SalesCodeLookupContent = React.memo(({ onClose, salesData, visibleCodes = null }) => {
   const [query, setQuery] = useState('');
   const [selectedCodes, setSelectedCodes] = useState([]);
-  const [position, setPosition] = useState({ x: 24, y: 96 });
+  const [position, setPosition] = useState(getInitialPopupPosition);
   const inputRef = useRef(null);
   const popupRef = useRef(null);
   const dragStateRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
@@ -34,36 +39,29 @@ const SalesCodeLookupModal = React.memo(({ isOpen, onClose, salesData, visibleCo
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
-    setQuery('');
-    setSelectedCodes([]);
-
-    const nextX = Math.max(12, window.innerWidth - 392);
-    const nextY = 92;
-    setPosition(clampPopupPosition(nextX, nextY));
-
-    setTimeout(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      const initialPosition = getInitialPopupPosition();
+      setPosition(clampPopupPosition(initialPosition.x, initialPosition.y));
       inputRef.current?.focus();
-    }, 0);
-  }, [isOpen, clampPopupPosition]);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [clampPopupPosition]);
 
   useEffect(() => {
-    if (!isOpen) return;
     const handleResize = () => {
       setPosition((previous) => clampPopupPosition(previous.x, previous.y));
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [isOpen, clampPopupPosition]);
+  }, [clampPopupPosition]);
 
   useEffect(() => {
-    if (!isOpen) return;
     const handleEsc = (event) => {
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [isOpen, onClose]);
+  }, [onClose]);
 
   const startDragging = useCallback((event) => {
     if (event?.button !== undefined && event.button !== 0) return;
@@ -121,15 +119,16 @@ const SalesCodeLookupModal = React.memo(({ isOpen, onClose, salesData, visibleCo
     return allEntries.filter((entry) => entry.code.includes(normalizedQuery)).slice(0, 250);
   }, [scopedEntries, allEntries, normalizedQuery]);
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const [selectionSource, setSelectionSource] = useState(allEntries);
+  if (selectionSource !== allEntries) {
+    setSelectionSource(allEntries);
     setSelectedCodes((previous) => {
       const availableCodes = new Set(allEntries.map((entry) => entry.code));
       const kept = previous.filter((code) => availableCodes.has(code));
       const same = kept.length === previous.length && kept.every((code, index) => code === previous[index]);
       return same ? previous : kept;
     });
-  }, [isOpen, allEntries]);
+  }
 
   const selectedCodeSet = useMemo(() => new Set(selectedCodes), [selectedCodes]);
 
@@ -156,8 +155,6 @@ const SalesCodeLookupModal = React.memo(({ isOpen, onClose, salesData, visibleCo
   const clearSelectedCodes = useCallback(() => {
     setSelectedCodes([]);
   }, []);
-
-  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[130] pointer-events-none">
@@ -296,6 +293,11 @@ const SalesCodeLookupModal = React.memo(({ isOpen, onClose, salesData, visibleCo
       </div>
     </div>
   );
+});
+
+const SalesCodeLookupModal = React.memo(({ isOpen, ...contentProps }) => {
+  if (!isOpen) return null;
+  return <SalesCodeLookupContent {...contentProps} />;
 });
 
 export default SalesCodeLookupModal;

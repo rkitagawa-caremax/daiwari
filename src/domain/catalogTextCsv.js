@@ -3,6 +3,7 @@ import {
   extractPdfPriceFields,
   normalizePdfCropCode
 } from './pdfCropImport.js';
+import { buildBomCsvContent, escapeCsvCell } from '../lib/csv.js';
 
 export const CATALOG_TEXT_CSV_HEADERS = Object.freeze([
   '画像ID',
@@ -36,13 +37,7 @@ export const CATALOG_TEXT_CSV_HEADERS = Object.freeze([
   '登録日時'
 ]);
 
-const CSV_BOM = '\uFEFF';
 const LIST_SEPARATOR = '｜';
-
-const escapeCsvCell = (value) => {
-  const text = String(value ?? '');
-  return /[,"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-};
 
 const joinList = (values) => (Array.isArray(values) ? values.filter(Boolean).join(LIST_SEPARATOR) : '');
 
@@ -160,7 +155,7 @@ export const buildCatalogTextCsvContent = (images = []) => {
     return leftCode.localeCompare(rightCode, 'ja', { numeric: true });
   });
   const rows = exportImages.map(buildCatalogTextCsvRow);
-  return CSV_BOM + [CATALOG_TEXT_CSV_HEADERS.map(escapeCsvCell).join(','), ...rows].join('\n');
+  return buildBomCsvContent(CATALOG_TEXT_CSV_HEADERS, rows, { escapeHeaders: true });
 };
 
 export const countCatalogTextExportImages = (images = []) => images.filter(isCatalogTextExportImage).length;

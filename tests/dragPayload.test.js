@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
   PANEL_ARRANGE_HOLD_MS,
   PANEL_ARRANGE_MOVE_TOLERANCE_PX,
+  buildExcludedItemDragConfig,
+  buildLibraryImageDragConfig,
+  buildPanelDragConfig,
   clearActiveNativeDragPayload,
   extractPanelAssignmentFromDragPayload,
   extractPanelArrangeDragPayload,
@@ -32,6 +35,133 @@ const createDataTransfer = () => {
 
 afterEach(() => {
   clearActiveNativeDragPayload();
+});
+
+test('panel drag config keeps native payload and pointer preview values aligned', () => {
+  assert.deepEqual(buildPanelDragConfig({
+    sheetId: 'sheet-1',
+    panelIndex: 3,
+    textData: '編集中テキスト',
+    arrangeMode: true,
+    arrangeSheetId: 'sheet-1',
+    arrangeTokenId: 'token-1',
+    previewImage: 'data:image/png;base64,panel',
+    previewLabel: 'テキスト',
+    previewCode: 'E1234',
+    previewText: 'プレビュー本文'
+  }), {
+    payload: {
+      moveSourceType: 'panel',
+      sourceSheetId: 'sheet-1',
+      sourceIndex: 3,
+      textData: '編集中テキスト',
+      arrangeMode: true,
+      arrangeSheetId: 'sheet-1',
+      arrangeTokenId: 'token-1'
+    },
+    preview: {
+      image: 'data:image/png;base64,panel',
+      label: 'テキスト',
+      code: 'E1234',
+      text: 'プレビュー本文'
+    }
+  });
+
+  assert.deepEqual(buildPanelDragConfig({
+    sheetId: 'sheet-2',
+    panelIndex: 4,
+    arrangeMode: false,
+    arrangeSheetId: '',
+    arrangeTokenId: ''
+  }).payload, {
+    moveSourceType: 'panel',
+    sourceSheetId: 'sheet-2',
+    sourceIndex: 4,
+    textData: '',
+    arrangeMode: false,
+    arrangeSheetId: '',
+    arrangeTokenId: ''
+  });
+});
+
+test('library image drag config preserves free-label arrays for both drag paths', () => {
+  const freeLabels = [{ id: 'label-1', text: '注記', x: 20, y: 30, colorIndex: 2 }];
+  const config = buildLibraryImageDragConfig({
+    id: 'image-1',
+    data: 'data:image/png;base64,library',
+    name: 'E2000.png',
+    code: 'E2000',
+    freeLabels,
+    freeText: '旧注記'
+  });
+
+  assert.deepEqual(config, {
+    payload: {
+      src: 'data:image/png;base64,library',
+      imageId: 'image-1',
+      type: 'image',
+      name: 'E2000.png',
+      code: 'E2000',
+      freeLabels,
+      freeText: '旧注記'
+    },
+    preview: {
+      image: 'data:image/png;base64,library',
+      code: 'E2000'
+    }
+  });
+  assert.equal(config.payload.freeLabels, freeLabels);
+});
+
+test('excluded item drag config preserves text flags, source id, and hidden non-text metadata', () => {
+  const freeLabels = [{ id: 'label-2', text: '除外注記', x: 40, y: 50, colorIndex: 1 }];
+  const textConfig = buildExcludedItemDragConfig({
+    id: 'excluded-1',
+    imageId: 'image-2',
+    originalName: 'E3000.png',
+    label: 'テキスト',
+    code: 'E3000',
+    isText: true,
+    text: '移動する本文',
+    freeLabels,
+    freeText: '旧ラベル'
+  }, 'data:image/png;base64,excluded');
+
+  assert.deepEqual(textConfig, {
+    payload: {
+      src: 'data:image/png;base64,excluded',
+      type: 'image',
+      name: 'E3000.png',
+      label: 'テキスト',
+      code: 'E3000',
+      isText: 'true',
+      hasTextPayload: '1',
+      textPayload: '移動する本文',
+      text: '移動する本文',
+      freeLabels,
+      freeText: '旧ラベル',
+      fromExcludedId: 'excluded-1',
+      imageId: 'image-2'
+    },
+    preview: {
+      image: 'data:image/png;base64,excluded',
+      label: 'テキスト',
+      code: 'E3000',
+      text: '移動する本文'
+    }
+  });
+
+  const imageConfig = buildExcludedItemDragConfig({
+    id: 'excluded-2',
+    isText: false,
+    text: '保持するがプレビューしない本文'
+  });
+  assert.equal(imageConfig.payload.isText, 'false');
+  assert.equal(imageConfig.payload.hasTextPayload, '1');
+  assert.equal(imageConfig.payload.textPayload, '保持するがプレビューしない本文');
+  assert.equal(imageConfig.payload.fromExcludedId, 'excluded-2');
+  assert.deepEqual(imageConfig.payload.freeLabels, []);
+  assert.equal(imageConfig.preview.text, '');
 });
 
 test('drag payload normalization keeps a stable string-based shape', () => {

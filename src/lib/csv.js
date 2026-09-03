@@ -1,3 +1,26 @@
+export const CSV_BOM = '\uFEFF';
+
+export const escapeCsvCell = (value, { quoteCarriageReturn = true } = {}) => {
+  const text = String(value ?? '');
+  const shouldQuote = quoteCarriageReturn
+    ? /[,"\r\n]/.test(text)
+    : /[,"\n]/.test(text);
+  return shouldQuote ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const buildBomCsvContent = (
+  headers = [],
+  rows = [],
+  { escapeHeaders = false } = {}
+) => {
+  const headerLine = Array.isArray(headers)
+    ? headers.map((header) => (
+      escapeHeaders ? escapeCsvCell(header) : String(header ?? '')
+    )).join(',')
+    : String(headers ?? '');
+  return CSV_BOM + [headerLine, ...rows].join('\n');
+};
+
 export const readFileAutoEncoding = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = (event) => {

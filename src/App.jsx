@@ -145,6 +145,7 @@ import { useScreenLock } from './hooks/useScreenLock';
 import { useAppDialogs } from './hooks/useAppDialogs';
 import { useWorkspacePointerDrag } from './hooks/useWorkspacePointerDrag';
 import { useWorkspaceViewState } from './hooks/useWorkspaceViewState';
+import { useLocalWorkspaceAutosave } from './hooks/useLocalWorkspaceAutosave';
 import {
   buildFirestoreActionErrorMessage,
   getFirestoreErrorCode,
@@ -716,87 +717,19 @@ export default function App() {
 
   // --- Data Sync ---
   // 自動保存 (Auto-Save) - IndexedDB with Debounce
-  const saveTimeoutRef = useRef(null);
-  const localSavedSnapshotRef = useRef({
-    sheets: null,
-    images: null,
-    tempItems: null,
-    excludedItems: null,
-    salesData: null
+  useLocalWorkspaceAutosave({
+    isLocalStorageMode: USE_LOCAL_STORAGE,
+    isDataLoaded,
+    sheets,
+    images,
+    tempItems,
+    excludedItems,
+    salesData
   });
-
-  useEffect(() => {
-    if (!(USE_LOCAL_STORAGE && isDataLoaded)) {
-      return () => {
-        if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current);
-        }
-      };
-    }
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    const shouldSaveSheets = localSavedSnapshotRef.current.sheets !== sheets;
-    const shouldSaveImages = localSavedSnapshotRef.current.images !== images;
-    const shouldSaveTempItems = localSavedSnapshotRef.current.tempItems !== tempItems;
-    const shouldSaveExcludedItems = localSavedSnapshotRef.current.excludedItems !== excludedItems;
-    const shouldSaveSalesData = localSavedSnapshotRef.current.salesData !== salesData;
-
-    if (!shouldSaveSheets && !shouldSaveImages && !shouldSaveTempItems && !shouldSaveExcludedItems && !shouldSaveSalesData) {
-      return () => {
-        if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current);
-        }
-      };
-    }
-
-    const snapshot = { sheets, images, tempItems, excludedItems, salesData };
-    saveTimeoutRef.current = setTimeout(async () => {
-      try {
-        const tasks = [];
-        if (shouldSaveSheets) {
-          tasks.push(idbHelper.setItem('sheets', snapshot.sheets).then(() => {
-            localSavedSnapshotRef.current.sheets = snapshot.sheets;
-          }));
-        }
-        if (shouldSaveImages) {
-          tasks.push(idbHelper.setItem('images', snapshot.images).then(() => {
-            localSavedSnapshotRef.current.images = snapshot.images;
-          }));
-        }
-        if (shouldSaveTempItems) {
-          tasks.push(idbHelper.setItem('tempItems', snapshot.tempItems).then(() => {
-            localSavedSnapshotRef.current.tempItems = snapshot.tempItems;
-          }));
-        }
-        if (shouldSaveExcludedItems) {
-          tasks.push(idbHelper.setItem('excludedItems', snapshot.excludedItems).then(() => {
-            localSavedSnapshotRef.current.excludedItems = snapshot.excludedItems;
-          }));
-        }
-        if (shouldSaveSalesData && snapshot.salesData) {
-          tasks.push(idbHelper.setItem('salesData', snapshot.salesData).then(() => {
-            localSavedSnapshotRef.current.salesData = snapshot.salesData;
-          }));
-        }
-        await Promise.all(tasks);
-      } catch (err) {
-        console.error("Auto-save failed:", err);
-      }
-    }, 500);
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [sheets, images, tempItems, excludedItems, salesData, isDataLoaded]);
 
   // 全体表示に切り替えた時、実績モードを自動的にオフにする
   useEffect(() => {
-    if (viewMode !== 'list' && viewMode !== 'single' && isSalesMode) {
+    if (viewMode !== 'list' && viewMode !== 'single') {
       setIsSalesMode(false);
     }
   }, [viewMode]);
@@ -983,6 +916,7 @@ export default function App() {
     excludedItemsCollection,
     imagesCollection,
     isAuthenticated,
+    isUndoApplyingRef,
     salesChunksCollection,
     setExcludedItems,
     setSheets,
@@ -1021,6 +955,7 @@ export default function App() {
     };
   }, [
     isAuthenticated,
+    isUndoApplyingRef,
     setTempItems,
     syncTempItems,
     tempShelfCollection,
@@ -1437,7 +1372,7 @@ export default function App() {
   }, [clearSalesModeLongPressTimer]);
 
   // --- Image Logic (Duplicate Check) ---
-  const checkImageUsage = (imageSrc) => {
+  const checkImageUsage = useCallback((imageSrc) => {
     if (!imageSrc) return false;
     for (const sheet of sheets) {
       for (const panel of sheet.panels) {
@@ -1445,7 +1380,7 @@ export default function App() {
       }
     }
     return false;
-  };
+  }, [sheets]);
 
   // --- Selection Logic ---
   const toggleMergeMode = () => {
@@ -1762,7 +1697,7 @@ export default function App() {
 
   // --- Temp & Excluded Logic (Restored) ---
 
-  const handleMoveToTemp = async (sheetId, panelIndex, movedText) => {
+  const handleMoveToTemp = useCallback(async (sheetId, panelIndex, movedText) => {
     if (isLockedRef.current) return;
     if (USE_LOCAL_STORAGE) {
       const sheet = sheets.find(s => s.id === sheetId);
@@ -1851,7 +1786,19 @@ export default function App() {
         showAlert(buildFirestoreActionErrorMessage("仮置き場への移動に失敗しました。少し待ってから再実行してください。", finalError));
       }
     }
-  };
+  }, [
+    legacyTempShelfCollection,
+    runCloudTransaction,
+    setSheets,
+    setTempItems,
+    sheets,
+    sheetsCollection,
+    showAlert,
+    tempItems,
+    tempShelfCollection,
+    tempShelfUserId,
+    useLegacyTempShelf
+  ]);
 
   const handleAddDragItemToTempShelf = useCallback(async (dragPayload = {}, resolvedAssignment = null) => {
     if (isLockedRef.current) return;
@@ -1938,7 +1885,7 @@ export default function App() {
     }
   }, [tempShelfCollection, excludedItemsCollection, runCloudWrite, showAlert, useLegacyTempShelf, legacyTempShelfCollection, tempShelfUserId, buildTempShelfPayload, setExcludedItems, setTempItems]);
 
-  const handleDeleteFromTemp = async (id) => {
+  const handleDeleteFromTemp = useCallback(async (id) => {
     if (isLockedRef.current) return;
     if (USE_LOCAL_STORAGE) {
       const newTempItems = tempItems.filter(item => item.id !== id);
@@ -1968,9 +1915,17 @@ export default function App() {
       }
       showAlert("仮置き場アイテムの削除に失敗しました。");
     }
-  };
+  }, [
+    legacyTempShelfCollection,
+    runCloudWrite,
+    setTempItems,
+    showAlert,
+    tempItems,
+    tempShelfCollection,
+    useLegacyTempShelf
+  ]);
 
-  const handleMoveToExcluded = async (sheetId, panelIndex, movedText) => {
+  const handleMoveToExcluded = useCallback(async (sheetId, panelIndex, movedText) => {
     if (isLockedRef.current) return;
     const currentSheet = sheets.find(s => s.id === sheetId);
     const currentPanel = currentSheet?.panels?.[panelIndex];
@@ -2028,7 +1983,16 @@ export default function App() {
       console.error("Move to excluded transaction failed:", error);
       showAlert(buildFirestoreActionErrorMessage("除外リストへの移動に失敗しました。少し待ってから再実行してください。", error));
     }
-  };
+  }, [
+    excludedItems,
+    excludedItemsCollection,
+    runCloudTransaction,
+    setExcludedItems,
+    setSheets,
+    sheets,
+    sheetsCollection,
+    showAlert
+  ]);
 
   const handleDeleteFromExcluded = async (id) => {
     if (isLockedRef.current) return;
@@ -2121,7 +2085,17 @@ export default function App() {
     });
   }, [setTempItems, tempItems, tempShelfCollection, runCloudWrite, useLegacyTempShelf]);
 
-  const handlePanelUpdateWithCheck = (sheetId, panelIndex, newData) => {
+  const persistCloudImagesCache = useCallback((nextImages) => {
+    if (USE_LOCAL_STORAGE) return;
+    idbHelper.setItem(CLOUD_IMAGES_CACHE_KEY, {
+      items: normalizeStockImages(nextImages || []),
+      fetchedAt: Date.now()
+    }).catch((error) => {
+      console.error("Cloud image cache save failed:", error);
+    });
+  }, []);
+
+  const handlePanelUpdateWithCheck = useCallback((sheetId, panelIndex, newData) => {
     if (isLockedRef.current) return;
     const sanitizedData = { ...newData };
     const cameFromTemp = !!sanitizedData.fromTempId;
@@ -2163,9 +2137,20 @@ export default function App() {
       }
     }
     handleUpdatePanel(sheetId, panelIndex, sanitizedData);
-  };
+  }, [
+    checkImageUsage,
+    excludedItems,
+    excludedItemsCollection,
+    handleDeleteFromTemp,
+    handleUpdatePanel,
+    removeMatchingTempItemsForImage,
+    requestConfirm,
+    runCloudWrite,
+    setExcludedItems,
+    sheets
+  ]);
 
-  const handleMoveToStock = async (sheetId, panelIndex, movedText) => {
+  const handleMoveToStock = useCallback(async (sheetId, panelIndex, movedText) => {
     if (isLockedRef.current) return;
     const sheet = sheets.find(s => s.id === sheetId);
     if (!sheet) return;
@@ -2244,9 +2229,20 @@ export default function App() {
       console.error("Move to stock failed", error);
       showAlert(buildFirestoreActionErrorMessage("画像ライブラリへの移動に失敗しました。元のコマは保持されています。", error));
     }
-  };
+  }, [
+    handleMoveToTemp,
+    handlePanelUpdateWithCheck,
+    images,
+    imagesCollection,
+    persistCloudImagesCache,
+    runCloudWrite,
+    setImages,
+    sheets,
+    showAlert,
+    undoAccountId
+  ]);
 
-  const handleMovePanel = async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
+  const handleMovePanel = useCallback(async (fromSheetId, fromIndex, toSheetId, toIndex, movedText) => {
     if (isLockedRef.current) return;
     if (fromSheetId === toSheetId && fromIndex === toIndex) return;
 
@@ -2335,7 +2331,7 @@ export default function App() {
       console.error("Move panel transaction failed:", error);
       showAlert(buildFirestoreActionErrorMessage("コマの移動に失敗しました。少し待ってから再実行してください。", error));
     }
-  };
+  }, [runCloudTransaction, setSheets, sheets, sheetsCollection, showAlert]);
 
   const applyDragPayloadToPanel = useCallback((targetSheetId, targetIndex, dragPayload = {}) => {
     if (!targetSheetId || Number.isNaN(targetIndex)) return false;
@@ -2560,16 +2556,6 @@ export default function App() {
   });
 
   // --- Image & Bulk Actions ---
-
-  const persistCloudImagesCache = useCallback((nextImages) => {
-    if (USE_LOCAL_STORAGE) return;
-    idbHelper.setItem(CLOUD_IMAGES_CACHE_KEY, {
-      items: normalizeStockImages(nextImages || []),
-      fetchedAt: Date.now()
-    }).catch((error) => {
-      console.error("Cloud image cache save failed:", error);
-    });
-  }, []);
 
   const refreshImageLibrary = useCallback(async (currentImages = []) => {
     if (USE_LOCAL_STORAGE) return currentImages;

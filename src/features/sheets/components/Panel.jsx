@@ -15,6 +15,7 @@ import {
 import { normalizeCode } from '../../../domain/productCodes';
 import {
   DAIWARI_PANEL_DROPZONE_PREFIX,
+  buildPanelDragConfig,
   clearActiveNativeDragPayload,
   getDragPayload,
   isDropEventHandled,
@@ -236,6 +237,22 @@ const Panel = React.memo(({
     }
   };
 
+  const getCurrentPanelDragConfig = () => {
+    const currentText = textareaRef.current ? textareaRef.current.value : localText;
+    return buildPanelDragConfig({
+      sheetId,
+      panelIndex: index,
+      textData: currentText || '',
+      arrangeMode: isArrangeMode && !!arrangeTokenId,
+      arrangeSheetId: isArrangeMode ? sheetId : '',
+      arrangeTokenId: isArrangeMode ? arrangeTokenId : '',
+      previewImage: isDummyPanel ? null : (resolvedImage || null),
+      previewLabel: data.label || null,
+      previewCode: data.code || null,
+      previewText: data.isText ? (currentText || data.text || '') : ''
+    });
+  };
+
   const handleDragStart = (event) => {
     onCancelArrangeHold?.();
     if (!hasTransferableContent || (isArrangeMode && !arrangeTokenId)) {
@@ -243,16 +260,7 @@ const Panel = React.memo(({
       return;
     }
 
-    const currentText = textareaRef.current ? textareaRef.current.value : localText;
-    setDragPayload(event.dataTransfer, {
-      moveSourceType: 'panel',
-      sourceSheetId: sheetId,
-      sourceIndex: index,
-      textData: currentText || '',
-      arrangeMode: isArrangeMode && !!arrangeTokenId,
-      arrangeSheetId: isArrangeMode ? sheetId : '',
-      arrangeTokenId: isArrangeMode ? arrangeTokenId : ''
-    });
+    setDragPayload(event.dataTransfer, getCurrentPanelDragConfig().payload);
     event.dataTransfer.effectAllowed = 'move';
     if (isArrangeMode && arrangeTokenId) {
       onArrangeDragStateChange?.(arrangeTokenId, true);
@@ -269,23 +277,8 @@ const Panel = React.memo(({
 
   const handlePointerDragStart = (event) => {
     if (!onStartPointerDrag) return;
-    const currentText = textareaRef.current ? textareaRef.current.value : localText;
     onStartPointerDrag(event, {
-      payload: {
-        moveSourceType: 'panel',
-        sourceSheetId: sheetId,
-        sourceIndex: index,
-        textData: currentText || '',
-        arrangeMode: isArrangeMode && !!arrangeTokenId,
-        arrangeSheetId: isArrangeMode ? sheetId : '',
-        arrangeTokenId: isArrangeMode ? arrangeTokenId : ''
-      },
-      preview: {
-        image: isDummyPanel ? null : (resolvedImage || null),
-        label: data.label || null,
-        code: data.code || null,
-        text: data.isText ? (currentText || data.text || '') : ''
-      },
+      ...getCurrentPanelDragConfig(),
       onFinish: () => {
         if (isArrangeMode && arrangeTokenId) {
           onArrangeDragStateChange?.(arrangeTokenId, false);
@@ -301,23 +294,20 @@ const Panel = React.memo(({
   );
 
   const buildArrangeTokenDragConfig = (token) => ({
-    payload: {
-      moveSourceType: 'panel',
-      sourceSheetId: sheetId,
-      sourceIndex: index,
+    ...buildPanelDragConfig({
+      sheetId,
+      panelIndex: index,
       textData: token?.content?.text || '',
       arrangeMode: true,
       arrangeSheetId: sheetId,
-      arrangeTokenId: token.id
-    },
-    preview: {
-      image: token?.content?.label && !token?.content?.isText
+      arrangeTokenId: token.id,
+      previewImage: token?.content?.label && !token?.content?.isText
         ? null
         : resolveArrangeTokenImage(token),
-      label: token?.content?.label || null,
-      code: token?.content?.code || null,
-      text: token?.content?.text || ''
-    },
+      previewLabel: token?.content?.label || null,
+      previewCode: token?.content?.code || null,
+      previewText: token?.content?.text || ''
+    }),
     onFinish: () => onArrangeDragStateChange?.(token.id, false)
   });
 

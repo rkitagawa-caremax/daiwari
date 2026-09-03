@@ -17,10 +17,11 @@ import {
 
 import { FREE_LABEL_COLORS, GENRES } from '../../constants/layout';
 import ImagePreviewModal from '../../components/dialogs/ImagePreviewModal';
-import { buildSidebarImageResults } from '../../domain/sidebarImageSearch';
-import { isImageWorkedByUser } from '../../domain/images';
+import { buildSidebarImageResultsForUser } from '../../domain/sidebarImageSearch';
 import { getPanelFreeLabels } from '../../domain/panels';
 import {
+  buildExcludedItemDragConfig,
+  buildLibraryImageDragConfig,
   clearActiveNativeDragPayload,
   getDragPayload,
   isDropEventHandled,
@@ -126,7 +127,9 @@ const Sidebar = React.memo(({
     return `legacy:${img?.name || ''}:${data.length}:${head}:${tail}`;
   }, []);
 
-  useEffect(() => {
+  const handleTabChange = useCallback((tabId) => {
+    if (tabId === activeTab) return;
+    setActiveTab(tabId);
     setSelectedImageIds(new Set());
     setIsImageSelectionMode(false);
   }, [activeTab]);
@@ -138,16 +141,6 @@ const Sidebar = React.memo(({
       else newSet.add(selectionKey);
       return newSet;
     });
-  };
-
-  const handleBulkDelete = () => {
-    if (isLocked) return;
-    const selectedTargets = filteredImages
-      .filter((img) => selectedImageIds.has(getImageSelectionKey(img)))
-      .map((img) => ({ id: img.id || null, data: img.data || null }));
-    onBulkDeleteImages(selectedTargets);
-    setIsImageSelectionMode(false);
-    setSelectedImageIds(new Set());
   };
 
   const handleTogglePreview = useCallback((src, name = '') => {
@@ -217,14 +210,25 @@ const Sidebar = React.memo(({
   // ALL OFF の間は「自分が作業した画像」(アップロード / コマから解除) のみ表示する。
   // workedBy 未記録の既存画像は互換のため全員に表示する。
   const filteredImages = useMemo(() => {
-    return buildSidebarImageResults({
+    return buildSidebarImageResultsForUser({
       images,
       sheets,
       excludedItems,
       searchQuery,
-      imageFilter: showAllImages ? null : (image) => isImageWorkedByUser(image, currentUserUid)
+      showAllImages,
+      currentUserUid
     });
   }, [images, sheets, excludedItems, searchQuery, showAllImages, currentUserUid]);
+
+  const handleBulkDelete = () => {
+    if (isLocked) return;
+    const selectedTargets = filteredImages
+      .filter((img) => selectedImageIds.has(getImageSelectionKey(img)))
+      .map((img) => ({ id: img.id || null, data: img.data || null }));
+    onBulkDeleteImages(selectedTargets);
+    setIsImageSelectionMode(false);
+    setSelectedImageIds(new Set());
+  };
 
 
   // 除外リスト検索: code / label / originalName / text を case-insensitive で部分一致
@@ -287,7 +291,7 @@ const Sidebar = React.memo(({
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
               data-work-action="navigation"
               onMouseEnter={(e) => {
                 const help = sidebarTabHelp[tab.id];
@@ -466,21 +470,9 @@ const Sidebar = React.memo(({
                   tabIndex={assignment ? 0 : undefined}
                   aria-label={assignment ? `配置済み画像、ページ${assignment.sheetNumber}を開く` : undefined}
                   draggable={!isImageSelectionMode && !assignment}
-                  onPointerDown={!isImageSelectionMode && !assignment ? (e) => onStartPointerDrag?.(e, {
-                    payload: {
-                      src: img.data,
-                      imageId: img.id || '',
-                      type: 'image',
-                      name: img.name || '',
-                      code: img.code || '',
-                      freeLabels: img.freeLabels || [],
-                      freeText: img.freeText || ''
-                    },
-                    preview: {
-                      image: img.data,
-                      code: img.code || img.name || ''
-                    }
-                  }) : undefined}
+                  onPointerDown={!isImageSelectionMode && !assignment
+                    ? (e) => onStartPointerDrag?.(e, buildLibraryImageDragConfig(img))
+                    : undefined}
                   onClick={() => {
                     if (assignment) {
                       onOpenAssignedImage?.(assignment.sheetId);
@@ -506,15 +498,7 @@ const Sidebar = React.memo(({
                       e.preventDefault();
                       return;
                     }
-                    setDragPayload(e.dataTransfer, {
-                      src: img.data,
-                      imageId: img.id || '',
-                      type: 'image',
-                      name: img.name || '',
-                      code: img.code || '',
-                      freeLabels: img.freeLabels || [],
-                      freeText: img.freeText || ''
-                    });
+                    setDragPayload(e.dataTransfer, buildLibraryImageDragConfig(img).payload);
                   }}
                 >
                   <div className="relative mb-1 aspect-square w-full overflow-hidden rounded-md bg-white flex items-center justify-center">
@@ -750,30 +734,7 @@ const Sidebar = React.memo(({
                         style={{ touchAction: 'none' }}
                         draggable
                         onPointerDown={(e) => {
-                          const payloadText = typeof item.text === 'string' ? item.text : '';
-                          onStartPointerDrag?.(e, {
-                            payload: {
-                              src: resolvedImg || '',
-                              type: 'image',
-                              name: item.originalName || 'excluded',
-                              label: item.label || '',
-                              code: item.code || '',
-                              isText: item.isText ? 'true' : 'false',
-                              hasTextPayload: '1',
-                              textPayload: payloadText,
-                              text: payloadText,
-                              freeLabels: item.freeLabels || [],
-                              freeText: item.freeText || '',
-                              fromExcludedId: item.id,
-                              imageId: item.imageId || ''
-                            },
-                            preview: {
-                              image: resolvedImg || null,
-                              label: item.label || null,
-                              code: item.code || null,
-                              text: item.isText ? payloadText : ''
-                            }
-                          });
+                          onStartPointerDrag?.(e, buildExcludedItemDragConfig(item, resolvedImg));
                         }}
                         onDoubleClick={(e) => {
                           e.preventDefault();
@@ -781,22 +742,7 @@ const Sidebar = React.memo(({
                           handleTogglePreview(resolvedImg || '', item.code || item.originalName || '');
                         }}
                         onDragStart={(e) => {
-                          const payloadText = typeof item.text === 'string' ? item.text : '';
-                          setDragPayload(e.dataTransfer, {
-                            src: resolvedImg || '',
-                            type: 'image',
-                            name: item.originalName || 'excluded',
-                            label: item.label || '',
-                            code: item.code || '',
-                            isText: item.isText ? 'true' : 'false',
-                            hasTextPayload: '1',
-                            textPayload: payloadText,
-                            text: payloadText,
-                            freeLabels: item.freeLabels || [],
-                            freeText: item.freeText || '',
-                            fromExcludedId: item.id,
-                            imageId: item.imageId || ''
-                          });
+                          setDragPayload(e.dataTransfer, buildExcludedItemDragConfig(item, resolvedImg).payload);
                         }}
                       >
                         <div className="relative mb-1 w-full aspect-square overflow-hidden rounded-md bg-slate-50">
