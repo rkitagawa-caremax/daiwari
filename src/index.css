@@ -169,6 +169,63 @@ button:active {
     transform: translateY(0.5px);
 }
 
+.daiwari-detail-zoom-range {
+    height: 18px;
+    cursor: pointer;
+    appearance: none;
+    background: transparent;
+}
+
+.daiwari-detail-zoom-range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+        to right,
+        #5b45f5 0%,
+        #5b45f5 var(--daiwari-zoom-progress),
+        #cbd5e1 var(--daiwari-zoom-progress),
+        #cbd5e1 100%
+    );
+}
+
+.daiwari-detail-zoom-range::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+    margin-top: -7px;
+    appearance: none;
+    border: 0;
+    border-radius: 50%;
+    background: #5b45f5;
+    box-shadow: 0 1px 3px rgba(79, 70, 229, 0.34);
+}
+
+.daiwari-detail-zoom-range::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: #cbd5e1;
+}
+
+.daiwari-detail-zoom-range::-moz-range-progress {
+    height: 4px;
+    border-radius: 9999px;
+    background: #5b45f5;
+}
+
+.daiwari-detail-zoom-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 50%;
+    background: #5b45f5;
+    box-shadow: 0 1px 3px rgba(79, 70, 229, 0.34);
+}
+
+.daiwari-detail-zoom-range:focus-visible {
+    outline: 2px solid #a5b4fc;
+    outline-offset: 3px;
+    border-radius: 9999px;
+}
+
 /* M3 Surface with tonal elevation */
 .m3-surface {
     background: var(--m3-surface);
