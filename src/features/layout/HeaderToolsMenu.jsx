@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckSquare,
@@ -10,6 +10,58 @@ import {
   Unlock,
   Wrench
 } from 'lucide-react';
+
+// AIアシスト起動ボタン。通常は台割くん (正面) だけを表示し、
+// ホバー中は 3 つの表情 (正面 → 左向き → 目を閉じる) を 0.5 秒ごとに切り替えてループする。
+const DAIWARI_KUN_FRAMES = ['/daiwari-kun.png', '/daiwari-kun-left.png', '/daiwari-kun-closed.png'];
+const DAIWARI_KUN_INTERVAL_MS = 500;
+
+const EdgeAiLaunchButton = ({ onLaunch, onShowQuickHelp, onHideQuickHelp }) => {
+  const [isHovering, setIsHovering] = useState(false);
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    if (!isHovering) return undefined;
+    const timer = setInterval(() => {
+      setFrame((current) => (current + 1) % DAIWARI_KUN_FRAMES.length);
+    }, DAIWARI_KUN_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [isHovering]);
+
+  return (
+    <button
+      type="button"
+      onClick={onLaunch}
+      onMouseEnter={(event) => {
+        setIsHovering(true);
+        onShowQuickHelp(event, 'AIアシスト', '外部AIへ送信せず、商品意味検索・類似品提案・CSV差分を端末内で処理します。');
+      }}
+      onMouseLeave={() => {
+        setIsHovering(false);
+        setFrame(0);
+        onHideQuickHelp();
+      }}
+      className="daiwari-ai-launch group relative flex h-10 w-[72px] flex-shrink-0 items-center justify-center px-2"
+      title="AIアシストを開く"
+      aria-label="AIアシストを開く"
+    >
+      <span className="relative z-[2] flex h-[32px] items-center justify-center">
+        {DAIWARI_KUN_FRAMES.map((src, index) => (
+          <img
+            key={src}
+            src={src}
+            alt=""
+            draggable="false"
+            className={`daiwari-ai-launch-image h-[32px] w-auto select-none object-contain ${index === 0 ? '' : 'absolute inset-0 m-auto'} ${index === frame ? 'opacity-100' : 'opacity-0'}`}
+          />
+        ))}
+      </span>
+      <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-one">✦</span>
+      <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-two">✦</span>
+      <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-three">✦</span>
+    </button>
+  );
+};
 
 // ヘッダー右端の「ツール」ボタンと、そのポップアップメニュー
 // (画面ロック / 選択モード / Q / ラベル強調 / 空き強調 / ページ追加 / 出力)。
@@ -39,28 +91,14 @@ const HeaderToolsMenu = ({
 }) => (
   <>
     <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-      <button
-        type="button"
-        onClick={() => {
+      <EdgeAiLaunchButton
+        onLaunch={() => {
           onClose();
           onOpenEdgeAi();
         }}
-        onMouseEnter={(event) => onShowQuickHelp(event, 'AIアシスト', '外部AIへ送信せず、商品意味検索・類似品提案・CSV差分を端末内で処理します。')}
-        onMouseLeave={onHideQuickHelp}
-        className="daiwari-ai-launch group relative flex h-10 w-[72px] flex-shrink-0 items-center justify-center px-2"
-        title="AIアシストを開く"
-        aria-label="AIアシストを開く"
-      >
-        <img
-          src="/daiwari-ai-icon.png"
-          alt=""
-          className="daiwari-ai-launch-image relative z-[2] h-[32px] w-auto select-none object-contain"
-          draggable="false"
-        />
-        <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-one">✦</span>
-        <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-two">✦</span>
-        <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-three">✦</span>
-      </button>
+        onShowQuickHelp={onShowQuickHelp}
+        onHideQuickHelp={onHideQuickHelp}
+      />
 
       <button
         type="button"
