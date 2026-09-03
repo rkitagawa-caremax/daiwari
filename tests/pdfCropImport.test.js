@@ -398,6 +398,11 @@ test('PDF catalog details preserve numeric and unhyphenated item-number candidat
   ]);
 });
 
+test('PDF catalog details retain discontinued and limited-stock lifecycle labels', () => {
+  assert.equal(extractPdfCatalogDetails('261-E1001 在庫限り').lifecycleStatus, '在庫限り');
+  assert.equal(extractPdfCatalogDetails('261-E1002 廃盤').lifecycleStatus, '廃盤');
+});
+
 test('automatic text extraction rect is limited by grid and text anchors while manual stays unchanged', () => {
   const cropRect = { x: 0.08, y: 0.04, width: 0.28, height: 0.3 };
   const gridRect = { x: 0.1, y: 0.06, width: 0.2, height: 0.2 };

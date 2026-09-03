@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart2, Grid, List, LogOut, Redo2, Undo2 } from 'lucide-react';
+import { BarChart2, FileDiff, Grid, List, LogOut, Redo2, Undo2 } from 'lucide-react';
 
 // 画面最上部のナビゲーションバー (M3 Expressive Style)。
 // 左: ロゴ / ログイン情報 / 戻る・進む / 詳細・全体 切替 / (選択モード時) 一括操作 / (詳細時) 実績モード
@@ -20,6 +20,10 @@ const AppHeader = ({
   onSalesModeClick,
   onSalesModeLongPressStart,
   onSalesModeLongPressEnd,
+  catalogChangeCount,
+  catalogChangeFileName,
+  isCatalogDiffMode,
+  onCatalogDiffModeClick,
   onShowQuickHelp,
   onHideQuickHelp,
   selectionToolbar,
@@ -111,26 +115,44 @@ const AppHeader = ({
 
       {/* 実績モード Toggle - 詳細表示時のみ */}
       {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
-        <button
-          onClick={onSalesModeClick}
-          onMouseDown={onSalesModeLongPressStart}
-          onMouseUp={onSalesModeLongPressEnd}
-          onMouseLeave={() => { onSalesModeLongPressEnd(); onHideQuickHelp(); }}
-          onTouchStart={onSalesModeLongPressStart}
-          onTouchEnd={onSalesModeLongPressEnd}
-          onTouchCancel={onSalesModeLongPressEnd}
-          onMouseEnter={(e) => onShowQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-bold transition-all duration-300 ml-2 whitespace-nowrap
-             ${isSalesLookupOpen
-              ? 'bg-violet-500/15 border-violet-500 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)] animate-pulse'
-              : isSalesMode
-              ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-              : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-          title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
-        >
-          <BarChart2 size={18} />
-          <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
-        </button>
+        <>
+          <button
+            onClick={onSalesModeClick}
+            onMouseDown={onSalesModeLongPressStart}
+            onMouseUp={onSalesModeLongPressEnd}
+            onMouseLeave={() => { onSalesModeLongPressEnd(); onHideQuickHelp(); }}
+            onTouchStart={onSalesModeLongPressStart}
+            onTouchEnd={onSalesModeLongPressEnd}
+            onTouchCancel={onSalesModeLongPressEnd}
+            onMouseEnter={(e) => onShowQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
+            className={`ml-2 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300
+              ${isSalesLookupOpen
+                ? 'animate-pulse border-violet-500 bg-violet-500/15 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)]'
+                : isSalesMode
+                  ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                  : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
+            title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
+          >
+            <BarChart2 size={18} />
+            <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {catalogChangeCount > 0 && (
+            <button
+              type="button"
+              onClick={onCatalogDiffModeClick}
+              onMouseEnter={(event) => onShowQuickHelp(event, '差分モード', `${catalogChangeFileName || '取込データ'}との変更 ${catalogChangeCount}件をコマ上に重ねて表示します。`)}
+              onMouseLeave={onHideQuickHelp}
+              className={`ml-1 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isCatalogDiffMode
+                ? 'border-amber-500 bg-amber-500/10 text-amber-700 shadow-[0_0_15px_rgba(245,158,11,0.24)]'
+                : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
+              title="商品情報の変更をコマ上に表示"
+            >
+              <FileDiff size={17} />
+              <span className="hidden xl:inline">差分 {catalogChangeCount}件 {isCatalogDiffMode ? 'ON' : 'OFF'}</span>
+            </button>
+          )}
+        </>
       )}
     </div>
 

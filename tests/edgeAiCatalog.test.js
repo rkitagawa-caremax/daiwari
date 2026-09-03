@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildEdgeCatalogProducts,
+  buildCatalogChangeSet,
   compareCatalogSnapshots,
   cosineSimilarity,
   parseCatalogSnapshotCsv,
+  parseCatalogSnapshotRecords,
   parseCsvRecords,
   rankEdgeCatalogProducts,
   summarizeCatalogDiff
@@ -61,12 +63,53 @@ test('parseCatalogSnapshotCsv recognizes Japanese catalog headers', () => {
     priceIncludingTax: 12800,
     priceExcludingTax: '',
     availability: '',
+    lifecycleStatus: '',
     handlingMarkers: [],
+    demoStatus: 'D',
     hasDemoMarker: true,
     specifications: ['軽量', '折りたたみ'],
     compositionDetails: [],
     materialDetails: []
   });
+});
+
+test('catalog snapshot records detect a heading row and retain only supplied comparison fields', () => {
+  const parsed = parseCatalogSnapshotRecords([
+    ['価格改定表', '', ''],
+    ['更新日', '2026/09/03', ''],
+    ['介援隊コード', '税込価格', 'デモ機区分'],
+    ['E001', 1540, '(N)']
+  ]);
+  assert.equal(parsed.headerRowIndex, 2);
+  assert.deepEqual(parsed.recognizedFields, ['priceIncludingTax', 'demoStatus']);
+  assert.equal(parsed.items[0].priceIncludingTax, 1540);
+  assert.equal(parsed.items[0].demoStatus, 'N');
+});
+
+test('catalog change set compares uploaded fields only and does not infer missing rows as discontinued', () => {
+  const products = [
+    { code: 'E001', name: '旧商品名', priceIncludingTax: 1408, priceExtractionConfidence: 'medium', lifecycleStatus: '通常', demoStatus: 'D' },
+    { code: 'E002', name: '掲載中', priceIncludingTax: 2200, demoStatus: '' }
+  ];
+  const changeSet = buildCatalogChangeSet({
+    products,
+    fileName: '価格表.xlsx',
+    sheetName: '改定',
+    snapshot: {
+      items: [{ code: 'E001', name: '', priceIncludingTax: 1540, lifecycleStatus: '廃盤', demoStatus: 'N' }],
+      recognizedFields: ['priceIncludingTax', 'lifecycleStatus', 'demoStatus']
+    }
+  });
+  assert.equal(changeSet.diffs.length, 1);
+  assert.equal(changeSet.displayCount, 1);
+  assert.deepEqual(changeSet.diffs[0].changes.map((change) => change.key), ['priceIncludingTax', 'lifecycleStatus', 'demoStatus']);
+  assert.deepEqual(changeSet.diffs[0].changes.map((change) => [change.before, change.after]), [
+    ['1408', '1540'],
+    ['通常', '廃盤'],
+    ['(D)', '(N)']
+  ]);
+  assert.equal(changeSet.diffs[0].changes[0].confidence, 'medium');
+  assert.equal(changeSet.byCode.E002, undefined);
 });
 
 test('compareCatalogSnapshots reports additions removals and field changes', () => {

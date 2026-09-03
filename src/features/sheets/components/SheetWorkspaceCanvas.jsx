@@ -13,6 +13,7 @@ const SheetWorkspaceCanvas = ({
   arrange,
   editing,
   sales,
+  changes = { isMode: false, byCode: {} },
   imageDataById
 }) => (
   <div
@@ -115,6 +116,8 @@ const SheetWorkspaceCanvas = ({
                 salesData={sales.data}
                 onHoverSales={sales.onHover}
                 onLeaveSales={sales.onLeave}
+                isCatalogDiffMode={changes.isMode}
+                catalogChangesByCode={changes.byCode}
                 imageDataById={imageDataById}
                 isLabelMode={editing.isLabelMode}
                 onChangeGenre={(genreId) => editing.onChangeGenre(sheet.id, genreId)}

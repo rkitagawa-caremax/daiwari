@@ -69,5 +69,6 @@ export { app as firebaseApp, auth, db };
 
 export const CLOUD_IMAGES_CACHE_KEY = 'cloudImagesCache';
 export const CLOUD_SALES_CACHE_KEY = 'cloudSalesDataCache';
+export const CATALOG_CHANGE_SET_CACHE_KEY = 'catalogChangeSetV1';
 export const CLOUD_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 export const LOCAL_WORK_LOGS_KEY = 'daiwari_work_activity_logs_v1';

@@ -21,6 +21,8 @@ const Sheet = React.memo(({
   salesData,
   onHoverSales,
   onLeaveSales,
+  isCatalogDiffMode = false,
+  catalogChangesByCode = {},
   imageDataById,
   isLabelMode,
   onChangeGenre,
@@ -129,6 +131,8 @@ const Sheet = React.memo(({
               salesData={salesData}
               onHoverSales={onHoverSales}
               onLeaveSales={onLeaveSales}
+              isCatalogDiffMode={isCatalogDiffMode}
+              catalogChangesByCode={catalogChangesByCode}
               imageDataById={imageDataById}
               isLabelMode={isLabelMode}
               onPreviewImage={onPreviewImage}

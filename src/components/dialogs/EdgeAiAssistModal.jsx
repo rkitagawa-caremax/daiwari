@@ -15,17 +15,18 @@ import {
 } from 'lucide-react';
 
 import {
+  CATALOG_DIFF_FIELD_DEFINITIONS,
   EDGE_AI_MODEL_VERSION,
+  buildCatalogChangeSet,
   buildEdgeCatalogProducts,
   compareCatalogSnapshots,
   createEdgeCatalogFingerprint,
-  parseCatalogSnapshotCsv,
   rankEdgeCatalogProducts,
   rankSimilarEdgeCatalogProducts,
   summarizeCatalogDiff
 } from '../../domain/edgeAiCatalog';
 import { embedEdgeAiTexts, initializeEdgeAi } from '../../lib/edgeAiClient';
-import { readFileAutoEncoding } from '../../lib/csv';
+import { readCatalogSnapshotFile } from '../../lib/catalogSnapshotFile';
 import { idbHelper } from '../../idbHelper';
 
 const INDEX_CACHE_KEY = `edgeAiCatalogIndex:${EDGE_AI_MODEL_VERSION}`;
@@ -34,7 +35,7 @@ const EMBEDDING_BATCH_SIZE = 12;
 const TABS = [
   { id: 'search', label: '商品意味検索' },
   { id: 'similar', label: '類似品提案' },
-  { id: 'diff', label: 'CSV差分' }
+  { id: 'diff', label: '変更チェック' }
 ];
 
 const STATUS_LABELS = {
@@ -43,6 +44,10 @@ const STATUS_LABELS = {
   modified: '変更',
   unchanged: '変更なし'
 };
+
+const CATALOG_FIELD_LABELS = Object.fromEntries(
+  CATALOG_DIFF_FIELD_DEFINITIONS.map((field) => [field.key, field.label])
+);
 
 const STATUS_STYLES = {
   added: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -129,7 +134,45 @@ const EmptyState = ({ children }) => (
   </div>
 );
 
-const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres, onOpenSheet }) => {
+const DiffResults = ({ diffs, emptyMessage = '差分はありません。' }) => (
+  <div className="mt-3 space-y-2">
+    {diffs.length === 0 ? (
+      <EmptyState>{emptyMessage}</EmptyState>
+    ) : diffs.map((diff) => (
+      <article key={diff.code} className="rounded-[22px] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-sm font-black text-[#273246]">{diff.code}</span>
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[diff.status]}`}>{STATUS_LABELS[diff.status]}</span>
+          <span className="truncate text-xs font-semibold text-[#566174]">{diff.after?.name || diff.before?.name || ''}</span>
+        </div>
+        {diff.changes.length > 0 && (
+          <div className="mt-3 divide-y divide-[#e7eaf0] rounded-2xl bg-[#f5f7fa] px-3">
+            {diff.changes.map((change) => (
+              <div key={change.key} className="grid gap-1 py-2 text-[11px] sm:grid-cols-[110px_1fr_18px_1fr]">
+                <span className={`font-semibold ${change.severity === 'high' ? 'text-rose-600' : 'text-[#5f697a]'}`}>{change.label}</span>
+                <span className="break-words text-[#7f8999] line-through">{change.before || '（空欄）'}</span>
+                <ArrowRight size={13} className="hidden text-[#b0b7c3] sm:block" />
+                <span className="break-words font-semibold text-[#273246]">{change.after || '（空欄）'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </article>
+    ))}
+  </div>
+);
+
+const EdgeAiAssistModal = ({
+  isOpen,
+  onClose,
+  images,
+  sheets,
+  salesData,
+  genres,
+  onOpenSheet,
+  activeChangeSet,
+  onApplyChangeSet
+}) => {
   const [activeTab, setActiveTab] = useState('search');
   const [query, setQuery] = useState('');
   const [semanticQuery, setSemanticQuery] = useState('');
@@ -144,6 +187,8 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
   const [aiError, setAiError] = useState('');
   const [oldSnapshot, setOldSnapshot] = useState(null);
   const [newSnapshot, setNewSnapshot] = useState(null);
+  const [catalogSnapshot, setCatalogSnapshot] = useState(null);
+  const [diffMode, setDiffMode] = useState('catalog');
   const [diffFilter, setDiffFilter] = useState('changed');
   const preparingRef = useRef(false);
 
@@ -182,6 +227,16 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
     if (diffFilter === 'changed') return diffs.filter((diff) => diff.status !== 'unchanged');
     return diffs.filter((diff) => diff.status === diffFilter);
   }, [diffFilter, diffs]);
+  const catalogChangeSet = useMemo(() => (
+    catalogSnapshot
+      ? buildCatalogChangeSet({
+        products,
+        snapshot: catalogSnapshot,
+        fileName: catalogSnapshot.fileName,
+        sheetName: catalogSnapshot.sheetName
+      })
+      : null
+  ), [catalogSnapshot, products]);
 
   const prepareIndex = useCallback(async () => {
     if (preparingRef.current || products.length === 0) return;
@@ -270,10 +325,10 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
     event.target.value = '';
     if (!file) return;
     try {
-      const text = await readFileAutoEncoding(file);
-      setter({ ...parseCatalogSnapshotCsv(text), fileName: file.name });
+      setAiError('');
+      setter(await readCatalogSnapshotFile(file));
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : 'CSVを読み込めませんでした。');
+      setAiError(error instanceof Error ? error.message : '比較データを読み込めませんでした。');
     }
   }, []);
 
@@ -446,67 +501,102 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
 
             {activeTab === 'diff' && (
               <div>
-                <h3 className="text-xl font-semibold text-[#273246]">CSVの変更を比べる</h3>
-                <p className="mt-1 text-xs text-[#7a8495]">変更前と変更後の全データCSVを、介援隊コードで突合します</p>
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  {[
-                    { label: '1. 変更前CSV', snapshot: oldSnapshot, setter: setOldSnapshot },
-                    { label: '2. 変更後CSV', snapshot: newSnapshot, setter: setNewSnapshot }
-                  ].map(({ label, snapshot, setter }) => (
-                    <label key={label} className={`flex cursor-pointer items-center gap-3 rounded-[22px] p-4 transition ${snapshot ? 'bg-emerald-50' : 'bg-white shadow-sm hover:bg-[#f2efff]'}`}>
-                      {snapshot ? <CheckCircle2 size={22} className="text-emerald-600" /> : <FileUp size={22} className="text-slate-400" />}
-                      <span className="min-w-0">
-                        <span className="block text-xs font-semibold text-[#364154]">{label}</span>
-                        <span className="block truncate text-[10px] text-[#7a8495]">{snapshot ? `${snapshot.fileName}（${snapshot.items.length.toLocaleString()}件）` : 'クリックして選択'}</span>
-                      </span>
-                      <input type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => loadSnapshot(event, setter)} />
-                    </label>
-                  ))}
+                <h3 className="text-xl font-semibold text-[#273246]">商品情報の変更を確認</h3>
+                <p className="mt-1 text-xs text-[#7a8495]">介援隊コードで突合し、詳細画面のコマ上に変更内容を表示します</p>
+
+                <div className="mt-5 inline-flex rounded-full bg-[#e9edf4] p-1">
+                  <button type="button" onClick={() => setDiffMode('catalog')} className={`rounded-full px-4 py-2 text-[11px] font-semibold transition ${diffMode === 'catalog' ? 'bg-white text-[#5145cd] shadow-sm' : 'text-[#667085]'}`}>台割と比較</button>
+                  <button type="button" onClick={() => setDiffMode('files')} className={`rounded-full px-4 py-2 text-[11px] font-semibold transition ${diffMode === 'files' ? 'bg-white text-[#5145cd] shadow-sm' : 'text-[#667085]'}`}>2ファイル比較</button>
                 </div>
 
-                {oldSnapshot && newSnapshot ? (
+                {diffMode === 'catalog' ? (
                   <>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {[
-                        ['changed', '差分のみ', diffSummary.added + diffSummary.removed + diffSummary.modified],
-                        ['modified', '変更', diffSummary.modified],
-                        ['added', '追加', diffSummary.added],
-                        ['removed', '削除', diffSummary.removed],
-                        ['all', 'すべて', diffs.length]
-                      ].map(([id, label, count]) => (
-                        <button key={id} type="button" onClick={() => setDiffFilter(id)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold transition ${diffFilter === id ? 'bg-[#6254e7] text-white' : 'bg-white text-[#687386] shadow-sm hover:bg-[#efecff]'}`}>
-                          {label} {count}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {visibleDiffs.length === 0 ? (
-                        <EmptyState>選択した条件に該当する差分はありません。</EmptyState>
-                      ) : visibleDiffs.map((diff) => (
-                        <article key={diff.code} className="rounded-[22px] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-sm font-black text-[#273246]">{diff.code}</span>
-                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[diff.status]}`}>{STATUS_LABELS[diff.status]}</span>
-                            <span className="truncate text-xs font-semibold text-[#566174]">{diff.after?.name || diff.before?.name || ''}</span>
-                          </div>
-                          {diff.changes.length > 0 && (
-                            <div className="mt-3 divide-y divide-[#e7eaf0] rounded-2xl bg-[#f5f7fa] px-3">
-                              {diff.changes.map((change) => (
-                                <div key={change.key} className="grid gap-1 py-2 text-[11px] sm:grid-cols-[110px_1fr_18px_1fr]">
-                                  <span className={`font-semibold ${change.severity === 'high' ? 'text-rose-600' : 'text-[#5f697a]'}`}>{change.label}</span>
-                                  <span className="break-words text-[#7f8999] line-through">{change.before || '（空欄）'}</span>
-                                  <ArrowRight size={13} className="hidden text-[#b0b7c3] sm:block" />
-                                  <span className="break-words font-semibold text-[#273246]">{change.after || '（空欄）'}</span>
-                                </div>
-                              ))}
-                            </div>
+                    <label className={`mt-5 flex cursor-pointer items-center gap-3 rounded-[22px] p-5 transition ${catalogSnapshot ? 'bg-emerald-50' : 'bg-white shadow-sm hover:bg-[#f2efff]'}`}>
+                      {catalogSnapshot ? <CheckCircle2 size={24} className="text-emerald-600" /> : <FileUp size={24} className="text-slate-400" />}
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-[#364154]">新しいExcel／CSVを選択</span>
+                        <span className="block truncate text-[10px] text-[#7a8495]">
+                          {catalogSnapshot
+                            ? `${catalogSnapshot.fileName}${catalogSnapshot.sheetName ? `・${catalogSnapshot.sheetName}` : ''}（${catalogSnapshot.items.length.toLocaleString()}件）`
+                            : '保存済みのコマテキストを基準に比較します（.xlsx／.csv）'}
+                        </span>
+                      </span>
+                      <input type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => loadSnapshot(event, setCatalogSnapshot)} />
+                    </label>
+
+                    {catalogChangeSet ? (
+                      <>
+                        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-white px-4 py-3 text-[11px] text-[#667085] shadow-sm">
+                          <span className="font-bold text-[#273246]">変更 {catalogChangeSet.summary.modified}</span>
+                          <span>新規 {catalogChangeSet.summary.added}</span>
+                          <span>照合済み {catalogSnapshot.items.length.toLocaleString()}件</span>
+                          {catalogChangeSet.recognizedFields.length > 0 ? (
+                            <span className="max-w-full truncate text-emerald-700">
+                              認識項目 {catalogChangeSet.recognizedFields.map((key) => CATALOG_FIELD_LABELS[key] || key).join('・')}
+                            </span>
+                          ) : (
+                            <span className="font-bold text-amber-700">比較できる項目列を認識できません</span>
                           )}
-                        </article>
-                      ))}
-                    </div>
+                          {catalogChangeSet.duplicateCodes > 0 && <span className="text-amber-700">重複コード {catalogChangeSet.duplicateCodes}件</span>}
+                          {catalogChangeSet.unreadableRows > 0 && <span className="text-amber-700">コード不明 {catalogChangeSet.unreadableRows}行</span>}
+                          <button
+                            type="button"
+                            onClick={() => onApplyChangeSet?.(catalogChangeSet)}
+                            className="ml-auto rounded-full bg-[#6254e7] px-4 py-2 font-bold text-white transition hover:bg-[#5145cd] disabled:opacity-40"
+                            disabled={catalogChangeSet.displayCount === 0}
+                          >
+                            {catalogChangeSet.displayCount > 0 ? `${catalogChangeSet.displayCount}件をページに表示` : 'ページ表示できる変更はありません'}
+                          </button>
+                        </div>
+                        <DiffResults diffs={catalogChangeSet.diffs} emptyMessage="取り込んだ項目に変更はありませんでした。" />
+                      </>
+                    ) : activeChangeSet ? (
+                      <div className="mt-4 rounded-2xl bg-indigo-50 px-4 py-3 text-[11px] text-indigo-700">
+                        現在、{activeChangeSet.fileName || '取込データ'}の差分 {activeChangeSet.displayCount || Object.keys(activeChangeSet.byCode || {}).length}件をページに表示できます。
+                      </div>
+                    ) : (
+                      <div className="mt-4"><EmptyState>新しい価格表や商品情報ファイルを選択してください。</EmptyState></div>
+                    )}
                   </>
                 ) : (
-                  <div className="mt-4"><EmptyState>比較する2つのCSVを選択してください。</EmptyState></div>
+                  <>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      {[
+                        { label: '1. 変更前Excel／CSV', snapshot: oldSnapshot, setter: setOldSnapshot },
+                        { label: '2. 変更後Excel／CSV', snapshot: newSnapshot, setter: setNewSnapshot }
+                      ].map(({ label, snapshot, setter }) => (
+                        <label key={label} className={`flex cursor-pointer items-center gap-3 rounded-[22px] p-4 transition ${snapshot ? 'bg-emerald-50' : 'bg-white shadow-sm hover:bg-[#f2efff]'}`}>
+                          {snapshot ? <CheckCircle2 size={22} className="text-emerald-600" /> : <FileUp size={22} className="text-slate-400" />}
+                          <span className="min-w-0">
+                            <span className="block text-xs font-semibold text-[#364154]">{label}</span>
+                            <span className="block truncate text-[10px] text-[#7a8495]">{snapshot ? `${snapshot.fileName}（${snapshot.items.length.toLocaleString()}件）` : 'クリックして選択'}</span>
+                          </span>
+                          <input type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => loadSnapshot(event, setter)} />
+                        </label>
+                      ))}
+                    </div>
+
+                    {oldSnapshot && newSnapshot ? (
+                      <>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {[
+                            ['changed', '差分のみ', diffSummary.added + diffSummary.removed + diffSummary.modified],
+                            ['modified', '変更', diffSummary.modified],
+                            ['added', '追加', diffSummary.added],
+                            ['removed', '削除', diffSummary.removed],
+                            ['all', 'すべて', diffs.length]
+                          ].map(([id, label, count]) => (
+                            <button key={id} type="button" onClick={() => setDiffFilter(id)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold transition ${diffFilter === id ? 'bg-[#6254e7] text-white' : 'bg-white text-[#687386] shadow-sm hover:bg-[#efecff]'}`}>
+                              {label} {count}
+                            </button>
+                          ))}
+                        </div>
+                        <DiffResults diffs={visibleDiffs} emptyMessage="選択した条件に該当する差分はありません。" />
+                      </>
+                    ) : (
+                      <div className="mt-4"><EmptyState>比較する2つのExcel／CSVを選択してください。</EmptyState></div>
+                    )}
+                  </>
                 )}
               </div>
             )}

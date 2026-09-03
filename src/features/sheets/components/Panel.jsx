@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GripVertical, X } from 'lucide-react';
+import { ArrowRight, GripVertical, X } from 'lucide-react';
 
 import {
   FREE_LABEL_COLORS,
@@ -13,6 +13,8 @@ import {
   getFreeLabelTextLayout
 } from '../../../domain/freeLabels';
 import { normalizeCode } from '../../../domain/productCodes';
+import { buildMonthlySalesSeries } from '../../../domain/salesData';
+import MonthlySalesChart from '../../sales/MonthlySalesChart';
 import {
   DAIWARI_PANEL_DROPZONE_PREFIX,
   buildPanelDragConfig,
@@ -27,6 +29,25 @@ import { clamp } from '../../../lib/math';
 const createFreeLabelId = () => (
   Date.now().toString() + Math.random().toString(36).substring(2, 7)
 );
+
+const formatCatalogChangeValue = (change, value) => {
+  if (change?.key?.startsWith('price')) {
+    const amount = Number(String(value || '').replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(amount) ? `￥${amount.toLocaleString()}` : (value || 'なし');
+  }
+  return value || 'なし';
+};
+
+const getCatalogChangeDisplay = (change = {}) => {
+  const before = formatCatalogChangeValue(change, change.before);
+  const after = formatCatalogChangeValue(change, change.after);
+  if (change.key?.startsWith('price')) return { title: '価格変更', detail: `${before} → ${after}` };
+  if (change.key === 'demoStatus') return { title: 'デモ機変更', detail: `${before} → ${after}` };
+  if (change.key === 'lifecycleStatus' && ['廃盤', '在庫限り', '休止'].includes(change.after)) {
+    return { title: change.after, detail: change.before ? `${change.before} → ${change.after}` : change.after };
+  }
+  return { title: `${change.label}変更`, detail: `${before} → ${after}` };
+};
 
 const Panel = React.memo(({
   index,
@@ -48,6 +69,8 @@ const Panel = React.memo(({
   salesData,
   onHoverSales,
   onLeaveSales,
+  isCatalogDiffMode = false,
+  catalogChangesByCode = {},
   imageDataById,
   isLabelMode,
   onPreviewImage,
@@ -63,6 +86,7 @@ const Panel = React.memo(({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isArrangeDragOver, setIsArrangeDragOver] = useState(false);
+  const [monthlySalesCode, setMonthlySalesCode] = useState(null);
   const textareaRef = useRef(null);
   const codeInputRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
@@ -77,6 +101,10 @@ const Panel = React.memo(({
     const normalizedTarget = normalizeCode(data.code);
     return salesData[normalizedTarget] || null;
   }, [isSalesMode, data.code, salesData]);
+  const matchedCatalogDiff = useMemo(() => {
+    if (!isCatalogDiffMode || !data.code) return null;
+    return catalogChangesByCode[normalizeCode(data.code)] || null;
+  }, [catalogChangesByCode, data.code, isCatalogDiffMode]);
 
   useEffect(() => {
     if (!isFocusedRef.current) {
@@ -554,6 +582,17 @@ const Panel = React.memo(({
   const salesTotal = matchedSales
     ? matchedSales.reduce((total, item) => total + (parseInt(item.count) || 0), 0)
     : 0;
+  const monthlySalesSeries = useMemo(() => buildMonthlySalesSeries(matchedSales), [matchedSales]);
+  const canShowMonthlySales = monthlySalesSeries.length > 0;
+  const normalizedPanelCode = normalizeCode(data.code);
+  const isMonthlySalesView = isSalesMode && monthlySalesCode === normalizedPanelCode && canShowMonthlySales;
+
+  const toggleSalesView = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canShowMonthlySales) return;
+    setMonthlySalesCode((current) => current === normalizedPanelCode ? null : normalizedPanelCode);
+  };
 
   return (
     <div
@@ -848,26 +887,76 @@ const Panel = React.memo(({
       })}
 
       {isSalesMode && matchedSales && (
-        <div className="absolute inset-0 z-30 bg-black/60 flex flex-col p-2 text-white pointer-events-none">
-          <div className="flex justify-between items-start mb-1">
+        <div className="pointer-events-none absolute inset-0 z-30 flex flex-col bg-black/60 p-2 text-white">
+          <div className="mb-1 flex items-start justify-between gap-1">
             <span className="text-[10px] bg-emerald-500 text-white px-1 py-0.5 rounded font-bold shadow-sm">
-              実績
+              {isMonthlySalesView ? '月別実績' : '実績'}
             </span>
-            <span className="text-xl font-bold font-mono tracking-tighter text-emerald-300">
-              {salesTotal.toLocaleString()}
-            </span>
+            <div className="flex items-center gap-1">
+              {!isMonthlySalesView && (
+                <span className="font-mono text-xl font-bold tracking-tighter text-emerald-300">
+                  {salesTotal.toLocaleString()}
+                </span>
+              )}
+              {canShowMonthlySales && (
+                <button
+                  type="button"
+                  onClick={toggleSalesView}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  draggable={false}
+                  className="pointer-events-auto flex h-7 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100/95 text-violet-500 shadow-sm transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                  aria-label={isMonthlySalesView ? '総合計表示に戻す' : '月別売上グラフを表示'}
+                  title={isMonthlySalesView ? '総合計表示に戻す' : '月別売上グラフを表示'}
+                >
+                  <ArrowRight size={15} strokeWidth={2.5} className={`transition-transform ${isMonthlySalesView ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex-1 overflow-hidden space-y-1">
-            {matchedSales.slice(0, 3).map((item, itemIndex) => (
-              <div key={itemIndex} className="flex justify-between items-baseline text-[9px] border-b border-white/20 pb-0.5">
-                <span className="truncate w-2/3 opacity-90">{item.name} {item.spec}</span>
-                <span className="font-mono font-bold opacity-100">{item.count}</span>
-              </div>
-            ))}
-            {matchedSales.length > 3 && (
-              <div className="text-[8px] text-center opacity-70 italic mt-1">
-                他 {matchedSales.length - 3} 件...
-              </div>
+          {isMonthlySalesView ? (
+            <MonthlySalesChart series={monthlySalesSeries} />
+          ) : (
+            <div className="flex-1 space-y-1 overflow-hidden">
+              {matchedSales.slice(0, 3).map((item, itemIndex) => (
+                <div key={itemIndex} className="flex items-baseline justify-between border-b border-white/20 pb-0.5 text-[9px]">
+                  <span className="w-2/3 truncate opacity-90">{item.name} {item.spec}</span>
+                  <span className="font-mono font-bold opacity-100">{item.count}</span>
+                </div>
+              ))}
+              {matchedSales.length > 3 && (
+                <div className="mt-1 text-center text-[8px] italic opacity-70">
+                  他 {matchedSales.length - 3} 件...
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {isCatalogDiffMode && matchedCatalogDiff && (
+        <div data-catalog-diff-overlay="true" className="pointer-events-none absolute inset-0 z-30 flex flex-col bg-slate-950/75 p-2 text-white">
+          <div className="mb-1 flex items-start justify-between gap-1">
+            <span className="rounded bg-amber-400 px-1.5 py-0.5 text-[9px] font-black text-amber-950 shadow-sm">
+              変更 {matchedCatalogDiff.changes?.length || 0}
+            </span>
+            <span className="truncate font-mono text-[9px] font-bold text-amber-200">{matchedCatalogDiff.code}</span>
+          </div>
+          <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+            {(matchedCatalogDiff.changes || []).slice(0, 3).map((change) => {
+              const display = getCatalogChangeDisplay(change);
+              return (
+                <div key={change.key} className={`rounded-md border px-1.5 py-1 ${change.severity === 'high' ? 'border-amber-300/70 bg-amber-400/20' : 'border-white/25 bg-white/10'}`}>
+                  <div className={`flex items-center gap-1 text-[9px] font-black leading-tight ${change.key === 'lifecycleStatus' && change.after === '廃盤' ? 'text-rose-300' : 'text-amber-200'}`}>
+                    <span>{display.title}</span>
+                    {change.confidence && change.confidence !== 'high' && <span className="rounded bg-white/15 px-1 text-[7px] text-white">要確認</span>}
+                  </div>
+                  <div className="mt-0.5 break-words font-mono text-[8px] font-bold leading-tight text-white">{display.detail}</div>
+                </div>
+              );
+            })}
+            {(matchedCatalogDiff.changes?.length || 0) > 3 && (
+              <div className="text-center text-[8px] font-bold text-slate-300">ほか {matchedCatalogDiff.changes.length - 3}件</div>
             )}
           </div>
         </div>

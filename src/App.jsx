@@ -54,6 +54,7 @@ import {
   db,
   CLOUD_IMAGES_CACHE_KEY,
   CLOUD_SALES_CACHE_KEY,
+  CATALOG_CHANGE_SET_CACHE_KEY,
   CLOUD_CACHE_TTL_MS,
   LOCAL_WORK_LOGS_KEY
 } from './config/firebase';
@@ -264,6 +265,7 @@ export default function App() {
   } = useWorkspaceUndoState({ accountId: undoAccountId });
   const [salesData, setSalesData] = useState(null); // { code: [{name, spec, count}] }
   const [salesDataLastUpdated, setSalesDataLastUpdated] = useState(null);
+  const [catalogChangeSet, setCatalogChangeSet] = useState(null);
 
   // UI State
   const [viewMode, setViewMode] = useState('overview');
@@ -300,6 +302,7 @@ export default function App() {
   const logoTapCountRef = useRef(0);
   const logoTapTimeoutRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
+  const [isCatalogDiffMode, setIsCatalogDiffMode] = useState(false);
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
   const [panelArrangeSession, setPanelArrangeSession] = useState(null);
@@ -729,10 +732,23 @@ export default function App() {
     salesData
   });
 
+  useEffect(() => {
+    let isCancelled = false;
+    void idbHelper.getItem(CATALOG_CHANGE_SET_CACHE_KEY)
+      .then((savedChangeSet) => {
+        if (!isCancelled && savedChangeSet?.byCode && Array.isArray(savedChangeSet?.diffs)) {
+          setCatalogChangeSet(savedChangeSet);
+        }
+      })
+      .catch((error) => console.error('Catalog change set cache load failed:', error));
+    return () => { isCancelled = true; };
+  }, []);
+
   // 全体表示に切り替えた時、実績モードを自動的にオフにする
   useEffect(() => {
     if (viewMode !== 'list' && viewMode !== 'single') {
       setIsSalesMode(false);
+      setIsCatalogDiffMode(false);
     }
   }, [viewMode]);
 
@@ -1364,8 +1380,27 @@ export default function App() {
       salesModeLongPressTriggeredRef.current = false;
       return;
     }
-    setIsSalesMode((prev) => !prev);
-  }, [panelArrangeSession]);
+    const nextIsSalesMode = !isSalesMode;
+    setIsSalesMode(nextIsSalesMode);
+    if (nextIsSalesMode) setIsCatalogDiffMode(false);
+  }, [isSalesMode, panelArrangeSession]);
+
+  const handleCatalogDiffModeButtonClick = useCallback(() => {
+    if (panelArrangeSession || !catalogChangeSet) return;
+    const nextIsCatalogDiffMode = !isCatalogDiffMode;
+    setIsCatalogDiffMode(nextIsCatalogDiffMode);
+    if (nextIsCatalogDiffMode) setIsSalesMode(false);
+  }, [catalogChangeSet, isCatalogDiffMode, panelArrangeSession]);
+
+  const handleApplyCatalogChangeSet = useCallback((nextChangeSet) => {
+    if (!nextChangeSet?.byCode || !Array.isArray(nextChangeSet?.diffs)) return;
+    setCatalogChangeSet(nextChangeSet);
+    setIsCatalogDiffMode(true);
+    setIsSalesMode(false);
+    setIsEdgeAiAssistOpen(false);
+    void idbHelper.setItem(CATALOG_CHANGE_SET_CACHE_KEY, nextChangeSet)
+      .catch((error) => console.error('Catalog change set cache save failed:', error));
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -3572,6 +3607,10 @@ export default function App() {
           onSalesModeClick={handleSalesModeButtonClick}
           onSalesModeLongPressStart={startSalesModeLongPress}
           onSalesModeLongPressEnd={endSalesModeLongPress}
+          catalogChangeCount={catalogChangeSet?.displayCount || Object.keys(catalogChangeSet?.byCode || {}).length}
+          catalogChangeFileName={catalogChangeSet?.fileName || ''}
+          isCatalogDiffMode={isCatalogDiffMode}
+          onCatalogDiffModeClick={handleCatalogDiffModeButtonClick}
           onShowQuickHelp={showQuickHelp}
           onHideQuickHelp={hideQuickHelp}
           selectionToolbar={isPageSelectionMode ? (
@@ -3791,6 +3830,10 @@ export default function App() {
                 onHover: handleHoverSales,
                 onLeave: handleLeaveSales
               }}
+              changes={{
+                isMode: isCatalogDiffMode,
+                byCode: catalogChangeSet?.byCode || {}
+              }}
               imageDataById={imageDataById}
             />
           </div>
@@ -3867,6 +3910,8 @@ export default function App() {
             sheets={sheets}
             salesData={salesData}
             genres={GENRES}
+            activeChangeSet={catalogChangeSet}
+            onApplyChangeSet={handleApplyCatalogChangeSet}
             onOpenSheet={(sheetId) => {
               setIsEdgeAiAssistOpen(false);
               handleOpenAssignedImage(sheetId);

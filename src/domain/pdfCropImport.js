@@ -732,6 +732,9 @@ export const extractPdfCatalogDetails = (sourceText = '', { code = '', productNa
   const itemNumberData = extractItemNumberCandidates(text, code);
   const hasStock = availabilityLabels.includes('在庫商品');
   const hasDirect = availabilityLabels.includes('直送');
+  const lifecycleStatus = /(?:廃盤|販売終了|終売)/.test(text)
+    ? '廃盤'
+    : (/(?:在庫限り|在庫かぎり|売切次第終了)/.test(text) ? '在庫限り' : '');
 
   return {
     version: 1,
@@ -743,6 +746,7 @@ export const extractPdfCatalogDetails = (sourceText = '', { code = '', productNa
     catchCopyCandidates,
     availability: hasStock && hasDirect ? 'mixed' : (hasStock ? 'stock' : (hasDirect ? 'direct' : 'unknown')),
     availabilityLabels,
+    lifecycleStatus,
     handlingMarkers,
     hasDemoMarker: handlingMarkers.includes('(D)') || /デモ機/.test(text),
     ...specificationData

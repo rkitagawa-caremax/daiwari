@@ -38,7 +38,7 @@ const SettingsModal = React.memo(({ isOpen, onClose, onImportSalesCSV, salesData
             </h4>
             <div className="p-5" style={{ background: 'var(--m3-surface-container-lowest)', borderRadius: 'var(--m3-shape-corner-lg)' }}>
               <p className="text-sm mb-5 leading-relaxed" style={{ color: 'var(--m3-on-surface-variant)' }}>
-                CSVファイル（商品別売上推移表）を取り込むと、パネル上のコード（介援隊CD）と照合して販売数量を表示できます。<br />
+                CSVファイル（商品別売上推移表）を取り込むと、パネル上のコード（介援隊CD）と照合して販売数量と月別推移を表示できます。<br />
                 <span style={{ color: 'var(--m3-error)' }}>※ 取り込みを行うと以前のデータは上書きされます。</span>
               </p>
 

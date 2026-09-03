@@ -3,15 +3,16 @@ import { normalizePdfCropCode } from './pdfCropImport.js';
 
 export const EDGE_AI_MODEL_VERSION = 'ruri-v3-30m-int8-v1';
 
-const FIELD_DEFINITIONS = Object.freeze([
+export const CATALOG_DIFF_FIELD_DEFINITIONS = Object.freeze([
   { key: 'name', label: '商品名', aliases: ['商品名', '品名', '名称', '商品名称'] },
   { key: 'itemNumber', label: '品番', aliases: ['品番', '型番', 'メーカー品番', '商品番号'] },
   { key: 'catchCopy', label: 'キャッチコピー', aliases: ['キャッチコピー', 'キャッチ', 'コピー', '商品説明', '説明文'] },
   { key: 'priceIncludingTax', label: '税込価格', aliases: ['税込価格', '価格(税込)', '税込', '税込み価格'] },
   { key: 'priceExcludingTax', label: '税抜価格', aliases: ['税抜価格', '価格(税抜)', '税別価格', '本体価格'] },
   { key: 'availability', label: '販売区分', aliases: ['販売区分', '在庫・直送', '在庫直送', '在庫区分'] },
+  { key: 'lifecycleStatus', label: '販売状態', aliases: ['販売状態', '商品状態', '商品ステータス', '掲載状態', '廃盤・在庫限り', '廃盤在庫限り'] },
   { key: 'handlingMarkers', label: '取扱記号', aliases: ['取扱記号', '取扱い記号', '記号'] },
-  { key: 'hasDemoMarker', label: 'デモ機', aliases: ['デモ機', 'デモ機(D)', 'デモ'] },
+  { key: 'demoStatus', label: 'デモ機', aliases: ['デモ機', 'デモ機(D)', 'デモ', 'デモ機区分', 'デモ区分', 'デモ記号'] },
   { key: 'specifications', label: '仕様', aliases: ['仕様', '商品仕様', 'スペック'] },
   { key: 'compositionDetails', label: '成分・原材料・栄養', aliases: ['成分・原材料・栄養', '成分', '原材料', '栄養'] },
   { key: 'materialDetails', label: '材質・素材', aliases: ['材質・素材', '材質', '素材'] }
@@ -47,12 +48,36 @@ const normalizePrice = (value) => {
   return match ? Number(match[0]) : String(value).trim();
 };
 
-const normalizeBoolean = (value) => {
+const normalizeAvailability = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return '';
-  if (['あり', '有', 'yes', 'true', '1', '○', 'd'].includes(normalized)) return true;
-  if (['なし', '無', 'no', 'false', '0', '×', '-'].includes(normalized)) return false;
+  const hasStock = /在庫|stock/.test(normalized);
+  const hasDirect = /直送|direct/.test(normalized);
+  if (hasStock && hasDirect) return 'mixed';
+  if (hasStock) return 'stock';
+  if (hasDirect) return 'direct';
+  if (/受注生産/.test(normalized)) return 'made-to-order';
   return String(value).trim();
+};
+
+const normalizeLifecycleStatus = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+  if (/廃盤|販売終了|終売/.test(normalized)) return '廃盤';
+  if (/在庫限り|在庫かぎり|売切次第終了/.test(normalized)) return '在庫限り';
+  if (/休止|一時停止/.test(normalized)) return '休止';
+  if (/通常|継続|販売中/.test(normalized)) return '通常';
+  return String(value).trim();
+};
+
+const normalizeDemoStatus = (value) => {
+  const raw = String(value ?? '').normalize('NFKC').trim();
+  if (!raw) return '';
+  const compact = raw.replace(/[（）()\s]/g, '').toUpperCase();
+  if (compact === 'D' || compact === 'デモ機' || compact === 'あり' || compact === '有' || compact === 'YES' || compact === 'TRUE' || compact === '1' || compact === '○') return 'D';
+  if (compact === 'N') return 'N';
+  if (compact === 'なし' || compact === '無' || compact === 'NO' || compact === 'FALSE' || compact === '0' || compact === '×' || compact === '-') return '';
+  return raw;
 };
 
 const normalizeList = (value) => String(value ?? '')
@@ -68,8 +93,9 @@ const makeSearchText = (product) => unique([
   product.itemNumber,
   product.catchCopy,
   displayValue(product.availability),
+  product.lifecycleStatus,
   ...product.handlingMarkers,
-  product.hasDemoMarker ? 'デモ機 D' : '',
+  product.demoStatus ? `デモ機 ${product.demoStatus}` : '',
   ...product.specifications,
   ...product.compositionDetails,
   ...product.materialDetails,
@@ -151,9 +177,13 @@ export const buildEdgeCatalogProducts = ({ images = [], sheets = [], salesData =
       catchCopy: details.catchCopy || '',
       priceIncludingTax: resolved.priceIncludingTax ?? '',
       priceExcludingTax: resolved.priceExcludingTax ?? '',
+      priceExtractionConfidence: resolved.priceExtractionConfidence || 'none',
       availability: details.availability || '',
+      lifecycleStatus: details.lifecycleStatus || '',
       handlingMarkers: asArray(details.handlingMarkers),
       hasDemoMarker: details.hasDemoMarker === true,
+      demoStatus: asArray(details.handlingMarkers).map((marker) => marker.match(/^\(([DN])\)$/)?.[1]).find(Boolean)
+        || (details.hasDemoMarker === true ? 'D' : ''),
       specifications: asArray(details.specifications),
       compositionDetails: asArray(details.compositionDetails),
       materialDetails: asArray(details.materialDetails),
@@ -318,13 +348,32 @@ const findHeaderIndex = (headers, aliases) => {
   return headers.findIndex((header) => normalizedAliases.includes(normalizeHeader(header)));
 };
 
-export const parseCatalogSnapshotCsv = (csvText = '') => {
-  const records = parseCsvRecords(csvText);
-  if (!records.length) throw new Error('CSVにデータがありません。');
-  const headers = records[0];
+const findCatalogHeaderRowIndex = (records = []) => {
+  let best = { index: -1, score: -1 };
+  records.slice(0, 30).forEach((record, index) => {
+    const headers = Array.isArray(record) ? record : [];
+    if (findHeaderIndex(headers, CODE_ALIASES) < 0) return;
+    const recognizedCount = CATALOG_DIFF_FIELD_DEFINITIONS.reduce((count, field) => (
+      count + (findHeaderIndex(headers, field.aliases) >= 0 ? 1 : 0)
+    ), 0);
+    const score = recognizedCount * 100 + headers.filter((value) => String(value ?? '').trim()).length;
+    if (score > best.score) best = { index, score };
+  });
+  return best.index;
+};
+
+export const parseCatalogSnapshotRecords = (inputRecords = []) => {
+  const records = (Array.isArray(inputRecords) ? inputRecords : []).map((record) => (
+    (Array.isArray(record) ? record : []).map((value) => (
+      value instanceof Date ? value.toISOString() : value ?? ''
+    ))
+  ));
+  if (!records.length) throw new Error('ファイルにデータがありません。');
+  const headerRowIndex = findCatalogHeaderRowIndex(records);
+  if (headerRowIndex < 0) throw new Error('「介援隊コード」または「商品コード」列が見つかりません。');
+  const headers = records[headerRowIndex];
   const codeIndex = findHeaderIndex(headers, CODE_ALIASES);
-  if (codeIndex < 0) throw new Error('「介援隊コード」または「商品コード」列が見つかりません。');
-  const fieldIndexes = Object.fromEntries(FIELD_DEFINITIONS.map((field) => [
+  const fieldIndexes = Object.fromEntries(CATALOG_DIFF_FIELD_DEFINITIONS.map((field) => [
     field.key,
     findHeaderIndex(headers, field.aliases)
   ]));
@@ -332,7 +381,7 @@ export const parseCatalogSnapshotCsv = (csvText = '') => {
   let unreadableRows = 0;
   let duplicateCodes = 0;
 
-  records.slice(1).forEach((record) => {
+  records.slice(headerRowIndex + 1).forEach((record) => {
     const code = normalizePdfCropCode(record[codeIndex] || '');
     if (!code) {
       if (record.some(Boolean)) unreadableRows += 1;
@@ -340,16 +389,19 @@ export const parseCatalogSnapshotCsv = (csvText = '') => {
     }
     if (byCode.has(code)) duplicateCodes += 1;
     const item = { code };
-    FIELD_DEFINITIONS.forEach((field) => {
+    CATALOG_DIFF_FIELD_DEFINITIONS.forEach((field) => {
       const index = fieldIndexes[field.key];
       let value = index >= 0 ? record[index] ?? '' : '';
       if (field.key.startsWith('price')) value = normalizePrice(value);
-      else if (field.key === 'hasDemoMarker') value = normalizeBoolean(value);
+      else if (field.key === 'availability') value = normalizeAvailability(value);
+      else if (field.key === 'lifecycleStatus') value = normalizeLifecycleStatus(value);
+      else if (field.key === 'demoStatus') value = normalizeDemoStatus(value);
       else if (['handlingMarkers', 'specifications', 'compositionDetails', 'materialDetails'].includes(field.key)) {
         value = normalizeList(value);
       } else value = String(value).trim();
       item[field.key] = value;
     });
+    item.hasDemoMarker = item.demoStatus === 'D';
     byCode.set(code, item);
   });
 
@@ -358,39 +410,81 @@ export const parseCatalogSnapshotCsv = (csvText = '') => {
     items: [...byCode.values()],
     duplicateCodes,
     unreadableRows,
-    recognizedFields: FIELD_DEFINITIONS.filter((field) => fieldIndexes[field.key] >= 0).map((field) => field.key)
+    headerRowIndex,
+    recognizedFields: CATALOG_DIFF_FIELD_DEFINITIONS.filter((field) => fieldIndexes[field.key] >= 0).map((field) => field.key)
   };
 };
 
-const areValuesEqual = (left, right) => normalizeText(displayValue(left)) === normalizeText(displayValue(right));
+export const parseCatalogSnapshotCsv = (csvText = '') => parseCatalogSnapshotRecords(parseCsvRecords(csvText));
 
 const getChangeSeverity = (fieldKey) => {
-  if (['priceIncludingTax', 'priceExcludingTax', 'availability', 'handlingMarkers', 'hasDemoMarker'].includes(fieldKey)) return 'high';
+  if (['priceIncludingTax', 'priceExcludingTax', 'availability', 'lifecycleStatus', 'handlingMarkers', 'demoStatus', 'hasDemoMarker'].includes(fieldKey)) return 'high';
   if (['itemNumber', 'specifications', 'compositionDetails', 'materialDetails'].includes(fieldKey)) return 'medium';
   return 'normal';
 };
 
-export const compareCatalogSnapshots = (oldItems = [], newItems = []) => {
+const displayFieldValue = (fieldKey, value) => {
+  if (fieldKey === 'availability') {
+    return ({ stock: '在庫', direct: '直送', mixed: '在庫・直送', 'made-to-order': '受注生産' }[value]) || displayValue(value);
+  }
+  if (fieldKey === 'demoStatus') return value ? `(${String(value).replace(/[（）()]/g, '')})` : 'なし';
+  return displayValue(value);
+};
+
+const areFieldValuesEqual = (fieldKey, left, right) => (
+  normalizeText(displayFieldValue(fieldKey, left)) === normalizeText(displayFieldValue(fieldKey, right))
+);
+
+export const compareCatalogSnapshots = (oldItems = [], newItems = [], options = {}) => {
   const oldByCode = new Map(oldItems.map((item) => [item.code, item]));
   const newByCode = new Map(newItems.map((item) => [item.code, item]));
-  const allCodes = [...new Set([...oldByCode.keys(), ...newByCode.keys()])].sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }));
+  const missingMeansRemoved = options.missingMeansRemoved !== false;
+  const requestedFields = Array.isArray(options.fields) ? new Set(options.fields) : null;
+  const allCodes = [...new Set([
+    ...(missingMeansRemoved ? oldByCode.keys() : []),
+    ...newByCode.keys()
+  ])].sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }));
 
   return allCodes.map((code) => {
     const before = oldByCode.get(code);
     const after = newByCode.get(code);
     if (!before) return { code, status: 'added', before: null, after, changes: [] };
     if (!after) return { code, status: 'removed', before, after: null, changes: [] };
-    const changes = FIELD_DEFINITIONS
-      .filter((field) => !areValuesEqual(before[field.key], after[field.key]))
+    const changes = CATALOG_DIFF_FIELD_DEFINITIONS
+      .filter((field) => !requestedFields || requestedFields.has(field.key))
+      .filter((field) => !areFieldValuesEqual(field.key, before[field.key], after[field.key]))
       .map((field) => ({
         key: field.key,
         label: field.label,
-        before: displayValue(before[field.key]),
-        after: displayValue(after[field.key]),
-        severity: getChangeSeverity(field.key)
+        before: displayFieldValue(field.key, before[field.key]),
+        after: displayFieldValue(field.key, after[field.key]),
+        severity: getChangeSeverity(field.key),
+        confidence: field.key.startsWith('price') ? (before.priceExtractionConfidence || 'unknown') : 'high'
       }));
     return { code, status: changes.length ? 'modified' : 'unchanged', before, after, changes };
   });
+};
+
+export const buildCatalogChangeSet = ({ products = [], snapshot = {}, fileName = '', sheetName = '' } = {}) => {
+  const diffs = compareCatalogSnapshots(products, snapshot.items || [], {
+    fields: snapshot.recognizedFields || [],
+    missingMeansRemoved: false
+  });
+  const changedDiffs = diffs.filter((diff) => diff.status !== 'unchanged');
+  const displayableDiffs = changedDiffs.filter((diff) => diff.status === 'modified' && diff.changes.length > 0);
+  return {
+    version: 1,
+    fileName,
+    sheetName,
+    importedAt: new Date().toISOString(),
+    recognizedFields: [...(snapshot.recognizedFields || [])],
+    unreadableRows: snapshot.unreadableRows || 0,
+    duplicateCodes: snapshot.duplicateCodes || 0,
+    summary: summarizeCatalogDiff(diffs),
+    diffs: changedDiffs,
+    displayCount: displayableDiffs.length,
+    byCode: Object.fromEntries(displayableDiffs.map((diff) => [diff.code, diff]))
+  };
 };
 
 export const summarizeCatalogDiff = (diffs = []) => diffs.reduce((summary, diff) => {
