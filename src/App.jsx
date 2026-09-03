@@ -105,6 +105,7 @@ import {
   getPageNavigationSelection
 } from './domain/twoPageWorkspace';
 import {
+  SALES_DATA_WRITE_BATCH_SIZE,
   mergeSerializedSalesChunks,
   parseSalesCsvContent,
   splitSalesDataIntoChunks
@@ -1272,39 +1273,30 @@ export default function App() {
       const entries = Object.entries(salesMap);
       const chunks = splitSalesDataIntoChunks(salesMap);
 
-      const batch = writeBatch(db);
-
       const snapshot = await getDocs(salesChunksCollection);
-      snapshot.docs.forEach(d => batch.delete(d.ref));
 
-      chunks.forEach((chunk, index) => {
-        const docRef = doc(salesChunksCollection, `chunk_${index}`);
-        batch.set(docRef, {
-          items: JSON.stringify(chunk),
-          updatedAt: serverTimestamp(),
-          chunkIndex: index
-        });
-      });
-
-      if (snapshot.size + chunks.length > 450) {
-        const deleteBatch = writeBatch(db);
-        snapshot.docs.forEach(d => deleteBatch.delete(d.ref));
-        await runCloudWrite(() => deleteBatch.commit(), { key: 'sales-data' });
-
-        for (let i = 0; i < chunks.length; i += 400) {
-          const writeBatchChunk = writeBatch(db);
-          chunks.slice(i, i + 400).forEach((chunk, idx) => {
-            const realIdx = i + idx;
-            const docRef = doc(salesChunksCollection, `chunk_${realIdx}`);
-            writeBatchChunk.set(docRef, {
-              items: JSON.stringify(chunk),
-              updatedAt: serverTimestamp()
-            });
+      // Firestoreの10MiBリクエスト上限に十分な余裕を持たせるため、
+      // 旧チャンクの削除と新チャンクの保存を少数ずつ確定する。
+      for (let index = 0; index < chunks.length; index += SALES_DATA_WRITE_BATCH_SIZE) {
+        const writeBatchChunk = writeBatch(db);
+        chunks.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((chunk, offset) => {
+          const realIndex = index + offset;
+          writeBatchChunk.set(doc(salesChunksCollection, `chunk_${realIndex}`), {
+            items: JSON.stringify(chunk),
+            updatedAt: serverTimestamp(),
+            chunkIndex: realIndex
           });
-          await runCloudWrite(() => writeBatchChunk.commit(), { key: 'sales-data' });
-        }
-      } else {
-        await runCloudWrite(() => batch.commit(), { key: 'sales-data' });
+        });
+        setProgressMessage(`データを保存中... ${Math.min(index + SALES_DATA_WRITE_BATCH_SIZE, chunks.length)}/${chunks.length}`);
+        await runCloudWrite(() => writeBatchChunk.commit(), { key: 'sales-data' });
+      }
+
+      const currentChunkIds = new Set(chunks.map((_, index) => `chunk_${index}`));
+      const obsoleteDocs = snapshot.docs.filter((snapshotDoc) => !currentChunkIds.has(snapshotDoc.id));
+      for (let index = 0; index < obsoleteDocs.length; index += SALES_DATA_WRITE_BATCH_SIZE) {
+        const deleteBatch = writeBatch(db);
+        obsoleteDocs.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((snapshotDoc) => deleteBatch.delete(snapshotDoc.ref));
+        await runCloudWrite(() => deleteBatch.commit(), { key: 'sales-data' });
       }
 
       await setDoc(doc(settingsCollection, 'salesDataMeta'), {

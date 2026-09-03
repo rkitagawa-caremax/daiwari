@@ -3,6 +3,8 @@ import { normalizeCode } from './productCodes.js';
 
 export const SALES_DATA_HEADER_ROW_COUNT = 2;
 export const SALES_DATA_CHUNK_SIZE = 1000;
+export const SALES_DATA_CHUNK_MAX_BYTES = 640 * 1024;
+export const SALES_DATA_WRITE_BATCH_SIZE = 5;
 
 const normalizeSalesHeader = (value) => String(value ?? '')
   .normalize('NFKC')
@@ -61,19 +63,23 @@ export const resolveSalesMonthColumns = (headerRows = []) => {
 
 export const buildMonthlySalesSeries = (items = []) => {
   const totals = new Map();
-  (Array.isArray(items) ? items : []).forEach((item) => {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const sharedLabels = normalizedItems.find((item) => Array.isArray(item?.monthlyLabels))?.monthlyLabels || [];
+  normalizedItems.forEach((item) => {
     (Array.isArray(item?.monthlySales) ? item.monthlySales : []).forEach((entry, index) => {
-      const key = entry?.key || `${entry?.label || '月'}-${index}`;
+      const isCompactEntry = typeof entry === 'number';
+      const label = isCompactEntry ? (item.monthlyLabels?.[index] || sharedLabels[index] || `${index + 1}月`) : (entry?.label || '');
+      const key = isCompactEntry ? `compact-month-${index}` : (entry?.key || `${entry?.label || '月'}-${index}`);
       if (!totals.has(key)) {
         totals.set(key, {
           key,
-          label: entry?.label || '',
-          year: entry?.year ?? null,
-          month: entry?.month ?? null,
+          label,
+          year: isCompactEntry ? null : (entry?.year ?? null),
+          month: isCompactEntry ? null : (entry?.month ?? null),
           count: 0
         });
       }
-      totals.get(key).count += Number(entry?.count) || 0;
+      totals.get(key).count += Number(isCompactEntry ? entry : entry?.count) || 0;
     });
   });
   return [...totals.values()];
@@ -100,20 +106,18 @@ export const parseSalesCsvContent = (
 
     const code = normalizeCode(rawCode);
     const count = parseSalesCount(columns[17]);
-    const monthlySales = monthColumns.map((monthColumn) => ({
-      key: monthColumn.key,
-      label: monthColumn.label,
-      year: monthColumn.year,
-      month: monthColumn.month,
-      count: parseSalesCount(columns[monthColumn.columnIndex])
-    }));
+    const monthlySales = monthColumns.map((monthColumn) => parseSalesCount(columns[monthColumn.columnIndex]));
     if (!salesData[code]) salesData[code] = [];
     const item = {
       name: columns[1] || '',
       spec: columns[2] || '',
       count
     };
-    if (monthlySales.length > 0) item.monthlySales = monthlySales;
+    if (monthlySales.length > 0) {
+      item.monthlySales = monthlySales;
+      // 月ラベルはコードごとに1度だけ保存し、Firestoreの通信量を抑える。
+      if (salesData[code].length === 0) item.monthlyLabels = monthColumns.map((monthColumn) => monthColumn.label);
+    }
     salesData[code].push(item);
   });
 
@@ -122,13 +126,32 @@ export const parseSalesCsvContent = (
 
 export const splitSalesDataIntoChunks = (
   salesData,
-  chunkSize = SALES_DATA_CHUNK_SIZE
+  chunkSize = SALES_DATA_CHUNK_SIZE,
+  maxBytes = SALES_DATA_CHUNK_MAX_BYTES
 ) => {
   const entries = Object.entries(salesData || {});
   const chunks = [];
-  for (let index = 0; index < entries.length; index += chunkSize) {
-    chunks.push(Object.fromEntries(entries.slice(index, index + chunkSize)));
-  }
+  const encoder = new TextEncoder();
+  let pendingEntries = [];
+  let pendingBytes = 2;
+
+  const flush = () => {
+    if (pendingEntries.length === 0) return;
+    chunks.push(Object.fromEntries(pendingEntries));
+    pendingEntries = [];
+    pendingBytes = 2;
+  };
+
+  entries.forEach(([code, items]) => {
+    const entryBytes = encoder.encode(JSON.stringify({ [code]: items })).byteLength;
+    if (entryBytes > maxBytes) {
+      throw new Error(`介援隊コード ${code} の実績明細が大きすぎるため保存できません。`);
+    }
+    if (pendingEntries.length > 0 && (pendingEntries.length >= chunkSize || pendingBytes + entryBytes > maxBytes)) flush();
+    pendingEntries.push([code, items]);
+    pendingBytes += entryBytes;
+  });
+  flush();
   return chunks;
 };
 

@@ -70,13 +70,12 @@ test('sales CSV keeps fiscal-year monthly values without changing the total', ()
 
   assert.equal(parsed.E001[0].count, 78);
   assert.equal(parsed.E001[0].monthlySales.length, 12);
-  assert.deepEqual(parsed.E001[0].monthlySales.slice(0, 2), [
-    { key: '2025-04', label: '25/4', year: 2025, month: 4, count: 1 },
-    { key: '2025-05', label: '25/5', year: 2025, month: 5, count: 2 }
+  assert.deepEqual(parsed.E001[0].monthlySales.slice(0, 2), [1, 2]);
+  assert.equal(parsed.E001[0].monthlySales.at(-1), 12);
+  assert.deepEqual(parsed.E001[0].monthlyLabels, [
+    '25/4', '25/5', '25/6', '25/7', '25/8', '25/9',
+    '25/10', '25/11', '25/12', '26/1', '26/2', '26/3'
   ]);
-  assert.deepEqual(parsed.E001[0].monthlySales.at(-1), {
-    key: '2026-03', label: '26/3', year: 2026, month: 3, count: 12
-  });
 });
 
 test('monthly sales series aggregates product variations in source column order', () => {
@@ -87,6 +86,16 @@ test('monthly sales series aggregates product variations in source column order'
   assert.deepEqual(buildMonthlySalesSeries(items), [
     { key: '2026-01', label: '26/1', year: 2026, month: 1, count: 15 },
     { key: '2026-02', label: '26/2', year: 2026, month: 2, count: 12 }
+  ]);
+});
+
+test('monthly sales series aggregates compact persisted values using one shared label list', () => {
+  assert.deepEqual(buildMonthlySalesSeries([
+    { monthlyLabels: ['25/4', '25/5'], monthlySales: [10, 4] },
+    { monthlySales: [5, 8] }
+  ]), [
+    { key: 'compact-month-0', label: '25/4', year: null, month: null, count: 15 },
+    { key: 'compact-month-1', label: '25/5', year: null, month: null, count: 12 }
   ]);
 });
 
@@ -107,6 +116,15 @@ test('splitSalesDataIntoChunks keeps entry order and chunk boundaries', () => {
     { A: [{ count: 1 }], B: [{ count: 2 }] },
     { C: [{ count: 3 }] }
   ]);
+});
+
+test('splitSalesDataIntoChunks also limits UTF-8 serialized byte size', () => {
+  const salesData = {
+    A: [{ name: 'あ'.repeat(40), count: 1 }],
+    B: [{ name: 'い'.repeat(40), count: 2 }]
+  };
+  const chunks = splitSalesDataIntoChunks(salesData, 1000, 180);
+  assert.deepEqual(chunks.map((chunk) => Object.keys(chunk)), [['A'], ['B']]);
 });
 
 test('mergeSerializedSalesChunks merges valid chunks and reports invalid chunks', () => {
