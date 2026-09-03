@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
-  Bot,
   CheckCircle2,
   Database,
   FileDiff,
@@ -74,8 +73,8 @@ const ResultCard = ({ result, onSelectSimilar, onOpenSheet }) => {
   const { product, score } = result;
   const assignment = product.assignments?.[0];
   return (
-    <article className="grid grid-cols-[76px_minmax(0,1fr)] gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-indigo-200 hover:shadow-md">
-      <div className="flex h-[76px] items-center justify-center overflow-hidden rounded-xl bg-slate-100">
+    <article className="group grid grid-cols-[72px_minmax(0,1fr)] gap-4 rounded-[22px] bg-white px-4 py-3.5 shadow-[0_1px_3px_rgba(15,23,42,0.08)] transition hover:shadow-[0_5px_20px_rgba(15,23,42,0.09)] sm:grid-cols-[84px_minmax(0,1fr)]">
+      <div className="flex h-[72px] items-center justify-center overflow-hidden rounded-2xl bg-[#f1f4f9] sm:h-[84px]">
         {product.imageData ? (
           <img src={product.imageData} alt="" className="h-full w-full object-contain" />
         ) : (
@@ -83,27 +82,27 @@ const ResultCard = ({ result, onSelectSimilar, onOpenSheet }) => {
         )}
       </div>
       <div className="min-w-0">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-md bg-indigo-600 px-2 py-0.5 font-mono text-xs font-black text-white">{product.code || 'コードなし'}</span>
-              <span className="text-[11px] font-bold text-indigo-600">一致度 {percent(score)}</span>
+              <span className="rounded-lg bg-[#eef1ff] px-2 py-1 font-mono text-xs font-black text-[#4f46e5]">{product.code || 'コードなし'}</span>
+              <span className="text-[11px] font-bold text-[#7067dc]">一致度 {percent(score)}</span>
               {product.hasDemoMarker && <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-bold text-cyan-700">デモ機</span>}
             </div>
-            <h4 className="mt-1 truncate text-sm font-bold text-slate-800">{product.name || product.itemNumber || '商品名未取得'}</h4>
+            <h4 className="mt-1.5 truncate text-sm font-bold text-[#1f2a44]">{product.name || product.itemNumber || '商品名未取得'}</h4>
           </div>
           {product.salesCount > 0 && (
             <span className="shrink-0 text-[10px] font-bold text-slate-500">実績 {product.salesCount.toLocaleString()}</span>
           )}
         </div>
-        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-500">
+        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[#667085]">
           {product.catchCopy || product.specifications?.join(' / ') || product.sourceText || 'テキスト情報はまだありません。'}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => onSelectSimilar(product)}
-            className="rounded-lg bg-violet-50 px-2 py-1 text-[10px] font-bold text-violet-700 hover:bg-violet-100"
+            className="rounded-full px-2.5 py-1 text-[10px] font-bold text-[#6750a4] transition hover:bg-[#f2edff]"
           >
             類似品を見る
           </button>
@@ -111,7 +110,7 @@ const ResultCard = ({ result, onSelectSimilar, onOpenSheet }) => {
             <button
               type="button"
               onClick={() => onOpenSheet?.(assignment.sheetId)}
-              className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200"
+              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold text-[#526070] transition hover:bg-[#eef2f7]"
             >
               <MapPin size={11} /> P.{assignment.pageNumber}を開く
             </button>
@@ -124,8 +123,9 @@ const ResultCard = ({ result, onSelectSimilar, onOpenSheet }) => {
 };
 
 const EmptyState = ({ children }) => (
-  <div className="flex min-h-44 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-8 text-center text-sm text-slate-500">
-    {children}
+  <div className="flex min-h-48 flex-col items-center justify-center px-8 py-10 text-center text-sm text-[#7a8495]">
+    <Sparkles size={24} className="mb-3 text-[#a78bfa]" />
+    <span>{children}</span>
   </div>
 );
 
@@ -280,82 +280,73 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-2 backdrop-blur-sm sm:p-4" onClick={onClose}>
       <section
         role="dialog"
         aria-modal="true"
         aria-label="AIアシスト"
-        className="flex h-[min(880px,94vh)] w-[min(1180px,96vw)] flex-col overflow-hidden rounded-[28px] border border-white/60 bg-slate-50 shadow-2xl"
+        className="flex h-[min(900px,96vh)] w-[min(1120px,97vw)] flex-col overflow-hidden rounded-[30px] bg-[#f7f9fc] shadow-[0_24px_80px_rgba(15,23,42,0.28)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex items-center gap-4 border-b border-slate-200 bg-white px-6 py-4">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-200">
-            <Bot size={23} />
-          </div>
+        <header className="flex min-h-16 items-center gap-3 bg-white/90 px-5 py-3 backdrop-blur-xl sm:px-7">
+          <img src="/daiwari-ai-icon.png" alt="" className="h-9 w-[56px] object-contain" />
           <div className="min-w-0">
-            <h2 className="text-lg font-black text-slate-800">AIアシスト <span className="ml-1 text-xs font-bold text-indigo-500">試作版</span></h2>
-            <p className="text-xs text-slate-500">商品検索・類似品・CSV変更差分を、この端末内だけで処理します。</p>
+            <h2 className="text-[15px] font-bold text-[#243047]">AIアシスト <span className="ml-1 text-[10px] font-medium text-[#7568d9]">試作版</span></h2>
+            <p className="hidden text-[10px] text-[#7b8597] sm:block">台割の商品情報を、この端末内だけで探して比較します</p>
           </div>
-          <div className="ml-auto hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-700 sm:flex">
-            <ShieldCheck size={14} /> 外部AI通信なし・API課金なし
+          <div className="ml-auto hidden items-center gap-1.5 text-[10px] font-medium text-emerald-700 sm:flex">
+            <ShieldCheck size={13} /> 外部AI通信なし
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="閉じる">
-            <X size={20} />
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-[#697386] transition hover:bg-[#eef1f6]" aria-label="閉じる">
+            <X size={19} />
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[230px_minmax(0,1fr)]">
-          <aside className="border-b border-slate-200 bg-white p-3 lg:border-b-0 lg:border-r">
-            <nav className="flex gap-2 overflow-x-auto lg:block lg:space-y-1.5">
-              {TABS.map(({ id, label }) => (
-                <button
-                  type="button"
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold transition lg:w-full ${activeTab === id ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}
-                >
-                  {id === 'search' ? <Search size={16} /> : id === 'similar' ? <Sparkles size={16} /> : <FileDiff size={16} />} {label}
-                </button>
-              ))}
-            </nav>
+        <div className="flex items-center gap-1 border-b border-[#e5e9f0] bg-white/80 px-4 sm:px-7">
+          <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="AIアシスト機能">
+            {TABS.map(({ id, label }) => (
+              <button
+                type="button"
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`relative flex shrink-0 items-center gap-1.5 px-3 py-3 text-[11px] font-semibold transition ${activeTab === id ? 'text-[#5145cd]' : 'text-[#6f798b] hover:text-[#313b4d]'}`}
+              >
+                {id === 'search' ? <Search size={14} /> : id === 'similar' ? <Sparkles size={14} /> : <FileDiff size={14} />}
+                {label}
+                {activeTab === id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[#6557e8]" />}
+              </button>
+            ))}
+          </nav>
+          <button
+            type="button"
+            onClick={prepareIndex}
+            disabled={!products.length || aiStatus === 'loading' || aiStatus === 'searching'}
+            title={`${products.length.toLocaleString()}商品を対象。初回のみ約80MBを読み込み、索引はこのブラウザに保存します。`}
+            className={`flex max-w-[220px] shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-semibold transition disabled:cursor-wait ${isIndexCurrent ? 'bg-emerald-50 text-emerald-700' : 'bg-[#eef1f6] text-[#5f697a] hover:bg-[#e5e9f0]'}`}
+          >
+            {aiStatus === 'loading' || aiStatus === 'searching' ? (
+              <Loader2 size={12} className="shrink-0 animate-spin" />
+            ) : isIndexCurrent ? (
+              <CheckCircle2 size={12} className="shrink-0" />
+            ) : (
+              <Database size={12} className="shrink-0" />
+            )}
+            <span className="truncate">
+              {aiStatus === 'loading'
+                ? aiProgressText || formatProgress(aiProgress)
+                : aiStatus === 'searching'
+                  ? '検索中…'
+                  : isIndexCurrent
+                    ? `AI準備済み・${aiDevice.toUpperCase()}`
+                    : indexFingerprint ? '索引を更新' : '意味検索を準備'}
+            </span>
+          </button>
+        </div>
 
-            <div className="mt-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-black text-slate-700">端末内AI</span>
-                <span className={`h-2 w-2 rounded-full ${isIndexCurrent ? 'bg-emerald-500' : aiStatus === 'loading' ? 'animate-pulse bg-amber-400' : 'bg-slate-300'}`} />
-              </div>
-              <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-                {products.length.toLocaleString()}商品を対象。初回のみ約80MBを同じアプリから読み込みます。
-              </p>
-              {aiStatus === 'loading' ? (
-                <div className="mt-2 rounded-xl bg-white p-2">
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-indigo-600">
-                    <Loader2 size={12} className="animate-spin" /> {aiProgressText || formatProgress(aiProgress)}
-                  </div>
-                  <p className="mt-1 truncate text-[9px] text-slate-400">{formatProgress(aiProgress)}</p>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={prepareIndex}
-                  disabled={!products.length || aiStatus === 'searching'}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-white px-2 py-2 text-[10px] font-black text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:opacity-50"
-                >
-                  {isIndexCurrent ? <CheckCircle2 size={13} /> : <Database size={13} />}
-                  {isIndexCurrent ? `AI準備済み (${aiDevice.toUpperCase()})` : indexFingerprint ? '索引を更新' : '意味検索を準備'}
-                </button>
-              )}
-              {isIndexCurrent && aiProgressText && <p className="mt-1.5 text-[9px] text-emerald-700">{aiProgressText}</p>}
-            </div>
-
-            <p className="mt-3 px-1 text-[9px] leading-relaxed text-slate-400">
-              準備前でも文字一致による軽量検索とCSV差分は利用できます。索引はFirebaseではなく、このブラウザだけに保存します。
-            </p>
-          </aside>
-
-          <main className="min-h-0 overflow-y-auto p-4 sm:p-6">
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[900px] px-4 py-6 sm:px-8 sm:py-8">
             {aiError && (
-              <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              <div className="mb-5 flex items-start justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-xs text-rose-700">
                 <span>{aiError} 軽量検索とCSV差分は引き続き使えます。</span>
                 <button type="button" onClick={() => setAiError('')}><X size={14} /></button>
               </div>
@@ -363,36 +354,56 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
 
             {activeTab === 'search' && (
               <div>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-black text-slate-800">商品意味検索</h3>
-                    <p className="mt-0.5 text-xs text-slate-500">コードだけでなく、用途・特徴・仕様の言葉で探せます。</p>
+                {!query.trim() && (
+                  <div className="pb-8 pt-7 text-center sm:pb-10 sm:pt-12">
+                    <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#e9ddff] to-[#d9efff]">
+                      <Sparkles size={20} className="text-[#6958d9]" />
+                    </div>
+                    <h3 className="bg-gradient-to-r from-[#4e73d9] via-[#8b5cc7] to-[#d06b91] bg-clip-text text-2xl font-semibold tracking-tight text-transparent sm:text-3xl">
+                      どの商品を探しますか？
+                    </h3>
+                    <p className="mt-2 text-xs text-[#7a8495]">介援隊コード、用途、特徴、仕様を自然な言葉で入力できます</p>
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${isIndexCurrent ? 'bg-violet-100 text-violet-700' : 'bg-slate-200 text-slate-600'}`}>
-                    {isIndexCurrent ? 'AI意味検索' : '軽量検索'}
-                  </span>
-                </div>
-                <form className="relative mt-4" onSubmit={(event) => { event.preventDefault(); runSearch(); }}>
-                  <Search size={19} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                )}
+                <form className={`${query.trim() ? '' : 'mx-auto max-w-[760px]'} relative`} onSubmit={(event) => { event.preventDefault(); runSearch(); }}>
+                  <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-[#778196]" />
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="例：折りたためる軽量な歩行器、E1423、在庫のある口腔ケア用品"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-28 text-sm shadow-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                    className="w-full rounded-[26px] border-0 bg-[#edf1f7] py-4 pl-13 pr-28 text-sm text-[#273246] shadow-none outline-none transition placeholder:text-[#8b95a6] focus:bg-white focus:ring-2 focus:ring-[#c8c2ff]"
                     autoFocus
                   />
-                  <button type="submit" disabled={!query.trim() || aiStatus === 'searching'} className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
-                    {aiStatus === 'searching' ? <Loader2 size={13} className="animate-spin" /> : null}検索
+                  <button type="submit" disabled={!query.trim() || aiStatus === 'searching'} className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-[#6254e7] px-4 py-2.5 text-[11px] font-semibold text-white transition hover:bg-[#5145cd] disabled:opacity-40">
+                    {aiStatus === 'searching' ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
+                    検索
                   </button>
                 </form>
-                <div className="mt-4">
+                {!query.trim() && (
+                  <div className="mx-auto mt-4 flex max-w-[720px] flex-wrap justify-center gap-2">
+                    {['売れ筋の車いす', '軽い歩行器', '在庫のある口腔ケア用品'].map((suggestion) => (
+                      <button key={suggestion} type="button" onClick={() => setQuery(suggestion)} className="rounded-full bg-white px-3 py-1.5 text-[10px] text-[#626d80] shadow-sm transition hover:bg-[#f1edff] hover:text-[#5c4fc7]">
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-6">
                   {!query.trim() ? (
-                    <EmptyState>検索したい商品のコード、用途、特徴、仕様を入力してください。</EmptyState>
+                    <p className="text-center text-[10px] text-[#98a1b1]">
+                      {isIndexCurrent ? `${products.length.toLocaleString()}商品をAI意味検索できます` : '意味検索を準備しなくても文字一致検索を利用できます'}
+                    </p>
                   ) : searchResults.length === 0 ? (
                     <EmptyState>該当する商品が見つかりませんでした。別の表現でもお試しください。</EmptyState>
                   ) : (
-                    <div className="grid gap-3 xl:grid-cols-2">
+                    <div>
+                      <div className="mb-3 flex items-center justify-between px-1">
+                        <p className="text-[11px] font-semibold text-[#687386]">{searchResults.length}件の候補</p>
+                        <span className="text-[10px] text-[#8b95a6]">{isIndexCurrent ? 'AI意味検索' : '軽量検索'}</span>
+                      </div>
+                      <div className="space-y-3">
                       {searchResults.map((result) => <ResultCard key={result.product.id} result={result} onSelectSimilar={selectSimilarProduct} onOpenSheet={onOpenSheet} />)}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -401,25 +412,25 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
 
             {activeTab === 'similar' && (
               <div>
-                <h3 className="text-lg font-black text-slate-800">類似品提案</h3>
-                <p className="mt-0.5 text-xs text-slate-500">商品テキスト・仕様・コマサイズをもとに候補を並べます。</p>
+                <h3 className="text-xl font-semibold text-[#273246]">類似品を探す</h3>
+                <p className="mt-1 text-xs text-[#7a8495]">商品テキスト、仕様、コマサイズをもとに候補を並べます</p>
                 {!selectedProduct ? (
-                  <div className="mt-4">
+                  <div className="mt-8">
                     <EmptyState>
                       <span>「商品意味検索」の結果から <b>類似品を見る</b> を選んでください。</span>
                     </EmptyState>
                   </div>
                 ) : (
                   <>
-                    <div className="mt-4 flex items-center gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-3">
-                      <div className="rounded-lg bg-violet-600 px-2 py-1 font-mono text-xs font-black text-white">{selectedProduct.code}</div>
+                    <div className="mt-5 flex items-center gap-3 rounded-[22px] bg-[#eeebff] px-4 py-3">
+                      <div className="rounded-lg bg-white px-2 py-1 font-mono text-xs font-black text-[#5d50cf]">{selectedProduct.code}</div>
                       <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-violet-500">比較元</p>
-                        <p className="truncate text-sm font-bold text-slate-800">{selectedProduct.name || selectedProduct.itemNumber || '商品名未取得'}</p>
+                        <p className="text-[9px] font-semibold text-[#7a6ed5]">比較元の商品</p>
+                        <p className="truncate text-sm font-semibold text-[#273246]">{selectedProduct.name || selectedProduct.itemNumber || '商品名未取得'}</p>
                       </div>
-                      <ArrowRight size={17} className="ml-auto text-violet-400" />
+                      <ArrowRight size={16} className="ml-auto text-[#8175dc]" />
                     </div>
-                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                    <div className="mt-4 space-y-3">
                       {similarResults.map((result) => <ResultCard key={result.product.id} result={result} onSelectSimilar={selectSimilarProduct} onOpenSheet={onOpenSheet} />)}
                     </div>
                   </>
@@ -429,18 +440,18 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
 
             {activeTab === 'diff' && (
               <div>
-                <h3 className="text-lg font-black text-slate-800">CSV変更差分</h3>
-                <p className="mt-0.5 text-xs text-slate-500">旧版と新版の全データCSVを介援隊コードで突合します。AI準備は不要です。</p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <h3 className="text-xl font-semibold text-[#273246]">CSVの変更を比べる</h3>
+                <p className="mt-1 text-xs text-[#7a8495]">変更前と変更後の全データCSVを、介援隊コードで突合します</p>
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   {[
                     { label: '1. 変更前CSV', snapshot: oldSnapshot, setter: setOldSnapshot },
                     { label: '2. 変更後CSV', snapshot: newSnapshot, setter: setNewSnapshot }
                   ].map(({ label, snapshot, setter }) => (
-                    <label key={label} className={`flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed p-4 transition ${snapshot ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 bg-white hover:border-indigo-300'}`}>
+                    <label key={label} className={`flex cursor-pointer items-center gap-3 rounded-[22px] p-4 transition ${snapshot ? 'bg-emerald-50' : 'bg-white shadow-sm hover:bg-[#f2efff]'}`}>
                       {snapshot ? <CheckCircle2 size={22} className="text-emerald-600" /> : <FileUp size={22} className="text-slate-400" />}
                       <span className="min-w-0">
-                        <span className="block text-xs font-black text-slate-700">{label}</span>
-                        <span className="block truncate text-[10px] text-slate-500">{snapshot ? `${snapshot.fileName}（${snapshot.items.length.toLocaleString()}件）` : 'クリックして選択'}</span>
+                        <span className="block text-xs font-semibold text-[#364154]">{label}</span>
+                        <span className="block truncate text-[10px] text-[#7a8495]">{snapshot ? `${snapshot.fileName}（${snapshot.items.length.toLocaleString()}件）` : 'クリックして選択'}</span>
                       </span>
                       <input type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => loadSnapshot(event, setter)} />
                     </label>
@@ -457,7 +468,7 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
                         ['removed', '削除', diffSummary.removed],
                         ['all', 'すべて', diffs.length]
                       ].map(([id, label, count]) => (
-                        <button key={id} type="button" onClick={() => setDiffFilter(id)} className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${diffFilter === id ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 shadow-sm hover:bg-slate-100'}`}>
+                        <button key={id} type="button" onClick={() => setDiffFilter(id)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold transition ${diffFilter === id ? 'bg-[#6254e7] text-white' : 'bg-white text-[#687386] shadow-sm hover:bg-[#efecff]'}`}>
                           {label} {count}
                         </button>
                       ))}
@@ -466,20 +477,20 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
                       {visibleDiffs.length === 0 ? (
                         <EmptyState>選択した条件に該当する差分はありません。</EmptyState>
                       ) : visibleDiffs.map((diff) => (
-                        <article key={diff.code} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <article key={diff.code} className="rounded-[22px] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-sm font-black text-slate-800">{diff.code}</span>
+                            <span className="font-mono text-sm font-black text-[#273246]">{diff.code}</span>
                             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[diff.status]}`}>{STATUS_LABELS[diff.status]}</span>
-                            <span className="truncate text-xs font-bold text-slate-600">{diff.after?.name || diff.before?.name || ''}</span>
+                            <span className="truncate text-xs font-semibold text-[#566174]">{diff.after?.name || diff.before?.name || ''}</span>
                           </div>
                           {diff.changes.length > 0 && (
-                            <div className="mt-2 divide-y divide-slate-100 rounded-xl bg-slate-50 px-3">
+                            <div className="mt-3 divide-y divide-[#e7eaf0] rounded-2xl bg-[#f5f7fa] px-3">
                               {diff.changes.map((change) => (
                                 <div key={change.key} className="grid gap-1 py-2 text-[11px] sm:grid-cols-[110px_1fr_18px_1fr]">
-                                  <span className={`font-bold ${change.severity === 'high' ? 'text-rose-600' : 'text-slate-600'}`}>{change.label}</span>
-                                  <span className="break-words text-slate-500 line-through">{change.before || '（空欄）'}</span>
-                                  <ArrowRight size={13} className="hidden text-slate-300 sm:block" />
-                                  <span className="break-words font-bold text-slate-800">{change.after || '（空欄）'}</span>
+                                  <span className={`font-semibold ${change.severity === 'high' ? 'text-rose-600' : 'text-[#5f697a]'}`}>{change.label}</span>
+                                  <span className="break-words text-[#7f8999] line-through">{change.before || '（空欄）'}</span>
+                                  <ArrowRight size={13} className="hidden text-[#b0b7c3] sm:block" />
+                                  <span className="break-words font-semibold text-[#273246]">{change.after || '（空欄）'}</span>
                                 </div>
                               ))}
                             </div>
@@ -493,8 +504,8 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
                 )}
               </div>
             )}
-          </main>
-        </div>
+          </div>
+        </main>
       </section>
     </div>
   );
