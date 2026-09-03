@@ -179,6 +179,7 @@ import ContentHeaderControls from './features/layout/ContentHeaderControls';
 import AppHeader from './features/layout/AppHeader';
 
 const PdfCropImportModal = lazy(() => import('./components/dialogs/PdfCropImportModal'));
+const EdgeAiAssistModal = lazy(() => import('./components/dialogs/EdgeAiAssistModal'));
 
 // フローティングパネルの初期位置 (右端寄せ)。従来の「右端・縦中央付近に縦積み」を再現する。
 const FLOATING_PANEL_RIGHT_MARGIN = 12;
@@ -290,6 +291,7 @@ export default function App() {
   const fileInputRef = useRef(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPdfCropImportOpen, setIsPdfCropImportOpen] = useState(false);
+  const [isEdgeAiAssistOpen, setIsEdgeAiAssistOpen] = useState(false);
   const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
   const [isWorkLogDashboardOpen, setIsWorkLogDashboardOpen] = useState(false);
   const [workLogRecords, setWorkLogRecords] = useState([]);
@@ -3603,6 +3605,7 @@ export default function App() {
               onToggleHighlightLabels={() => setHighlightLabels(!highlightLabels)}
               onToggleHighlightEmpty={() => setHighlightEmpty(!highlightEmpty)}
               onAddSheet={handleAddSheet}
+              onOpenEdgeAi={() => setIsEdgeAiAssistOpen(true)}
               onExportCSV={handleExportCSV}
               onShowQuickHelp={showQuickHelp}
               onHideQuickHelp={hideQuickHelp}
@@ -3854,6 +3857,23 @@ export default function App() {
       <PdfExportSurface page={pdfExportPage} imageDataById={imageDataById} />
 
       <ImagePreviewModal preview={assignedImagePreview} onClose={() => setAssignedImagePreview(null)} />
+
+      {isEdgeAiAssistOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45"><Loader2 className="animate-spin text-white" size={36} /></div>}>
+          <EdgeAiAssistModal
+            isOpen={isEdgeAiAssistOpen}
+            onClose={() => setIsEdgeAiAssistOpen(false)}
+            images={images}
+            sheets={sheets}
+            salesData={salesData}
+            genres={GENRES}
+            onOpenSheet={(sheetId) => {
+              setIsEdgeAiAssistOpen(false);
+              handleOpenAssignedImage(sheetId);
+            }}
+          />
+        </Suspense>
+      )}
 
       {isPdfCropImportOpen && (
         <Suspense fallback={<div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/45"><Loader2 className="animate-spin text-white" size={36} /></div>}>

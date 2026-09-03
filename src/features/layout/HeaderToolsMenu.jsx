@@ -32,12 +32,36 @@ const HeaderToolsMenu = ({
   onToggleHighlightLabels,
   onToggleHighlightEmpty,
   onAddSheet,
+  onOpenEdgeAi,
   onExportCSV,
   onShowQuickHelp,
   onHideQuickHelp
 }) => (
   <>
     <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+      <button
+        type="button"
+        onClick={() => {
+          onClose();
+          onOpenEdgeAi();
+        }}
+        onMouseEnter={(event) => onShowQuickHelp(event, 'AIアシスト', '外部AIへ送信せず、商品意味検索・類似品提案・CSV差分を端末内で処理します。')}
+        onMouseLeave={onHideQuickHelp}
+        className="daiwari-ai-launch group relative flex h-10 w-[72px] flex-shrink-0 items-center justify-center px-2"
+        title="AIアシストを開く"
+        aria-label="AIアシストを開く"
+      >
+        <img
+          src="/daiwari-ai-icon.png"
+          alt=""
+          className="daiwari-ai-launch-image relative z-[2] h-[32px] w-auto select-none object-contain"
+          draggable="false"
+        />
+        <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-one">✦</span>
+        <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-two">✦</span>
+        <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-three">✦</span>
+      </button>
+
       <button
         type="button"
         onClick={onToggle}

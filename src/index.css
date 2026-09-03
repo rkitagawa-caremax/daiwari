@@ -611,6 +611,93 @@ button:active {
     animation: daiwari-arrange-icon-hover 1.8s ease-in-out infinite;
 }
 
+@keyframes daiwari-ai-sparkle-pop {
+    0%, 100% {
+        opacity: 0;
+        transform: scale(0.2) rotate(0deg);
+    }
+
+    35% {
+        opacity: 1;
+        transform: scale(1.15) rotate(24deg);
+    }
+
+    70% {
+        opacity: 0.35;
+        transform: scale(0.68) rotate(54deg);
+    }
+}
+
+.daiwari-ai-launch {
+    isolation: isolate;
+    overflow: visible;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    transition: transform 180ms ease;
+}
+
+.daiwari-ai-launch:hover {
+    transform: translateY(-1px) scale(1.035);
+}
+
+.daiwari-ai-launch-image {
+    filter: saturate(1.04);
+    transition: filter 180ms ease, transform 180ms ease;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-launch-image {
+    filter:
+        saturate(1.2)
+        brightness(1.08)
+        drop-shadow(0 0 5px rgba(168, 85, 247, 0.48))
+        drop-shadow(0 0 5px rgba(125, 211, 252, 0.35));
+    transform: scale(1.045);
+}
+
+.daiwari-ai-sparkle {
+    position: absolute;
+    z-index: 4;
+    color: #ffffff;
+    font-size: 12px;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    text-shadow:
+        0 0 3px #ffffff,
+        0 0 7px rgba(168, 85, 247, 0.95),
+        0 0 12px rgba(56, 189, 248, 0.75);
+}
+
+.daiwari-ai-sparkle-one {
+    left: 5px;
+    top: -4px;
+}
+
+.daiwari-ai-sparkle-two {
+    right: 4px;
+    top: 1px;
+    font-size: 9px;
+}
+
+.daiwari-ai-sparkle-three {
+    bottom: -3px;
+    right: 18px;
+    font-size: 8px;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-sparkle-one {
+    animation: daiwari-ai-sparkle-pop 1.05s ease-in-out infinite;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-sparkle-two {
+    animation: daiwari-ai-sparkle-pop 1.05s 160ms ease-in-out infinite;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-sparkle-three {
+    animation: daiwari-ai-sparkle-pop 1.05s 340ms ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .daiwari-panel-arrange-image {
         animation: none;
@@ -620,6 +707,16 @@ button:active {
     .daiwari-panel-arrange-floating-token,
     .daiwari-panel-arrange-banner,
     .daiwari-panel-arrange-icon {
+        animation: none;
+    }
+
+    .daiwari-ai-launch,
+    .daiwari-ai-launch:hover,
+    .daiwari-ai-launch:hover .daiwari-ai-launch-image {
+        transform: none;
+    }
+
+    .daiwari-ai-launch:hover .daiwari-ai-sparkle {
         animation: none;
     }
 }

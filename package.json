@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@tailwindcss/postcss": "^4.1.18",
     "firebase": "^12.7.0",
     "html2canvas-pro": "2.3.9",
