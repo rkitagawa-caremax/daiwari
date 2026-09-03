@@ -684,19 +684,42 @@ button:active {
 }
 
 @keyframes daiwari-ai-mascot-front {
-    0%, 32% { opacity: 1; }
-    33%, 100% { opacity: 0; }
+    0%, 33.332% { opacity: 1; }
+    33.333%, 100% { opacity: 0; }
 }
 
 @keyframes daiwari-ai-mascot-left {
-    0%, 32% { opacity: 0; }
-    33%, 65% { opacity: 1; }
-    66%, 100% { opacity: 0; }
+    0%, 33.332% { opacity: 0; }
+    33.333%, 66.665% { opacity: 1; }
+    66.666%, 100% { opacity: 0; }
 }
 
 @keyframes daiwari-ai-mascot-closed {
-    0%, 65% { opacity: 0; }
-    66%, 100% { opacity: 1; }
+    0%, 66.665% { opacity: 0; }
+    66.666%, 100% { opacity: 1; }
+}
+
+.daiwari-ai-launch-frame-left,
+.daiwari-ai-launch-frame-closed {
+    opacity: 0;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-launch-frame {
+    animation-duration: 0.9s;
+    animation-timing-function: step-end;
+    animation-iteration-count: infinite;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-launch-frame-front {
+    animation-name: daiwari-ai-mascot-front;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-launch-frame-left {
+    animation-name: daiwari-ai-mascot-left;
+}
+
+.daiwari-ai-launch:hover .daiwari-ai-launch-frame-closed {
+    animation-name: daiwari-ai-mascot-closed;
 }
 
 .daiwari-ai-mascot {
@@ -705,6 +728,11 @@ button:active {
     height: 38px;
     flex: 0 0 auto;
     overflow: hidden;
+}
+
+.daiwari-ai-mascot-hero {
+    width: 104px;
+    height: 78px;
 }
 
 .daiwari-ai-mascot-frame {
@@ -743,6 +771,10 @@ button:active {
     }
 
     .daiwari-ai-launch:hover .daiwari-ai-sparkle {
+        animation: none;
+    }
+
+    .daiwari-ai-launch:hover .daiwari-ai-launch-frame {
         animation: none;
     }
 

@@ -360,8 +360,10 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
               <div>
                 {!query.trim() && (
                   <div className="pb-8 pt-7 text-center sm:pb-10 sm:pt-12">
-                    <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#e9ddff] to-[#d9efff]">
-                      <Sparkles size={20} className="text-[#6958d9]" />
+                    <div className="daiwari-ai-mascot daiwari-ai-mascot-hero mx-auto mb-5" aria-hidden="true">
+                      <img src="/daiwari-kun.png" alt="" className="daiwari-ai-mascot-frame daiwari-ai-mascot-frame-front" draggable="false" />
+                      <img src="/daiwari-kun-left.png" alt="" className="daiwari-ai-mascot-frame daiwari-ai-mascot-frame-left" draggable="false" />
+                      <img src="/daiwari-kun-closed.png" alt="" className="daiwari-ai-mascot-frame daiwari-ai-mascot-frame-closed" draggable="false" />
                     </div>
                     <h3 className="bg-gradient-to-r from-[#4e73d9] via-[#8b5cc7] to-[#d06b91] bg-clip-text text-2xl font-semibold tracking-tight text-transparent sm:text-3xl">
                       どの商品を探しますか？

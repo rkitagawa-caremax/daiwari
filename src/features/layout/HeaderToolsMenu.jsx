@@ -21,7 +21,9 @@ const EdgeAiLaunchButton = ({ onLaunch, onShowQuickHelp, onHideQuickHelp }) => (
       aria-label="AIアシストを開く"
     >
       <span className="relative z-[2] flex h-[46px] items-center justify-center">
-        <img src="/daiwari-ai-icon.png" alt="" draggable="false" className="daiwari-ai-launch-image h-[46px] w-auto select-none object-contain" />
+        <img src="/daiwari-kun.png" alt="" draggable="false" className="daiwari-ai-launch-image daiwari-ai-launch-frame daiwari-ai-launch-frame-front h-[46px] w-auto select-none object-contain" />
+        <img src="/daiwari-kun-left.png" alt="" draggable="false" className="daiwari-ai-launch-image daiwari-ai-launch-frame daiwari-ai-launch-frame-left absolute inset-0 m-auto h-[46px] w-auto select-none object-contain" />
+        <img src="/daiwari-kun-closed.png" alt="" draggable="false" className="daiwari-ai-launch-image daiwari-ai-launch-frame daiwari-ai-launch-frame-closed absolute inset-0 m-auto h-[46px] w-auto select-none object-contain" />
       </span>
       <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-one">✦</span>
       <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-two">✦</span>
