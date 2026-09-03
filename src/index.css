@@ -638,7 +638,7 @@ button:active {
 }
 
 .daiwari-ai-launch:hover {
-    transform: translateY(-1px) scale(1.035);
+    transform: translateY(-2px) scale(1.12);
 }
 
 .daiwari-ai-launch-image {
@@ -650,9 +650,9 @@ button:active {
     filter:
         saturate(1.2)
         brightness(1.08)
-        drop-shadow(0 0 5px rgba(168, 85, 247, 0.48))
-        drop-shadow(0 0 5px rgba(125, 211, 252, 0.35));
-    transform: scale(1.045);
+        drop-shadow(0 0 7px rgba(168, 85, 247, 0.48))
+        drop-shadow(0 0 7px rgba(125, 211, 252, 0.35));
+    transform: scale(1.16);
 }
 
 .daiwari-ai-sparkle {

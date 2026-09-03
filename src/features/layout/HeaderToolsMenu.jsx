@@ -41,18 +41,18 @@ const EdgeAiLaunchButton = ({ onLaunch, onShowQuickHelp, onHideQuickHelp }) => {
         setFrame(0);
         onHideQuickHelp();
       }}
-      className="daiwari-ai-launch group relative flex h-10 w-[72px] flex-shrink-0 items-center justify-center px-2"
+      className="daiwari-ai-launch group relative flex h-12 w-[92px] flex-shrink-0 items-center justify-center px-2"
       title="AIアシストを開く"
       aria-label="AIアシストを開く"
     >
-      <span className="relative z-[2] flex h-[32px] items-center justify-center">
+      <span className="relative z-[2] flex h-[46px] items-center justify-center">
         {DAIWARI_KUN_FRAMES.map((src, index) => (
           <img
             key={src}
             src={src}
             alt=""
             draggable="false"
-            className={`daiwari-ai-launch-image h-[32px] w-auto select-none object-contain ${index === 0 ? '' : 'absolute inset-0 m-auto'} ${index === frame ? 'opacity-100' : 'opacity-0'}`}
+            className={`daiwari-ai-launch-image h-[46px] w-auto select-none object-contain ${index === 0 ? '' : 'absolute inset-0 m-auto'} ${index === frame ? 'opacity-100' : 'opacity-0'}`}
           />
         ))}
       </span>
