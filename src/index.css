@@ -634,25 +634,10 @@ button:active {
     background: transparent;
     border: 0;
     box-shadow: none;
-    transition: transform 180ms ease;
-}
-
-.daiwari-ai-launch:hover {
-    transform: translateY(-2px) scale(1.12);
 }
 
 .daiwari-ai-launch-image {
     filter: saturate(1.04);
-    transition: filter 180ms ease, transform 180ms ease;
-}
-
-.daiwari-ai-launch:hover .daiwari-ai-launch-image {
-    filter:
-        saturate(1.2)
-        brightness(1.08)
-        drop-shadow(0 0 7px rgba(168, 85, 247, 0.48))
-        drop-shadow(0 0 7px rgba(125, 211, 252, 0.35));
-    transform: scale(1.16);
 }
 
 .daiwari-ai-sparkle {
@@ -698,6 +683,53 @@ button:active {
     animation: daiwari-ai-sparkle-pop 1.05s 340ms ease-in-out infinite;
 }
 
+@keyframes daiwari-ai-mascot-front {
+    0%, 32% { opacity: 1; }
+    33%, 100% { opacity: 0; }
+}
+
+@keyframes daiwari-ai-mascot-left {
+    0%, 32% { opacity: 0; }
+    33%, 65% { opacity: 1; }
+    66%, 100% { opacity: 0; }
+}
+
+@keyframes daiwari-ai-mascot-closed {
+    0%, 65% { opacity: 0; }
+    66%, 100% { opacity: 1; }
+}
+
+.daiwari-ai-mascot {
+    position: relative;
+    width: 48px;
+    height: 38px;
+    flex: 0 0 auto;
+    overflow: hidden;
+}
+
+.daiwari-ai-mascot-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    animation-duration: 1.5s;
+    animation-timing-function: step-end;
+    animation-iteration-count: infinite;
+}
+
+.daiwari-ai-mascot-frame-front {
+    animation-name: daiwari-ai-mascot-front;
+}
+
+.daiwari-ai-mascot-frame-left {
+    animation-name: daiwari-ai-mascot-left;
+}
+
+.daiwari-ai-mascot-frame-closed {
+    animation-name: daiwari-ai-mascot-closed;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .daiwari-panel-arrange-image {
         animation: none;
@@ -710,14 +742,17 @@ button:active {
         animation: none;
     }
 
-    .daiwari-ai-launch,
-    .daiwari-ai-launch:hover,
-    .daiwari-ai-launch:hover .daiwari-ai-launch-image {
-        transform: none;
-    }
-
     .daiwari-ai-launch:hover .daiwari-ai-sparkle {
         animation: none;
+    }
+
+    .daiwari-ai-mascot-frame {
+        animation: none;
+    }
+
+    .daiwari-ai-mascot-frame-left,
+    .daiwari-ai-mascot-frame-closed {
+        opacity: 0;
     }
 }
 

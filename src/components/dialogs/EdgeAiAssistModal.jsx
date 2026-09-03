@@ -289,7 +289,11 @@ const EdgeAiAssistModal = ({ isOpen, onClose, images, sheets, salesData, genres,
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex min-h-16 items-center gap-3 bg-white/90 px-5 py-3 backdrop-blur-xl sm:px-7">
-          <img src="/daiwari-ai-icon.png" alt="" className="h-9 w-[56px] object-contain" />
+          <div className="daiwari-ai-mascot" aria-hidden="true">
+            <img src="/daiwari-kun.png" alt="" className="daiwari-ai-mascot-frame daiwari-ai-mascot-frame-front" draggable="false" />
+            <img src="/daiwari-kun-left.png" alt="" className="daiwari-ai-mascot-frame daiwari-ai-mascot-frame-left" draggable="false" />
+            <img src="/daiwari-kun-closed.png" alt="" className="daiwari-ai-mascot-frame daiwari-ai-mascot-frame-closed" draggable="false" />
+          </div>
           <div className="min-w-0">
             <h2 className="text-[15px] font-bold text-[#243047]">AIアシスト <span className="ml-1 text-[10px] font-medium text-[#7568d9]">試作版</span></h2>
             <p className="hidden text-[10px] text-[#7b8597] sm:block">台割の商品情報を、この端末内だけで探して比較します</p>
