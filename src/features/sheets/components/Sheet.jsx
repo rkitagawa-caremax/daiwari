@@ -87,7 +87,7 @@ const Sheet = React.memo(({
             </span>
             <select
               value={sheet.genre}
-              onChange={(event) => onChangeGenre?.(event.target.value)}
+              onChange={(event) => onChangeGenre?.(sheet.id, event.target.value)}
               onClick={(event) => event.stopPropagation()}
               className="min-w-0 max-w-[70%] cursor-pointer border-0 bg-transparent p-0 text-right text-[11px] font-bold leading-none text-slate-700 shadow-none outline-none focus:ring-0"
               aria-label={`P.${pageNumber}のジャンル`}

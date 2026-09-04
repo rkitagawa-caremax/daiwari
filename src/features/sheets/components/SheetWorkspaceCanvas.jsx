@@ -1,8 +1,9 @@
+import React from 'react';
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import Sheet from './Sheet';
 
-const SheetWorkspaceCanvas = ({
+const SheetWorkspaceCanvas = React.memo(({
   viewMode,
   isTwoPageMode,
   zoomScale,
@@ -123,7 +124,7 @@ const SheetWorkspaceCanvas = ({
                 catalogChangesByCode={changes.byCode}
                 imageDataById={imageDataById}
                 isLabelMode={editing.isLabelMode}
-                onChangeGenre={(genreId) => editing.onChangeGenre(sheet.id, genreId)}
+                onChangeGenre={editing.onChangeGenre}
                 onPreviewImage={editing.onPreviewImage}
                 isArrangeMode={isArrangeSheet}
                 arrangeDraggingTokenId={arrange.draggingTokenId}
@@ -140,6 +141,8 @@ const SheetWorkspaceCanvas = ({
       );
     })}
   </div>
-);
+));
+
+SheetWorkspaceCanvas.displayName = 'SheetWorkspaceCanvas';
 
 export default SheetWorkspaceCanvas;

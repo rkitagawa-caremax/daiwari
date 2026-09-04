@@ -131,6 +131,7 @@ import {
   parseNullableDragValue
 } from './lib/dragPayload';
 import { parseCSVLine, readFileAutoEncoding } from './lib/csv';
+import { useStableHandler } from './hooks/useStableHandler';
 import { parseSalesCsvWithoutBlocking } from './lib/salesCsvParser';
 import { downloadTextFile } from './lib/download';
 import {
@@ -214,6 +215,8 @@ import {
 } from './features/undo/accountUndo';
 
 // --- Components ---
+
+const EMPTY_CATALOG_CHANGES = Object.freeze({});
 
 export default function App() {
   // 初期表示のAppIDを決定（URLパラメータ > LocalStorage > Default）
@@ -3535,6 +3538,97 @@ export default function App() {
     setAssignedImagePreview({ src: preview.src, name: previewName });
   }, [images]);
 
+  // --- ワークスペースへ渡すプロップの安定化 ---
+  // App はヘッダー操作やポップアップ表示のたびに再レンダリングされる。ここで渡す関数や
+  // グループオブジェクトの識別子が毎回変わると、React.memo の Sheet / Panel (全ページ x 16コマ)
+  // がすべて再描画されてしまうため、ハンドラーは恒久参照に、グループは useMemo で固定する。
+  const stableToggleSheetSelection = useStableHandler(handleToggleSheetSelection);
+  const stableNavigatePage = useStableHandler(handleNavigatePage);
+  const stableOpenSheet = useStableHandler((sheetId) => {
+    setActiveSheetId(sheetId);
+    setIsLabelSelectionMode(false);
+    setViewMode('single');
+  });
+  const stableUpdatePanel = useStableHandler(handlePanelUpdateWithCheck);
+  const stableSelectPanel = useStableHandler(handleSelectPanel);
+  const stableDeleteSheet = useStableHandler(handleDeleteSheet);
+  const stableApplyDragPayloadToPanel = useStableHandler(applyDragPayloadToPanel);
+  const stableStartPointerDrag = useStableHandler(startPointerDrag);
+  const stableChangeGenre = useStableHandler(handleChangeGenre);
+  const stablePreviewAssignedImage = useStableHandler(handlePreviewAssignedImage);
+
+  const pageSelectionProps = useMemo(() => ({
+    isEnabled: isPageSelectionMode,
+    selectedIds: selectedSheetIds,
+    onToggle: stableToggleSheetSelection
+  }), [isPageSelectionMode, selectedSheetIds, stableToggleSheetSelection]);
+
+  const navigationProps = useMemo(() => ({
+    activeSheetId,
+    currentIndex,
+    totalCount: currentList.length,
+    onNavigate: stableNavigatePage,
+    onOpenSheet: stableOpenSheet
+  }), [activeSheetId, currentIndex, currentList.length, stableNavigatePage, stableOpenSheet]);
+
+  const arrangeProps = useMemo(() => ({
+    workspaceView: panelArrangeWorkspaceView,
+    sheetIds: panelArrangeModeSheetIds,
+    draggingTokenId: arrangeDraggingTokenId,
+    onStartHold: startPanelArrangeHold,
+    onCancelHold: clearPanelArrangeHold,
+    onDragStateChange: handleArrangeDragStateChange
+  }), [
+    arrangeDraggingTokenId,
+    clearPanelArrangeHold,
+    handleArrangeDragStateChange,
+    panelArrangeModeSheetIds,
+    panelArrangeWorkspaceView,
+    startPanelArrangeHold
+  ]);
+
+  const editingProps = useMemo(() => ({
+    updatePanel: stableUpdatePanel,
+    selection,
+    isMergeMode,
+    onSelectPanel: stableSelectPanel,
+    onDeleteSheet: stableDeleteSheet,
+    highlightEmpty,
+    highlightLabels,
+    onApplyDragPayloadToPanel: stableApplyDragPayloadToPanel,
+    onStartPointerDrag: stableStartPointerDrag,
+    isLabelMode: isLabelSelectionMode,
+    onChangeGenre: stableChangeGenre,
+    onPreviewImage: stablePreviewAssignedImage
+  }), [
+    highlightEmpty,
+    highlightLabels,
+    isLabelSelectionMode,
+    isMergeMode,
+    selection,
+    stableApplyDragPayloadToPanel,
+    stableChangeGenre,
+    stableDeleteSheet,
+    stablePreviewAssignedImage,
+    stableSelectPanel,
+    stableStartPointerDrag,
+    stableUpdatePanel
+  ]);
+
+  const salesProps = useMemo(() => ({
+    isMode: isSalesMode,
+    showMonthlyCharts: isSalesChartMode,
+    data: activeSalesData,
+    onHover: handleHoverSales,
+    onLeave: handleLeaveSales
+  }), [activeSalesData, handleHoverSales, handleLeaveSales, isSalesChartMode, isSalesMode]);
+
+  const changesProps = useMemo(() => ({
+    isMode: isCatalogDiffMode,
+    byCode: catalogChangeSet?.byCode || EMPTY_CATALOG_CHANGES
+  }), [catalogChangeSet, isCatalogDiffMode]);
+
+
   const handleOpenAssignedImage = useCallback((sheetId) => {
     if (panelArrangeSession) {
       showAlert('ホバリングを解除してから別のページへ移動してください。');
@@ -3911,56 +4005,13 @@ export default function App() {
               zoomScale={zoomScale}
               displaySheets={displaySheets}
               sheets={sheets}
-              pageSelection={{
-                isEnabled: isPageSelectionMode,
-                selectedIds: selectedSheetIds,
-                onToggle: handleToggleSheetSelection
-              }}
-              navigation={{
-                activeSheetId,
-                currentIndex,
-                totalCount: currentList.length,
-                onNavigate: handleNavigatePage,
-                onOpenSheet: (sheetId) => {
-                  setActiveSheetId(sheetId);
-                  setIsLabelSelectionMode(false);
-                  setViewMode('single');
-                }
-              }}
-              arrange={{
-                workspaceView: panelArrangeWorkspaceView,
-                sheetIds: panelArrangeModeSheetIds,
-                draggingTokenId: arrangeDraggingTokenId,
-                onStartHold: startPanelArrangeHold,
-                onCancelHold: clearPanelArrangeHold,
-                onDragStateChange: handleArrangeDragStateChange
-              }}
-              editing={{
-                updatePanel: handlePanelUpdateWithCheck,
-                selection,
-                isMergeMode,
-                onSelectPanel: handleSelectPanel,
-                onDeleteSheet: handleDeleteSheet,
-                highlightEmpty,
-                highlightLabels,
-                onApplyDragPayloadToPanel: applyDragPayloadToPanel,
-                onStartPointerDrag: startPointerDrag,
-                isLabelMode: isLabelSelectionMode,
-                onChangeGenre: handleChangeGenre,
-                onPreviewImage: handlePreviewAssignedImage
-              }}
+              pageSelection={pageSelectionProps}
+              navigation={navigationProps}
+              arrange={arrangeProps}
+              editing={editingProps}
               showPanelCodes={showPanelCodes}
-              sales={{
-                isMode: isSalesMode,
-                showMonthlyCharts: isSalesChartMode,
-                data: activeSalesData,
-                onHover: handleHoverSales,
-                onLeave: handleLeaveSales
-              }}
-              changes={{
-                isMode: isCatalogDiffMode,
-                byCode: catalogChangeSet?.byCode || {}
-              }}
+              sales={salesProps}
+              changes={changesProps}
               imageDataById={imageDataById}
             />
           </div>
