@@ -62,16 +62,16 @@ const MonthlySalesChart = React.memo(({ series = [] }) => {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" aria-label="月別売上折れ線グラフ">
-      <div className="mb-0.5 flex items-baseline justify-between gap-1 leading-none text-cyan-50">
-        <span className="text-[8px] font-bold">月別推移</span>
-        <span className="flex items-baseline gap-0.5 whitespace-nowrap">
-          <span className="text-[9px] font-bold">最大</span>
-          <span className="font-mono text-lg font-black tracking-tight text-cyan-200">{chart.maximum.toLocaleString()}</span>
-          {chart.maximumLabel && <span className="text-[9px] font-bold">（{chart.maximumLabel}）</span>}
+      <div className="mb-1 flex items-baseline justify-between gap-1 leading-none text-cyan-50">
+        <span className="text-[11px] font-bold">月別推移</span>
+        <span className="flex items-baseline gap-1 whitespace-nowrap">
+          <span className="text-[11px] font-bold">最大</span>
+          <span className="font-mono text-2xl font-black leading-none tracking-tight text-cyan-200">{chart.maximum.toLocaleString()}</span>
+          {chart.maximumLabel && <span className="text-[11px] font-bold">（{chart.maximumLabel}）</span>}
         </span>
       </div>
       <svg
-        viewBox="0 0 100 52"
+        viewBox="0 0 100 46"
         preserveAspectRatio="none"
         className="min-h-0 w-full flex-1 overflow-visible"
         role="img"
@@ -99,16 +99,13 @@ const MonthlySalesChart = React.memo(({ series = [] }) => {
           </>
         )}
 
-        {labelIndexes.map((index) => {
-          const point = chart.points[index];
-          if (!point) return null;
-          return (
-            <text key={`label-${index}`} x={point.x} y="50.5" textAnchor={index === 0 ? 'start' : index === series.length - 1 ? 'end' : 'middle'} fill="rgba(255,255,255,0.66)" fontSize="4.5" fontWeight="700">
-              {point.label}
-            </text>
-          );
-        })}
       </svg>
+      {/* 月ラベルは SVG の外に出す。SVG 内だと縦横比の引き伸ばしで文字が歪んで読みにくい */}
+      <div className="mt-1 flex items-center justify-between text-[11px] font-bold leading-none text-cyan-300">
+        {labelIndexes.map((index) => (
+          <span key={`label-${index}`}>{series[index]?.label || ''}</span>
+        ))}
+      </div>
     </div>
   );
 });

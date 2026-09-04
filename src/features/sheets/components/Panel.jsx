@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, GripVertical, X } from 'lucide-react';
+import { GripVertical, X } from 'lucide-react';
 
 import {
   FREE_LABEL_COLORS,
@@ -12,7 +12,7 @@ import {
   formatFreeLabelText,
   getFreeLabelTextLayout
 } from '../../../domain/freeLabels';
-import { normalizeCode } from '../../../domain/productCodes';
+import { extractProductCodes, normalizeCode } from '../../../domain/productCodes';
 import { buildMonthlySalesSeries } from '../../../domain/salesData';
 import MonthlySalesChart from '../../sales/MonthlySalesChart';
 import {
@@ -97,11 +97,14 @@ const Panel = React.memo(({
   const panelRef = useRef(null);
   const freeLabelDragSessionRef = useRef(null);
 
+  // コマに複数の介援隊コードが記載されている場合 (コード欄・テキスト欄)、全コードの実績を合算する
   const matchedSales = useMemo(() => {
-    if (!isSalesMode || !data.code || !salesData) return null;
-    const normalizedTarget = normalizeCode(data.code);
-    return salesData[normalizedTarget] || null;
-  }, [isSalesMode, data.code, salesData]);
+    if (!isSalesMode || !salesData) return null;
+    const codes = extractProductCodes(data.code, data.text);
+    if (codes.length === 0) return null;
+    const merged = codes.flatMap((code) => salesData[code] || []);
+    return merged.length > 0 ? merged : null;
+  }, [isSalesMode, data.code, data.text, salesData]);
   const matchedCatalogDiff = useMemo(() => {
     if (!isCatalogDiffMode || !data.code) return null;
     return catalogChangesByCode[normalizeCode(data.code)] || null;
@@ -890,52 +893,42 @@ const Panel = React.memo(({
       })}
 
       {isSalesMode && matchedSales && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex flex-col bg-black/60 p-2 text-white">
-          <div className="mb-1 flex items-start justify-between gap-1">
-            {/* グラフ表示中はバッジを出さず、グラフの面積を優先する */}
-            {!isMonthlySalesView && (
-              <span className="text-[10px] bg-emerald-500 text-white px-1 py-0.5 rounded font-bold shadow-sm">
-                実績
-              </span>
-            )}
-            <div className="flex items-center gap-1">
-              {!isMonthlySalesView && (
-                <span className="font-mono text-xl font-bold tracking-tighter text-emerald-300">
-                  {salesTotal.toLocaleString()}
-                </span>
-              )}
-              {canShowMonthlySales && !showMonthlySalesForAll && (
-                <button
-                  type="button"
-                  onClick={toggleSalesView}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
-                  draggable={false}
-                  className="pointer-events-auto flex h-7 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100/95 text-violet-500 shadow-sm transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                  aria-label={isMonthlySalesView ? '総合計表示に戻す' : '月別売上グラフを表示'}
-                  title={isMonthlySalesView ? '総合計表示に戻す' : '月別売上グラフを表示'}
-                >
-                  <ArrowRight size={15} strokeWidth={2.5} className={`transition-transform ${isMonthlySalesView ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-            </div>
-          </div>
+        <div className="pointer-events-none absolute inset-0 z-30 flex flex-col bg-slate-950/70 p-2 text-white backdrop-blur-[2px]">
+          {/* →ボタンの代わりに、オーバーレイ全面のクリックで合計⇔月別グラフを切り替える */}
+          {canShowMonthlySales && !showMonthlySalesForAll && (
+            <button
+              type="button"
+              onClick={toggleSalesView}
+              onPointerDown={(event) => event.stopPropagation()}
+              onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+              draggable={false}
+              className="pointer-events-auto absolute inset-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+              aria-label={isMonthlySalesView ? '総合計表示に戻す' : '月別売上グラフを表示'}
+              title={isMonthlySalesView ? 'クリックで合計表示に戻す' : 'クリックで月別グラフを表示'}
+            />
+          )}
           {isMonthlySalesView ? (
             <MonthlySalesChart series={monthlySalesSeries} />
           ) : (
-            <div className="flex-1 space-y-1 overflow-hidden">
-              {matchedSales.slice(0, 3).map((item, itemIndex) => (
-                <div key={itemIndex} className="flex items-baseline justify-between border-b border-white/20 pb-0.5 text-[9px]">
-                  <span className="w-2/3 truncate opacity-90">{item.name} {item.spec}</span>
-                  <span className="font-mono font-bold opacity-100">{item.count}</span>
-                </div>
-              ))}
-              {matchedSales.length > 3 && (
-                <div className="mt-1 text-center text-[8px] italic opacity-70">
-                  他 {matchedSales.length - 3} 件...
-                </div>
-              )}
-            </div>
+            <>
+              <div className="flex items-baseline justify-between gap-1">
+                <span className="text-[8px] font-bold tracking-[0.2em] text-emerald-300/90">実績</span>
+                <span className="font-mono text-2xl font-black leading-none tracking-tight text-emerald-300">
+                  {salesTotal.toLocaleString()}
+                </span>
+              </div>
+              <div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-hidden">
+                {matchedSales.slice(0, 3).map((item, itemIndex) => (
+                  <div key={itemIndex} className="flex items-baseline justify-between gap-1 text-[9px] leading-tight">
+                    <span className="min-w-0 flex-1 truncate text-white/70">{item.name} {item.spec}</span>
+                    <span className="font-mono font-bold">{(parseInt(item.count) || 0).toLocaleString()}</span>
+                  </div>
+                ))}
+                {matchedSales.length > 3 && (
+                  <div className="text-[8px] font-bold text-white/45">他{matchedSales.length - 3}件</div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
