@@ -66,6 +66,7 @@ const Panel = React.memo(({
   onApplyDragPayloadToPanel,
   onStartPointerDrag,
   isSalesMode,
+  showMonthlySalesForAll = false,
   salesData,
   onHoverSales,
   onLeaveSales,
@@ -585,7 +586,9 @@ const Panel = React.memo(({
   const monthlySalesSeries = useMemo(() => buildMonthlySalesSeries(matchedSales), [matchedSales]);
   const canShowMonthlySales = monthlySalesSeries.length > 0;
   const normalizedPanelCode = normalizeCode(data.code);
-  const isMonthlySalesView = isSalesMode && monthlySalesCode === normalizedPanelCode && canShowMonthlySales;
+  const isMonthlySalesView = isSalesMode
+    && canShowMonthlySales
+    && (showMonthlySalesForAll || monthlySalesCode === normalizedPanelCode);
 
   const toggleSalesView = (event) => {
     event.preventDefault();
@@ -898,7 +901,7 @@ const Panel = React.memo(({
                   {salesTotal.toLocaleString()}
                 </span>
               )}
-              {canShowMonthlySales && (
+              {canShowMonthlySales && !showMonthlySalesForAll && (
                 <button
                   type="button"
                   onClick={toggleSalesView}

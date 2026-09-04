@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart2, FileDiff, Grid, List, LogOut, Redo2, Undo2 } from 'lucide-react';
+import { BarChart2, ChartSpline, FileDiff, Grid, List, LogOut, Redo2, Undo2 } from 'lucide-react';
 
 // 画面最上部のナビゲーションバー (M3 Expressive Style)。
 // 左: ロゴ / ログイン情報 / 戻る・進む / 詳細・全体 切替 / (選択モード時) 一括操作 / (詳細時) 実績モード
@@ -16,8 +16,15 @@ const AppHeader = ({
   onSelectViewMode,
   isPageSelectionMode,
   isSalesMode,
+  isSalesChartMode,
   isSalesLookupOpen,
+  salesPeriodOptions = [],
+  activeSalesPeriod,
+  salesPeriodMeta = {},
+  isSalesPeriodLoading = false,
+  onSelectSalesPeriod,
   onSalesModeClick,
+  onSalesChartModeClick,
   onSalesModeLongPressStart,
   onSalesModeLongPressEnd,
   catalogChangeCount,
@@ -136,6 +143,49 @@ const AppHeader = ({
             <BarChart2 size={18} />
             <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
           </button>
+
+          <button
+            type="button"
+            onClick={onSalesChartModeClick}
+            onMouseEnter={(event) => onShowQuickHelp(event, '月別グラフ', '表示中の詳細ページにある全商品の月別売上グラフを一括で表示します。')}
+            onMouseLeave={onHideQuickHelp}
+            className={`ml-1 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isSalesChartMode
+              ? 'border-blue-500 bg-blue-500/10 text-blue-600 shadow-[0_0_15px_rgba(59,130,246,0.24)]'
+              : 'border-slate-200 bg-white text-blue-500 hover:border-blue-300 hover:bg-blue-50'}`}
+            aria-pressed={isSalesChartMode}
+            title={isSalesChartMode ? '月別グラフの一括表示を解除' : '月別グラフを全コマに一括表示'}
+          >
+            <ChartSpline size={18} strokeWidth={2.4} />
+            <span className="hidden xl:inline">月別グラフ {isSalesChartMode ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {isSalesMode && salesPeriodOptions.length > 1 && (
+            <div className="ml-1 flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-0.5" role="group" aria-label="売上データの対象期間">
+              {salesPeriodOptions.map((period) => {
+                const isActive = period.id === activeSalesPeriod;
+                const hasData = !!salesPeriodMeta?.[period.id];
+                return (
+                  <button
+                    key={period.id}
+                    type="button"
+                    onClick={() => onSelectSalesPeriod?.(period.id)}
+                    onMouseEnter={(event) => onShowQuickHelp(event, period.label, hasData
+                      ? `${period.description}の売上データを表示します。`
+                      : `${period.description}の売上データはまだ取り込まれていません。設定から取り込めます。`)}
+                    onMouseLeave={onHideQuickHelp}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors ${isActive
+                      ? 'bg-emerald-500 text-white shadow-sm'
+                      : hasData ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
+                    aria-pressed={isActive}
+                    title={hasData ? `${period.label}の売上を表示` : `${period.label}のデータは未取り込み`}
+                  >
+                    {period.label}
+                  </button>
+                );
+              })}
+              {isSalesPeriodLoading && <span className="px-1 text-[10px] font-bold text-slate-400">読込中…</span>}
+            </div>
+          )}
 
           {catalogChangeCount > 0 && (
             <button

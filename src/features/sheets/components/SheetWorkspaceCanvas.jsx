@@ -113,6 +113,7 @@ const SheetWorkspaceCanvas = ({
                 onApplyDragPayloadToPanel={editing.onApplyDragPayloadToPanel}
                 onStartPointerDrag={editing.onStartPointerDrag}
                 isSalesMode={sales.isMode}
+                showMonthlySalesForAll={sales.showMonthlyCharts}
                 salesData={sales.data}
                 onHoverSales={sales.onHover}
                 onLeaveSales={sales.onLeave}

@@ -107,9 +107,16 @@ import {
 import {
   SALES_DATA_WRITE_BATCH_SIZE,
   mergeSerializedSalesChunks,
-  parseSalesCsvContent,
   splitSalesDataIntoChunks
 } from './domain/salesData';
+import {
+  SALES_PERIOD_CURRENT,
+  SALES_PERIOD_OPTIONS,
+  buildSalesPeriodMeta,
+  createEmptySalesPeriodMeta,
+  getSalesPeriodCacheKey,
+  getSalesPeriodDefinition
+} from './domain/salesPeriods';
 import {
   getCoords,
   getSizeType
@@ -124,6 +131,7 @@ import {
   parseNullableDragValue
 } from './lib/dragPayload';
 import { parseCSVLine, readFileAutoEncoding } from './lib/csv';
+import { parseSalesCsvWithoutBlocking } from './lib/salesCsvParser';
 import { downloadTextFile } from './lib/download';
 import {
   buildDatedCsvFilename,
@@ -264,9 +272,17 @@ export default function App() {
     tempItems,
     workspaceStateRef
   } = useWorkspaceUndoState({ accountId: undoAccountId });
-  const [salesData, setSalesData] = useState(null); // { code: [{name, spec, count}] }
-  const [salesDataLastUpdated, setSalesDataLastUpdated] = useState(null);
+  const [salesData, setSalesData] = useState(null); // 今期: { code: [{name, spec, count}] }
+  const [activeSalesPeriod, setActiveSalesPeriod] = useState(SALES_PERIOD_CURRENT);
+  const [loadedHistoricalSales, setLoadedHistoricalSales] = useState({ periodId: null, data: null });
+  const [salesPeriodMeta, setSalesPeriodMeta] = useState(createEmptySalesPeriodMeta);
   const [catalogChangeSet, setCatalogChangeSet] = useState(null);
+  // 実績モードで参照する売上。今期は常駐、前期・前々期は選択されたときだけ読み込む。
+  const activeSalesData = activeSalesPeriod === SALES_PERIOD_CURRENT
+    ? salesData
+    : (loadedHistoricalSales.periodId === activeSalesPeriod ? loadedHistoricalSales.data : null);
+  const isSalesPeriodLoading = activeSalesPeriod !== SALES_PERIOD_CURRENT
+    && loadedHistoricalSales.periodId !== activeSalesPeriod;
 
   // UI State
   const [viewMode, setViewMode] = useState('overview');
@@ -303,6 +319,7 @@ export default function App() {
   const logoTapCountRef = useRef(0);
   const logoTapTimeoutRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
+  const [isSalesChartMode, setIsSalesChartMode] = useState(false);
   const [isCatalogDiffMode, setIsCatalogDiffMode] = useState(false);
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
@@ -433,6 +450,7 @@ export default function App() {
       setArrangeDraggingTokenId(null);
       setIsLabelSelectionMode(false);
       setIsSalesMode(false);
+      setIsSalesChartMode(false);
       setPanelArrangeSession(arrangeSession);
       try {
         navigator.vibrate?.(35);
@@ -476,7 +494,10 @@ export default function App() {
     if (viewMode !== 'single') setViewMode('single');
     if (isPageSelectionMode) setIsPageSelectionMode(false);
     if (isLabelSelectionMode) setIsLabelSelectionMode(false);
-    if (isSalesMode) setIsSalesMode(false);
+    if (isSalesMode) {
+      setIsSalesMode(false);
+      setIsSalesChartMode(false);
+    }
   }, [
     isLabelSelectionMode,
     isPageSelectionMode,
@@ -519,7 +540,14 @@ export default function App() {
   }, [tempShelfCollection, useLegacyTempShelf, tempShelfUserId]);
   const excludedItemsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'excludedItems'), [appId]);
   const settingsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'settings'), [appId]);
-  const salesChunksCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'public', 'data', 'salesDataChunks'), [appId]);
+  const salesChunksCollections = useMemo(() => {
+    if (USE_LOCAL_STORAGE) return {};
+    return Object.fromEntries(SALES_PERIOD_OPTIONS.map((period) => [
+      period.id,
+      collection(db, 'artifacts', appId, 'public', 'data', period.chunkCollectionId)
+    ]));
+  }, [appId]);
+  const salesChunksCollection = salesChunksCollections[SALES_PERIOD_CURRENT] || null;
   const workLogsCollection = useMemo(() => USE_LOCAL_STORAGE ? null : collection(db, 'artifacts', appId, 'activityLogs'), [appId]);
   const signedInUserName = useMemo(() => {
     const signedInEmail = normalizeEmail(firebaseUser?.email);
@@ -548,6 +576,9 @@ export default function App() {
           let savedTempItems = await idbHelper.getItem('tempItems');
           let savedExcludedItems = await idbHelper.getItem('excludedItems');
           let savedSalesData = await idbHelper.getItem('salesData');
+          const savedSalesMetaEntries = await Promise.all(SALES_PERIOD_OPTIONS.map(async (period) => (
+            [period.id, await idbHelper.getItem(period.localMetaKey)]
+          )));
 
           // 初回アクセス時のみLocalStorageからの移行を試みる
           const lsFlag = localStorage.getItem('daiwari_migrated_to_idb');
@@ -594,6 +625,7 @@ export default function App() {
           syncTempItems(savedTempItems || []);
           syncExcludedItems(savedExcludedItems || []);
           if (savedSalesData) setSalesData(savedSalesData);
+          setSalesPeriodMeta(Object.fromEntries(savedSalesMetaEntries));
 
           if (!isSameStockImageList(loadedImages, normalizedSavedImages)) {
             await idbHelper.setItem('images', normalizedSavedImages);
@@ -714,6 +746,9 @@ export default function App() {
       syncTempItems([]);
       syncExcludedItems([]);
       setSalesData(null);
+      setActiveSalesPeriod(SALES_PERIOD_CURRENT);
+      setLoadedHistoricalSales({ periodId: null, data: null });
+      setSalesPeriodMeta(createEmptySalesPeriodMeta());
       setIsDataLoaded(false);
       setAuthErrorMessage('');
     } catch (error) {
@@ -745,10 +780,55 @@ export default function App() {
     return () => { isCancelled = true; };
   }, []);
 
+  // 前期・前々期が選ばれたら、その期の売上をキャッシュ → Firestore の順に読み込む。
+  // 今期は常駐しているので対象外。
+  useEffect(() => {
+    if (activeSalesPeriod === SALES_PERIOD_CURRENT) return undefined;
+    if (loadedHistoricalSales.periodId === activeSalesPeriod) return undefined;
+
+    let isCancelled = false;
+    const period = getSalesPeriodDefinition(activeSalesPeriod);
+    const cacheKey = getSalesPeriodCacheKey(CLOUD_SALES_CACHE_KEY, activeSalesPeriod);
+
+    const loadPeriod = async () => {
+      try {
+        if (USE_LOCAL_STORAGE) {
+          const saved = await idbHelper.getItem(period.localDataKey);
+          if (!isCancelled) setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: saved || {} });
+          return;
+        }
+
+        const cached = await idbHelper.getItem(cacheKey);
+        if (!isCancelled && cached?.data) {
+          setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: cached.data });
+        }
+
+        const chunksCollection = salesChunksCollections[activeSalesPeriod];
+        if (!chunksCollection) return;
+        const snapshot = await getDocs(chunksCollection);
+        if (isCancelled) return;
+        const fullSalesMap = mergeSerializedSalesChunks(
+          snapshot.docs.map((snapshotDoc) => snapshotDoc.data()?.items),
+          { onParseError: (error) => console.error("Failed to parse sales chunk", error) }
+        );
+        setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: fullSalesMap });
+        await idbHelper.setItem(cacheKey, { data: fullSalesMap, fetchedAt: Date.now() });
+      } catch (error) {
+        console.error("Historical sales load failed:", error);
+        // 読み込めなかった期は空として扱い、再試行のループを避ける
+        if (!isCancelled) setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: {} });
+      }
+    };
+
+    void loadPeriod();
+    return () => { isCancelled = true; };
+  }, [activeSalesPeriod, loadedHistoricalSales.periodId, salesChunksCollections]);
+
   // 全体表示に切り替えた時、実績モードを自動的にオフにする
   useEffect(() => {
     if (viewMode !== 'list' && viewMode !== 'single') {
       setIsSalesMode(false);
+      setIsSalesChartMode(false);
       setIsCatalogDiffMode(false);
     }
   }, [viewMode]);
@@ -917,19 +997,27 @@ export default function App() {
 
     void loadSalesWithCache();
 
-    const unsubscribeMeta = onSnapshot(doc(settingsCollection, 'salesDataMeta'), (docSnap) => {
-      if (docSnap.exists()) {
-        const metaData = docSnap.data() || {};
-        setSalesDataLastUpdated(metaData.updatedAt?.toDate() || null);
-        void loadSalesWithCache(metaData);
-      }
-    }, (err) => console.error("Sales Meta Sync Error", err));
+    // 期ごとの取り込み状況 (最終更新・件数・ファイル名) を購読する。今期だけは本体データも追従させる。
+    const unsubscribeMetas = SALES_PERIOD_OPTIONS.map((period) => onSnapshot(
+      doc(settingsCollection, period.metaDocumentId),
+      (docSnap) => {
+        const metaData = docSnap.exists() ? (docSnap.data() || {}) : null;
+        setSalesPeriodMeta((current) => ({
+          ...current,
+          [period.id]: metaData
+            ? { ...metaData, updatedAt: metaData.updatedAt?.toDate?.() || null }
+            : null
+        }));
+        if (period.id === SALES_PERIOD_CURRENT && metaData) void loadSalesWithCache(metaData);
+      },
+      (err) => console.error("Sales Meta Sync Error", err)
+    ));
 
     return () => {
       isCancelled = true;
       unsubscribeSheets();
       unsubscribeExcluded();
-      unsubscribeMeta();
+      unsubscribeMetas.forEach((unsubscribe) => unsubscribe());
     };
   }, [
     excludedItemsCollection,
@@ -1242,22 +1330,33 @@ export default function App() {
   }, [isAuthenticated, sheets, sheetsCollection, runCloudWrite]);
 
   // --- Sales CSV Import Logic ---
-  const handleImportSalesCSV = async (file) => {
+  // 期 (今期 / 前期 / 前々期) ごとに別のチャンクコレクションとメタ文書へ保存する。
+  const handleImportSalesCSV = async (file, periodId = SALES_PERIOD_CURRENT) => {
     if (isLockedRef.current) return;
+    const period = getSalesPeriodDefinition(periodId);
     setIsProcessing(true);
-    setProgressMessage("売上データを解析中...");
+    setProgressMessage(`${period.label}の売上データを解析中...`);
     try {
       const text = await readFileAutoEncoding(file);
-      const salesMap = parseSalesCsvContent(text);
+      // 大きなCSVでも画面が固まらないよう、対応ブラウザでは別スレッドで解析する
+      const salesMap = await parseSalesCsvWithoutBlocking(text);
+      const periodMeta = buildSalesPeriodMeta({ salesData: salesMap, fileName: file?.name || '' });
+
+      const applyLoadedPeriod = () => {
+        setSalesPeriodMeta((current) => ({ ...current, [period.id]: periodMeta }));
+        if (period.id === SALES_PERIOD_CURRENT) setSalesData(salesMap);
+        else setLoadedHistoricalSales({ periodId: period.id, data: salesMap });
+      };
 
       if (USE_LOCAL_STORAGE) {
         try {
-          await idbHelper.setItem('salesData', salesMap);
-          setSalesData(salesMap);
+          await idbHelper.setItem(period.localDataKey, salesMap);
+          await idbHelper.setItem(period.localMetaKey, periodMeta);
+          applyLoadedPeriod();
           setProgressMessage("完了しました");
           setTimeout(() => {
             setIsProcessing(false);
-            showAlert("売上データを取り込みました");
+            showAlert(`${period.label}の売上データを取り込みました`);
             setIsSettingsOpen(false);
           }, 500);
         } catch (e) {
@@ -1268,12 +1367,14 @@ export default function App() {
         return;
       }
 
+      const periodChunksCollection = salesChunksCollections[period.id];
+      if (!periodChunksCollection) throw new Error('売上データの保存先に接続できません。');
+
       // Chunking logic
       setProgressMessage("データを保存中...");
-      const entries = Object.entries(salesMap);
       const chunks = splitSalesDataIntoChunks(salesMap);
 
-      const snapshot = await getDocs(salesChunksCollection);
+      const snapshot = await getDocs(periodChunksCollection);
 
       // Firestoreの10MiBリクエスト上限に十分な余裕を持たせるため、
       // 旧チャンクの削除と新チャンクの保存を少数ずつ確定する。
@@ -1281,7 +1382,7 @@ export default function App() {
         const writeBatchChunk = writeBatch(db);
         chunks.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((chunk, offset) => {
           const realIndex = index + offset;
-          writeBatchChunk.set(doc(salesChunksCollection, `chunk_${realIndex}`), {
+          writeBatchChunk.set(doc(periodChunksCollection, `chunk_${realIndex}`), {
             items: JSON.stringify(chunk),
             updatedAt: serverTimestamp(),
             chunkIndex: realIndex
@@ -1299,21 +1400,20 @@ export default function App() {
         await runCloudWrite(() => deleteBatch.commit(), { key: 'sales-data' });
       }
 
-      await setDoc(doc(settingsCollection, 'salesDataMeta'), {
-        updatedAt: serverTimestamp(),
-        totalItems: entries.length
+      await setDoc(doc(settingsCollection, period.metaDocumentId), {
+        ...periodMeta,
+        updatedAt: serverTimestamp()
       });
 
       const cachedMetaSeconds = Math.floor(Date.now() / 1000);
-      await idbHelper.setItem(CLOUD_SALES_CACHE_KEY, {
+      await idbHelper.setItem(getSalesPeriodCacheKey(CLOUD_SALES_CACHE_KEY, period.id), {
         data: salesMap,
         metaSeconds: cachedMetaSeconds,
         fetchedAt: Date.now()
       });
-      setSalesData(salesMap);
-      setSalesDataLastUpdated(new Date(cachedMetaSeconds * 1000));
+      applyLoadedPeriod();
 
-      showAlert("売上データを取り込みました！");
+      showAlert(`${period.label}の売上データを取り込みました！`);
       setIsSettingsOpen(false);
 
     } catch (err) {
@@ -1374,14 +1474,35 @@ export default function App() {
     }
     const nextIsSalesMode = !isSalesMode;
     setIsSalesMode(nextIsSalesMode);
-    if (nextIsSalesMode) setIsCatalogDiffMode(false);
+    if (nextIsSalesMode) {
+      setIsCatalogDiffMode(false);
+    } else {
+      setIsSalesChartMode(false);
+    }
   }, [isSalesMode, panelArrangeSession]);
+
+  const handleSelectSalesPeriod = useCallback((periodId) => {
+    setActiveSalesPeriod(periodId);
+  }, []);
+
+  const handleSalesChartModeButtonClick = useCallback(() => {
+    if (panelArrangeSession) return;
+    const nextIsSalesChartMode = !isSalesChartMode;
+    setIsSalesChartMode(nextIsSalesChartMode);
+    if (nextIsSalesChartMode) {
+      setIsSalesMode(true);
+      setIsCatalogDiffMode(false);
+    }
+  }, [isSalesChartMode, panelArrangeSession]);
 
   const handleCatalogDiffModeButtonClick = useCallback(() => {
     if (panelArrangeSession || !catalogChangeSet) return;
     const nextIsCatalogDiffMode = !isCatalogDiffMode;
     setIsCatalogDiffMode(nextIsCatalogDiffMode);
-    if (nextIsCatalogDiffMode) setIsSalesMode(false);
+    if (nextIsCatalogDiffMode) {
+      setIsSalesMode(false);
+      setIsSalesChartMode(false);
+    }
   }, [catalogChangeSet, isCatalogDiffMode, panelArrangeSession]);
 
   const handleApplyCatalogChangeSet = useCallback((nextChangeSet) => {
@@ -1389,6 +1510,7 @@ export default function App() {
     setCatalogChangeSet(nextChangeSet);
     setIsCatalogDiffMode(true);
     setIsSalesMode(false);
+    setIsSalesChartMode(false);
     setIsEdgeAiAssistOpen(false);
     void idbHelper.setItem(CATALOG_CHANGE_SET_CACHE_KEY, nextChangeSet)
       .catch((error) => console.error('Catalog change set cache save failed:', error));
@@ -3595,8 +3717,15 @@ export default function App() {
           onSelectViewMode={handleSelectViewMode}
           isPageSelectionMode={isPageSelectionMode}
           isSalesMode={isSalesMode}
+          isSalesChartMode={isSalesChartMode}
+          salesPeriodOptions={SALES_PERIOD_OPTIONS}
+          activeSalesPeriod={activeSalesPeriod}
+          salesPeriodMeta={salesPeriodMeta}
+          isSalesPeriodLoading={isSalesPeriodLoading}
+          onSelectSalesPeriod={handleSelectSalesPeriod}
           isSalesLookupOpen={isSalesLookupOpen}
           onSalesModeClick={handleSalesModeButtonClick}
+          onSalesChartModeClick={handleSalesChartModeButtonClick}
           onSalesModeLongPressStart={startSalesModeLongPress}
           onSalesModeLongPressEnd={endSalesModeLongPress}
           catalogChangeCount={catalogChangeSet?.displayCount || Object.keys(catalogChangeSet?.byCode || {}).length}
@@ -3818,7 +3947,8 @@ export default function App() {
               }}
               sales={{
                 isMode: isSalesMode,
-                data: salesData,
+                showMonthlyCharts: isSalesChartMode,
+                data: activeSalesData,
                 onHover: handleHoverSales,
                 onLeave: handleLeaveSales
               }}
@@ -3843,7 +3973,7 @@ export default function App() {
       <SalesCodeLookupModal
         isOpen={isSalesLookupOpen}
         onClose={() => setIsSalesLookupOpen(false)}
-        salesData={salesData}
+        salesData={activeSalesData}
         visibleCodes={salesLookupVisibleCodes}
       />
 
@@ -3929,7 +4059,8 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onImportSalesCSV={handleImportSalesCSV}
-        salesDataLastUpdated={salesDataLastUpdated}
+        salesPeriodOptions={SALES_PERIOD_OPTIONS}
+        salesPeriodMeta={salesPeriodMeta}
       />
 
       <ConfirmModal
