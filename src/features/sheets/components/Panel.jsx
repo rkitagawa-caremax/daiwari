@@ -892,9 +892,12 @@ const Panel = React.memo(({
       {isSalesMode && matchedSales && (
         <div className="pointer-events-none absolute inset-0 z-30 flex flex-col bg-black/60 p-2 text-white">
           <div className="mb-1 flex items-start justify-between gap-1">
-            <span className="text-[10px] bg-emerald-500 text-white px-1 py-0.5 rounded font-bold shadow-sm">
-              {isMonthlySalesView ? '月別実績' : '実績'}
-            </span>
+            {/* グラフ表示中はバッジを出さず、グラフの面積を優先する */}
+            {!isMonthlySalesView && (
+              <span className="text-[10px] bg-emerald-500 text-white px-1 py-0.5 rounded font-bold shadow-sm">
+                実績
+              </span>
+            )}
             <div className="flex items-center gap-1">
               {!isMonthlySalesView && (
                 <span className="font-mono text-xl font-bold tracking-tighter text-emerald-300">

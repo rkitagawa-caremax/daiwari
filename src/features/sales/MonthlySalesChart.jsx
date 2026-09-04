@@ -1,9 +1,31 @@
 import React, { useId, useMemo } from 'react';
 
-const CHART_LEFT = 10;
-const CHART_RIGHT = 98;
-const CHART_TOP = 3;
-const CHART_BOTTOM = 45;
+const CHART_LEFT = 4;
+const CHART_RIGHT = 96;
+const CHART_TOP = 4;
+const CHART_BOTTOM = 44;
+
+const round2 = (value) => Math.round(value * 100) / 100;
+const clampY = (value) => Math.min(CHART_BOTTOM, Math.max(CHART_TOP - 1.5, value));
+
+// Catmull-Rom をベジェに変換したなめらかな折れ線。
+// 制御点の y は描画域に収め、スパイクでベースラインを突き抜けないようにする。
+const buildSmoothPath = (points) => {
+  if (points.length === 0) return '';
+  let path = `M ${round2(points[0].x)},${round2(points[0].y)}`;
+  for (let index = 0; index < points.length - 1; index++) {
+    const previous = points[index - 1] || points[index];
+    const current = points[index];
+    const next = points[index + 1];
+    const afterNext = points[index + 2] || next;
+    const c1x = current.x + (next.x - previous.x) / 6;
+    const c1y = clampY(current.y + (next.y - previous.y) / 6);
+    const c2x = next.x - (afterNext.x - current.x) / 6;
+    const c2y = clampY(next.y - (afterNext.y - current.y) / 6);
+    path += ` C ${round2(c1x)},${round2(c1y)} ${round2(c2x)},${round2(c2y)} ${round2(next.x)},${round2(next.y)}`;
+  }
+  return path;
+};
 
 const MonthlySalesChart = React.memo(({ series = [] }) => {
   const gradientId = `monthly-sales-area-${useId().replace(/:/g, '')}`;
@@ -17,11 +39,21 @@ const MonthlySalesChart = React.memo(({ series = [] }) => {
       value,
       label: series[index]?.label || ''
     }));
-    const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
-    const areaPoints = points.length > 0
-      ? `${points[0].x},${CHART_BOTTOM} ${linePoints} ${points.at(-1).x},${CHART_BOTTOM}`
+    const linePath = buildSmoothPath(points);
+    const areaPath = points.length > 0
+      ? `${linePath} L ${round2(points.at(-1).x)},${CHART_BOTTOM} L ${round2(points[0].x)},${CHART_BOTTOM} Z`
       : '';
-    return { maximum, points, linePoints, areaPoints };
+    // 最大値の月 (同数の場合は最初の月)。全月 0 のときは無し
+    const maxValue = Math.max(0, ...values);
+    const maxIndex = maxValue > 0 ? values.indexOf(maxValue) : -1;
+    return {
+      maximum,
+      maximumLabel: maxIndex >= 0 ? (series[maxIndex]?.label || '') : '',
+      maxPoint: maxIndex >= 0 ? points[maxIndex] : null,
+      points,
+      linePath,
+      areaPath
+    };
   }, [series]);
 
   if (series.length === 0) return null;
@@ -30,9 +62,13 @@ const MonthlySalesChart = React.memo(({ series = [] }) => {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" aria-label="月別売上折れ線グラフ">
-      <div className="mb-0.5 flex items-center justify-between text-[8px] font-bold leading-none text-cyan-50">
-        <span>月別推移</span>
-        <span className="font-mono">最大 {chart.maximum.toLocaleString()}</span>
+      <div className="mb-0.5 flex items-baseline justify-between gap-1 leading-none text-cyan-50">
+        <span className="text-[8px] font-bold">月別推移</span>
+        <span className="flex items-baseline gap-0.5 whitespace-nowrap">
+          <span className="text-[9px] font-bold">最大</span>
+          <span className="font-mono text-lg font-black tracking-tight text-cyan-200">{chart.maximum.toLocaleString()}</span>
+          {chart.maximumLabel && <span className="text-[9px] font-bold">（{chart.maximumLabel}）</span>}
+        </span>
       </div>
       <svg
         viewBox="0 0 100 52"
@@ -43,24 +79,31 @@ const MonthlySalesChart = React.memo(({ series = [] }) => {
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.94" />
-            <stop offset="58%" stopColor="#38bdf8" stopOpacity="0.78" />
-            <stop offset="100%" stopColor="#bae6fd" stopOpacity="0.34" />
+            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {[CHART_TOP, CHART_TOP + ((CHART_BOTTOM - CHART_TOP) / 3), CHART_TOP + (((CHART_BOTTOM - CHART_TOP) * 2) / 3), CHART_BOTTOM].map((y) => (
-          <line key={y} x1={CHART_LEFT} y1={y} x2={CHART_RIGHT} y2={y} stroke="rgba(255,255,255,0.24)" strokeWidth="0.65" vectorEffect="non-scaling-stroke" />
-        ))}
-        <text x="0" y={CHART_TOP + 2} fill="rgba(255,255,255,0.62)" fontSize="4.5" fontWeight="700">{chart.maximum}</text>
-        <text x="0" y={((CHART_TOP + CHART_BOTTOM) / 2) + 2} fill="rgba(255,255,255,0.5)" fontSize="4.5" fontWeight="700">{Math.round(chart.maximum / 2)}</text>
-        <text x="2" y={CHART_BOTTOM + 1} fill="rgba(255,255,255,0.62)" fontSize="4.5" fontWeight="700">0</text>
-        <polygon points={chart.areaPoints} fill={`url(#${gradientId})`} />
-        <polyline points={chart.linePoints} fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinejoin="miter" strokeLinecap="square" vectorEffect="non-scaling-stroke" />
+
+        {/* 基準線は最大値 (破線) とベースラインの 2 本だけに絞る */}
+        <line x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_RIGHT} y2={CHART_TOP} stroke="rgba(255,255,255,0.18)" strokeWidth="0.8" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+        <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="rgba(255,255,255,0.3)" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+
+        <path d={chart.areaPath} fill={`url(#${gradientId})`} />
+        <path d={chart.linePath} fill="none" stroke="#67e8f9" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+
+        {/* 最大値の月に打点する。長さ 0 のパス + 丸キャップなので縦横比が歪んでも真円のまま */}
+        {chart.maxPoint && (
+          <>
+            <path d={`M ${round2(chart.maxPoint.x)},${round2(chart.maxPoint.y)} l 0.001,0`} stroke="rgba(34,211,238,0.35)" strokeWidth="8" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            <path d={`M ${round2(chart.maxPoint.x)},${round2(chart.maxPoint.y)} l 0.001,0`} stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          </>
+        )}
+
         {labelIndexes.map((index) => {
           const point = chart.points[index];
           if (!point) return null;
           return (
-            <text key={`label-${index}`} x={point.x} y="50" textAnchor={index === 0 ? 'start' : index === series.length - 1 ? 'end' : 'middle'} fill="rgba(255,255,255,0.78)" fontSize="4.5" fontWeight="700">
+            <text key={`label-${index}`} x={point.x} y="50.5" textAnchor={index === 0 ? 'start' : index === series.length - 1 ? 'end' : 'middle'} fill="rgba(255,255,255,0.66)" fontSize="4.5" fontWeight="700">
               {point.label}
             </text>
           );
