@@ -320,6 +320,8 @@ export default function App() {
   const logoTapTimeoutRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
   const [isSalesChartMode, setIsSalesChartMode] = useState(false);
+  // 各コマ右上の介援隊コードバッジ表示 (詳細・全体どちらにも効く)
+  const [showPanelCodes, setShowPanelCodes] = useState(true);
   const [isCatalogDiffMode, setIsCatalogDiffMode] = useState(false);
   const [isSalesLookupOpen, setIsSalesLookupOpen] = useState(false);
   const [isLabelSelectionMode, setIsLabelSelectionMode] = useState(false);
@@ -3718,6 +3720,8 @@ export default function App() {
           isPageSelectionMode={isPageSelectionMode}
           isSalesMode={isSalesMode}
           isSalesChartMode={isSalesChartMode}
+          showPanelCodes={showPanelCodes}
+          onTogglePanelCodes={() => setShowPanelCodes((current) => !current)}
           salesPeriodOptions={SALES_PERIOD_OPTIONS}
           activeSalesPeriod={activeSalesPeriod}
           salesPeriodMeta={salesPeriodMeta}
@@ -3945,6 +3949,7 @@ export default function App() {
                 onChangeGenre: handleChangeGenre,
                 onPreviewImage: handlePreviewAssignedImage
               }}
+              showPanelCodes={showPanelCodes}
               sales={{
                 isMode: isSalesMode,
                 showMonthlyCharts: isSalesChartMode,

@@ -67,6 +67,7 @@ const Panel = React.memo(({
   onStartPointerDrag,
   isSalesMode,
   showMonthlySalesForAll = false,
+  showPanelCode = true,
   salesData,
   onHoverSales,
   onLeaveSales,
@@ -1080,7 +1081,7 @@ const Panel = React.memo(({
           <div className="text-[10px] px-1.5 py-0.5 font-bold rounded-br-sm shadow-sm" style={{ background: 'var(--m3-surface-variant)', color: 'var(--m3-on-surface-variant)' }}>
             {globalNumber}
           </div>
-          {data.code && (
+          {data.code && showPanelCode && (
             <div className="text-[10px] px-1.5 py-0.5 font-bold border-r border-b shadow-sm font-mono" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)', borderColor: 'var(--m3-outline-variant)' }}>
               {data.code}
             </div>

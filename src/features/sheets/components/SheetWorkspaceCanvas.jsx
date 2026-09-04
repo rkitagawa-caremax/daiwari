@@ -14,6 +14,7 @@ const SheetWorkspaceCanvas = ({
   editing,
   sales,
   changes = { isMode: false, byCode: {} },
+  showPanelCodes = true,
   imageDataById
 }) => (
   <div
@@ -114,6 +115,7 @@ const SheetWorkspaceCanvas = ({
                 onStartPointerDrag={editing.onStartPointerDrag}
                 isSalesMode={sales.isMode}
                 showMonthlySalesForAll={sales.showMonthlyCharts}
+                showPanelCode={showPanelCodes}
                 salesData={sales.data}
                 onHoverSales={sales.onHover}
                 onLeaveSales={sales.onLeave}

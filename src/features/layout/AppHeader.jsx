@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart2, ChartSpline, FileDiff, Grid, List, LogOut, Redo2, Undo2 } from 'lucide-react';
+import { BarChart2, ChartSpline, FileDiff, Grid, Hash, List, LogOut, Redo2, Undo2 } from 'lucide-react';
 
 // 画面最上部のナビゲーションバー (M3 Expressive Style)。
 // 左: ロゴ / ログイン情報 / 戻る・進む / 詳細・全体 切替 / (選択モード時) 一括操作 / (詳細時) 実績モード
@@ -14,6 +14,8 @@ const AppHeader = ({
   onRedo,
   viewMode,
   onSelectViewMode,
+  showPanelCodes,
+  onTogglePanelCodes,
   isPageSelectionMode,
   isSalesMode,
   isSalesChartMode,
@@ -118,6 +120,22 @@ const AppHeader = ({
         </button>
       </div>
 
+      {/* 介援隊コード表示の切替 — 詳細・全体どちらでも常設 */}
+      <button
+        type="button"
+        onClick={onTogglePanelCodes}
+        onMouseEnter={(event) => onShowQuickHelp(event, '介援隊コード表示', '各コマ右上に表示している介援隊コードの表示/非表示を切り替えます。')}
+        onMouseLeave={onHideQuickHelp}
+        className={`ml-1 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${showPanelCodes
+          ? 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+          : 'border-slate-500 bg-slate-600 text-white shadow-md'}`}
+        aria-pressed={!showPanelCodes}
+        title={showPanelCodes ? '介援隊コードを非表示にする' : '介援隊コードを表示する'}
+      >
+        <Hash size={16} strokeWidth={2.6} />
+        <span className="hidden xl:inline">コード {showPanelCodes ? 'ON' : 'OFF'}</span>
+      </button>
+
       {selectionToolbar}
 
       {/* 実績モード Toggle - 詳細表示時のみ */}
@@ -174,7 +192,7 @@ const AppHeader = ({
                       : `${period.description}の売上データはまだ取り込まれていません。設定から取り込めます。`)}
                     onMouseLeave={onHideQuickHelp}
                     className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors ${isActive
-                      ? 'bg-emerald-500 text-white shadow-sm'
+                      ? `${isSalesChartMode ? 'bg-cyan-600' : 'bg-emerald-500'} text-white shadow-sm`
                       : hasData ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
                     aria-pressed={isActive}
                     title={hasData ? `${period.label}の売上を表示` : `${period.label}のデータは未取り込み`}
