@@ -44,7 +44,7 @@ const HiddenImportModal = React.memo(({
             className="w-full m3-btn-tonal flex items-center justify-center gap-2"
           >
             <TrendingUp size={16} />
-            販売数量CSVを取り込む
+            販売実績CSVを取り込む
           </button>
 
           <button

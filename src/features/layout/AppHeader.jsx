@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart2, ChartSpline, FileDiff, Grid, Hash, List, LogOut, Redo2, Undo2 } from 'lucide-react';
+import { BarChart2, ChartSpline, FileDiff, Grid, Hash, List, LogOut, PieChart, Redo2, Undo2 } from 'lucide-react';
 
 // 画面最上部のナビゲーションバー (M3 Expressive Style)。
 // 左: ロゴ / ログイン情報 / 戻る・進む / 詳細・全体 切替 / (選択モード時) 一括操作 / (詳細時) 実績モード
@@ -19,6 +19,7 @@ const AppHeader = ({
   isPageSelectionMode,
   isSalesMode,
   isSalesChartMode,
+  salesDisplayMode = 'quantity',
   isSalesLookupOpen,
   salesPeriodOptions = [],
   activeSalesPeriod,
@@ -27,6 +28,7 @@ const AppHeader = ({
   onSelectSalesPeriod,
   onSalesModeClick,
   onSalesChartModeClick,
+  onGrossProfitModeClick,
   onSalesModeLongPressStart,
   onSalesModeLongPressEnd,
   catalogChangeCount,
@@ -153,13 +155,13 @@ const AppHeader = ({
             className={`ml-2 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300
               ${isSalesLookupOpen
                 ? 'animate-pulse border-violet-500 bg-violet-500/15 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)]'
-                : isSalesMode
+                : isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode
                   ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
                   : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
             title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
           >
             <BarChart2 size={18} />
-            <span className="hidden xl:inline">実績モード {isSalesMode ? 'ON' : 'OFF'}</span>
+            <span className="hidden xl:inline">実績モード {isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode ? 'ON' : 'OFF'}</span>
           </button>
 
           <button
@@ -177,11 +179,29 @@ const AppHeader = ({
             <span className="hidden xl:inline">月別グラフ {isSalesChartMode ? 'ON' : 'OFF'}</span>
           </button>
 
+          <button
+            type="button"
+            onClick={onGrossProfitModeClick}
+            onMouseEnter={(event) => onShowQuickHelp(event, '粗利データ', 'コマごとの粗利率を円グラフ、粗利総額を金額で表示します。')}
+            onMouseLeave={onHideQuickHelp}
+            className={`ml-1 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isSalesMode && salesDisplayMode === 'grossProfit'
+              ? 'border-yellow-400 bg-yellow-300/20 text-amber-700 shadow-[0_0_18px_rgba(250,204,21,0.55)]'
+              : 'border-slate-200 bg-white text-amber-600 hover:border-yellow-300 hover:bg-yellow-50'}`}
+            aria-pressed={isSalesMode && salesDisplayMode === 'grossProfit'}
+            title="コマ上に粗利率と粗利総額を表示"
+          >
+            <PieChart size={18} strokeWidth={2.5} />
+            <span className="hidden xl:inline">粗利データ</span>
+          </button>
+
           {isSalesMode && salesPeriodOptions.length > 1 && (
             <div className="ml-1 flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-0.5" role="group" aria-label="売上データの対象期間">
               {salesPeriodOptions.map((period) => {
                 const isActive = period.id === activeSalesPeriod;
-                const hasData = !!salesPeriodMeta?.[period.id];
+                const periodMeta = salesPeriodMeta?.[period.id];
+                const hasData = salesDisplayMode === 'grossProfit'
+                  ? (periodMeta?.metrics?.grossProfitAmount?.codes || 0) > 0
+                  : !!periodMeta;
                 return (
                   <button
                     key={period.id}
@@ -192,7 +212,7 @@ const AppHeader = ({
                       : `${period.description}の売上データはまだ取り込まれていません。設定から取り込めます。`)}
                     onMouseLeave={onHideQuickHelp}
                     className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors ${isActive
-                      ? `${isSalesChartMode ? 'bg-cyan-600' : 'bg-emerald-500'} text-white shadow-sm`
+                      ? `${salesDisplayMode === 'grossProfit' ? 'bg-yellow-400 text-amber-950 shadow-[0_0_12px_rgba(250,204,21,0.5)]' : isSalesChartMode ? 'bg-cyan-600 text-white' : 'bg-emerald-500 text-white'} shadow-sm`
                       : hasData ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
                     aria-pressed={isActive}
                     title={hasData ? `${period.label}の売上を表示` : `${period.label}のデータは未取り込み`}

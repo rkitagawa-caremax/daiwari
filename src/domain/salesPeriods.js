@@ -1,3 +1,5 @@
+import { summarizeSalesDataMetrics } from './salesData.js';
+
 export const SALES_PERIOD_CURRENT = 'current';
 export const SALES_PERIOD_PREVIOUS = 'previous';
 export const SALES_PERIOD_TWO_PREVIOUS = 'twoPrevious';
@@ -55,14 +57,18 @@ export const getSalesDataMonthLabels = (salesData) => {
   return [];
 };
 
-export const buildSalesPeriodMeta = ({ salesData, fileName = '', updatedAt = new Date() } = {}) => ({
-  fileName,
-  updatedAt,
-  totalItems: Object.keys(salesData || {}).length,
-  totalRows: Object.values(salesData || {}).reduce(
-    (total, items) => total + (Array.isArray(items) ? items.length : 0),
-    0
-  ),
-  monthLabels: getSalesDataMonthLabels(salesData)
-});
-
+export const buildSalesPeriodMeta = ({ salesData, fileName = '', sourceFiles = {}, updatedAt = new Date() } = {}) => {
+  const metrics = summarizeSalesDataMetrics(salesData);
+  return {
+    fileName,
+    sourceFiles,
+    updatedAt,
+    totalItems: Object.keys(salesData || {}).length,
+    totalRows: Object.values(salesData || {}).reduce(
+      (total, items) => total + (Array.isArray(items) ? items.length : 0),
+      0
+    ),
+    monthLabels: getSalesDataMonthLabels(salesData),
+    metrics
+  };
+};

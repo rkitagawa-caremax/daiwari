@@ -171,6 +171,12 @@ export const buildEdgeCatalogProducts = ({ images = [], sheets = [], salesData =
     const details = resolved.details || {};
     const salesRows = code && Array.isArray(salesData?.[code]) ? salesData[code] : [];
     const assignments = getImageAssignments(image, code, assignmentMaps);
+    const quantityMatched = salesRows.some((row) => Object.hasOwn(row || {}, 'count'));
+    const salesAmountMatched = salesRows.some((row) => Object.hasOwn(row || {}, 'salesAmount'));
+    const grossProfitMatched = salesRows.some((row) => Object.hasOwn(row || {}, 'grossProfitAmount'));
+    const salesCount = salesRows.reduce((total, row) => total + (Number(row?.count) || 0), 0);
+    const salesAmount = salesRows.reduce((total, row) => total + (Number(row?.salesAmount) || 0), 0);
+    const grossProfitAmount = salesRows.reduce((total, row) => total + (Number(row?.grossProfitAmount) || 0), 0);
     const product = {
       id: image.id || `${code || 'unknown'}-${imageIndex}`,
       imageId: image.id || null,
@@ -197,12 +203,31 @@ export const buildEdgeCatalogProducts = ({ images = [], sheets = [], salesData =
       sourcePage: image.sourcePage ?? '',
       assignments,
       salesMatched: salesRows.length > 0,
-      salesCount: salesRows.reduce((total, row) => total + (Number(row?.count) || 0), 0),
+      quantityMatched,
+      salesAmountMatched,
+      grossProfitMatched,
+      salesCount,
+      salesAmount,
+      grossProfitAmount,
+      grossMargin: salesAmountMatched && grossProfitMatched && salesAmount !== 0 ? grossProfitAmount / salesAmount : null,
       // 台割アドバイス (トレンド分析) 用に月別合算も持たせる
       monthlySales: buildMonthlySalesSeries(salesRows).map((entry) => ({ label: entry.label, count: entry.count })),
       salesNames: unique(salesRows.map((row) => String(row?.name || '').trim())),
       salesSpecs: unique(salesRows.map((row) => String(row?.spec || '').trim()))
     };
+    const catalogTextSignals = [
+      String(image.productName || '').trim(),
+      product.itemNumber,
+      product.catchCopy,
+      product.specifications.length > 0 ? product.specifications.join(' ') : '',
+      product.compositionDetails.length > 0 || product.materialDetails.length > 0
+        ? [...product.compositionDetails, ...product.materialDetails].join(' ')
+        : '',
+      product.sourceText.length >= 40 ? product.sourceText : ''
+    ];
+    product.catalogTextFieldCount = catalogTextSignals.filter(Boolean).length;
+    product.catalogTextCompleteness = product.catalogTextFieldCount / catalogTextSignals.length;
+    product.catalogText = unique(catalogTextSignals).join('。');
     product.searchText = makeSearchText(product);
     products.push(product);
   });

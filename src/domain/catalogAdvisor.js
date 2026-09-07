@@ -1,7 +1,7 @@
 import { cosineSimilarity } from './edgeAiCatalog.js';
 
 // --- 台割全体のアドバイス生成 (端末内・決定的な分析) ---
-// LLM は使わず、掲載中の商品 (buildEdgeCatalogProducts の出力) と販売数量実績・埋め込みベクトルから
+// LLM は使わず、掲載中の商品 (buildEdgeCatalogProducts の出力) と販売実績・誌面テキスト・埋め込みベクトルから
 // ABC 分析 / フェアシェア / カニバリゼーション / 価格帯カバレッジ / 直近トレンドを計算し、
 // 経営・マーケティング理論に紐づけた推奨アクションへ変換する。
 
@@ -66,6 +66,15 @@ export const consolidateAdvisorProducts = (products = []) => {
       current.salesMatched = current.salesMatched === true || product.salesMatched === true;
     }
     if ((product.salesCount || 0) > (current.salesCount || 0)) current.salesCount = product.salesCount;
+    if ((product.salesAmount || 0) > (current.salesAmount || 0)) current.salesAmount = product.salesAmount;
+    if ((product.grossProfitAmount || 0) > (current.grossProfitAmount || 0)) current.grossProfitAmount = product.grossProfitAmount;
+    ['quantityMatched', 'salesAmountMatched', 'grossProfitMatched'].forEach((keyName) => {
+      if (current[keyName] != null || product[keyName] != null) {
+        current[keyName] = current[keyName] === true || product[keyName] === true;
+      }
+    });
+    current.catalogTextCompleteness = Math.max(current.catalogTextCompleteness || 0, product.catalogTextCompleteness || 0);
+    current.catalogText = [...new Set([current.catalogText, product.catalogText].filter(Boolean))].join(' ');
     if ((product.monthlySales || []).length > (current.monthlySales || []).length) current.monthlySales = product.monthlySales;
     if (!current.priceIncludingTax && product.priceIncludingTax) current.priceIncludingTax = product.priceIncludingTax;
     if (!current.name && product.name) current.name = product.name;
@@ -93,6 +102,37 @@ const jaccard = (left, right) => {
 };
 
 const productLabel = (product) => product.name || product.itemNumber || product.code || '(名称未取得)';
+
+const PERFORMANCE_METRICS = Object.freeze([
+  Object.freeze({ id: 'quantity', valueKey: 'salesCount', matchedKey: 'quantityMatched', weight: 0.3 }),
+  Object.freeze({ id: 'salesAmount', valueKey: 'salesAmount', matchedKey: 'salesAmountMatched', weight: 0.3 }),
+  Object.freeze({ id: 'grossProfitAmount', valueKey: 'grossProfitAmount', matchedKey: 'grossProfitMatched', weight: 0.4 })
+]);
+
+const productHasMetric = (product, metric) => (
+  product?.[metric.matchedKey] === true
+  || (product?.[metric.matchedKey] == null
+    && Number.isFinite(Number(product?.[metric.valueKey]))
+    && Number(product?.[metric.valueKey]) !== 0)
+);
+
+const resolveAvailablePerformanceMetrics = (products) => PERFORMANCE_METRICS.filter((metric) => (
+  products.some((product) => productHasMetric(product, metric))
+));
+
+const performanceMetricWeights = (metrics) => {
+  const totalWeight = metrics.reduce((sum, metric) => sum + metric.weight, 0) || 1;
+  return Object.fromEntries(metrics.map((metric) => [metric.id, metric.weight / totalWeight]));
+};
+
+const productPerformanceBasis = (product) => {
+  const candidates = [
+    { metric: 'grossProfitAmount', label: '粗利額', value: Number(product?.grossProfitAmount) || 0, matched: productHasMetric(product, PERFORMANCE_METRICS[2]) },
+    { metric: 'salesAmount', label: '売上額', value: Number(product?.salesAmount) || 0, matched: productHasMetric(product, PERFORMANCE_METRICS[1]) },
+    { metric: 'quantity', label: '販売数量', value: Number(product?.salesCount) || 0, matched: productHasMetric(product, PERFORMANCE_METRICS[0]) }
+  ];
+  return candidates.find((candidate) => candidate.matched) || candidates[2];
+};
 
 // --- ABC 分析 (パレート) ---
 export const buildAbcAnalysis = (products) => {
@@ -167,31 +207,93 @@ export const buildPanelQuantityAnalysis = (products) => {
   return { rows, highest, lowest, expansionCandidates, reductionCandidates, averagePerSpace };
 };
 
-// --- ジャンル別のフェアシェア (誌面シェア vs 販売数量シェア) ---
+// --- 商品コマ別の総合実績 (数量・売上額・粗利額を、利用可能な指標だけで統合) ---
+export const buildPanelPerformanceAnalysis = (products) => {
+  const availableMetrics = resolveAvailablePerformanceMetrics(products);
+  const weights = performanceMetricWeights(availableMetrics);
+  const metricTotals = Object.fromEntries(availableMetrics.map((metric) => [
+    metric.id,
+    products.reduce((sum, product) => sum + (productHasMetric(product, metric) ? Math.max(0, Number(product[metric.valueKey]) || 0) : 0), 0)
+  ]));
+  const rows = products
+    .filter((product) => availableMetrics.some((metric) => productHasMetric(product, metric)))
+    .map((product) => {
+      const spaceUnits = (product.assignments || []).reduce((sum, assignment) => sum + assignmentSpace(assignment), 0) || 1;
+      const metricShares = {};
+      let usedWeight = 0;
+      let weightedShare = 0;
+      availableMetrics.forEach((metric) => {
+        if (!productHasMetric(product, metric) || metricTotals[metric.id] <= 0) return;
+        metricShares[metric.id] = Math.max(0, Number(product[metric.valueKey]) || 0) / metricTotals[metric.id];
+        weightedShare += metricShares[metric.id] * weights[metric.id];
+        usedWeight += weights[metric.id];
+      });
+      return {
+        id: product.id,
+        code: product.code,
+        name: productLabel(product),
+        quantity: Number(product.salesCount) || 0,
+        salesAmount: Number(product.salesAmount) || 0,
+        grossProfitAmount: Number(product.grossProfitAmount) || 0,
+        grossMargin: Number(product.salesAmount) !== 0 ? (Number(product.grossProfitAmount) || 0) / Number(product.salesAmount) : null,
+        spaceUnits,
+        metricShares,
+        performanceShare: usedWeight > 0 ? weightedShare / usedWeight : 0,
+        genre: primaryGenre(product),
+        assignment: product.assignments?.[0] || null
+      };
+    });
+  const totalSpaceUnits = rows.reduce((sum, row) => sum + row.spaceUnits, 0);
+  rows.forEach((row) => {
+    row.panelShare = totalSpaceUnits > 0 ? row.spaceUnits / totalSpaceUnits : 0;
+    row.fairShare = row.panelShare > 0 ? row.performanceShare / row.panelShare : 0;
+  });
+  const highest = [...rows].sort((a, b) => b.performanceShare - a.performanceShare || b.fairShare - a.fairShare).slice(0, T.maxListItems);
+  const lowest = [...rows].sort((a, b) => a.performanceShare - b.performanceShare || a.fairShare - b.fairShare).slice(0, T.maxListItems);
+  const expansionCandidates = rows.filter((row) => row.fairShare >= T.underAllocatedFairShare && row.spaceUnits <= 4)
+    .sort((a, b) => b.fairShare - a.fairShare).slice(0, 3);
+  const reductionCandidates = rows.filter((row) => row.spaceUnits >= 2 && row.fairShare <= T.overAllocatedFairShare)
+    .sort((a, b) => a.fairShare - b.fairShare).slice(0, 3);
+  return { rows, highest, lowest, expansionCandidates, reductionCandidates, availableMetrics: availableMetrics.map((metric) => metric.id), weights, metricTotals };
+};
+
+// --- ジャンル別のフェアシェア (誌面シェア vs 数量・売上額・粗利額の総合実績シェア) ---
 export const buildGenreBalance = (products) => {
   const byGenre = new Map();
   let totalSpaceUnits = 0;
   let totalSales = 0;
+  let totalSalesAmount = 0;
+  let totalGrossProfitAmount = 0;
+  const availableMetrics = resolveAvailablePerformanceMetrics(products);
+  const weights = performanceMetricWeights(availableMetrics);
   products.forEach((product) => {
     const assignments = product.assignments?.length ? product.assignments : [{ genre: '未設定' }];
     const productSpace = assignments.reduce((sum, assignment) => sum + assignmentSpace(assignment), 0);
     assignments.forEach((assignment) => {
       const genre = assignment.genre || '未設定';
-      if (!byGenre.has(genre)) byGenre.set(genre, { genre, spaceUnits: 0, placements: 0, sales: 0, productIds: new Set() });
+      if (!byGenre.has(genre)) byGenre.set(genre, { genre, spaceUnits: 0, placements: 0, sales: 0, salesAmount: 0, grossProfitAmount: 0, productIds: new Set() });
       const entry = byGenre.get(genre);
       const spaceUnits = assignmentSpace(assignment);
       entry.spaceUnits += spaceUnits;
       entry.placements++;
       entry.sales += (product.salesCount || 0) * (spaceUnits / productSpace);
+      entry.salesAmount += (product.salesAmount || 0) * (spaceUnits / productSpace);
+      entry.grossProfitAmount += (product.grossProfitAmount || 0) * (spaceUnits / productSpace);
       entry.productIds.add(product.id);
       totalSpaceUnits += spaceUnits;
     });
     totalSales += product.salesCount || 0;
+    totalSalesAmount += product.salesAmount || 0;
+    totalGrossProfitAmount += product.grossProfitAmount || 0;
   });
   const rows = [...byGenre.values()].map((entry) => {
     const panelShare = totalSpaceUnits > 0 ? entry.spaceUnits / totalSpaceUnits : 0;
     const salesShare = totalSales > 0 ? entry.sales / totalSales : 0;
-    const fairShare = panelShare > 0 ? salesShare / panelShare : 0;
+    const salesAmountShare = totalSalesAmount > 0 ? entry.salesAmount / totalSalesAmount : 0;
+    const grossProfitShare = totalGrossProfitAmount > 0 ? entry.grossProfitAmount / totalGrossProfitAmount : 0;
+    const metricShares = { quantity: salesShare, salesAmount: salesAmountShare, grossProfitAmount: grossProfitShare };
+    const performanceShare = availableMetrics.reduce((sum, metric) => sum + metricShares[metric.id] * weights[metric.id], 0);
+    const fairShare = panelShare > 0 ? performanceShare / panelShare : 0;
     return {
       genre: entry.genre,
       panels: entry.spaceUnits,
@@ -200,15 +302,67 @@ export const buildGenreBalance = (products) => {
       products: entry.productIds.size,
       panelShare,
       salesShare,
+      quantityShare: salesShare,
+      salesAmountShare,
+      grossProfitShare,
+      performanceShare,
       fairShare,
       sales: entry.sales,
       salesPerSpace: entry.spaceUnits > 0 ? entry.sales / entry.spaceUnits : 0,
-      status: entry.spaceUnits < T.minGenrePanels || totalSales === 0
+      status: entry.spaceUnits < T.minGenrePanels || availableMetrics.length === 0
         ? 'ok'
         : fairShare < T.overAllocatedFairShare ? 'over' : fairShare > T.underAllocatedFairShare ? 'under' : 'ok'
     };
-  }).sort((a, b) => b.sales - a.sales);
-  return { rows, totalPanels: totalSpaceUnits, totalSpaceUnits, totalSales };
+  }).sort((a, b) => b.performanceShare - a.performanceShare);
+  return { rows, totalPanels: totalSpaceUnits, totalSpaceUnits, totalSales, totalSalesAmount, totalGrossProfitAmount, availableMetrics: availableMetrics.map((metric) => metric.id), weights };
+};
+
+export const buildProfitabilityAnalysis = (products) => {
+  const rows = products
+    .filter((product) => productHasMetric(product, PERFORMANCE_METRICS[1]) && productHasMetric(product, PERFORMANCE_METRICS[2]) && Number(product.salesAmount) > 0)
+    .map((product) => ({
+      id: product.id,
+      code: product.code,
+      name: productLabel(product),
+      salesAmount: Number(product.salesAmount) || 0,
+      grossProfitAmount: Number(product.grossProfitAmount) || 0,
+      grossMargin: (Number(product.grossProfitAmount) || 0) / Number(product.salesAmount),
+      assignment: product.assignments?.[0] || null
+    }));
+  const totalSalesAmount = rows.reduce((sum, row) => sum + row.salesAmount, 0);
+  const totalGrossProfitAmount = rows.reduce((sum, row) => sum + row.grossProfitAmount, 0);
+  const grossMargin = totalSalesAmount > 0 ? totalGrossProfitAmount / totalSalesAmount : null;
+  const lowMarginThreshold = grossMargin == null ? null : Math.max(0.05, grossMargin * 0.6);
+  const lowMargin = lowMarginThreshold == null ? [] : rows
+    .filter((row) => row.grossMargin < lowMarginThreshold && row.salesAmount >= (totalSalesAmount / Math.max(1, rows.length)))
+    .sort((a, b) => a.grossMargin - b.grossMargin || b.salesAmount - a.salesAmount)
+    .slice(0, T.maxListItems);
+  const highGrossProfit = [...rows].sort((a, b) => b.grossProfitAmount - a.grossProfitAmount).slice(0, T.maxListItems);
+  return { rows, totalSalesAmount, totalGrossProfitAmount, grossMargin, lowMarginThreshold, lowMargin, highGrossProfit };
+};
+
+export const buildCatalogTextAnalysis = (products, panelPerformance = null) => {
+  const performanceById = new Map((panelPerformance?.rows || []).map((row) => [row.id, row.performanceShare]));
+  const averagePerformanceShare = panelPerformance?.rows?.length ? 1 / panelPerformance.rows.length : 0;
+  const rows = products.map((product) => {
+    const fallbackSignals = [product.name, product.itemNumber, product.catchCopy, product.sourceText, product.searchText].filter((value) => String(value || '').trim()).length;
+    const completeness = Number.isFinite(Number(product.catalogTextCompleteness))
+      ? Math.max(0, Math.min(1, Number(product.catalogTextCompleteness)))
+      : Math.min(1, fallbackSignals / 5);
+    return {
+      id: product.id,
+      code: product.code,
+      name: productLabel(product),
+      completeness,
+      performanceShare: performanceById.get(product.id) || 0,
+      assignment: product.assignments?.[0] || null
+    };
+  });
+  const averageCompleteness = rows.length > 0 ? rows.reduce((sum, row) => sum + row.completeness, 0) / rows.length : 0;
+  const coverage = rows.length > 0 ? rows.filter((row) => row.completeness >= 0.5).length / rows.length : 0;
+  const weakHighValue = rows.filter((row) => row.completeness < 0.5 && row.performanceShare >= averagePerformanceShare)
+    .sort((a, b) => b.performanceShare - a.performanceShare).slice(0, T.maxListItems);
+  return { rows, coverage, averageCompleteness, weakHighValue };
 };
 
 // --- カニバリゼーション候補 (同ジャンル内の近似商品ペア) ---
@@ -224,7 +378,7 @@ export const buildCannibalizationPairs = (products, vectorsById = null) => {
   const pairs = [];
   groups.forEach((group) => {
     const candidates = group.length > 300
-      ? [...group].sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0)).slice(0, 300)
+      ? [...group].sort((a, b) => productPerformanceBasis(b).value - productPerformanceBasis(a).value).slice(0, 300)
       : group;
     const tokens = method === 'lexical' ? candidates.map((p) => tokenize(p.searchText)) : null;
     for (let i = 0; i < candidates.length; i++) {
@@ -242,16 +396,26 @@ export const buildCannibalizationPairs = (products, vectorsById = null) => {
           similarity = jaccard(tokens[i], tokens[j]);
           if (similarity < T.cannibalJaccard) continue;
         }
-        const [strong, weak] = (left.salesCount || 0) >= (right.salesCount || 0) ? [left, right] : [right, left];
+        const leftBasis = productPerformanceBasis(left);
+        const rightBasis = productPerformanceBasis(right);
+        const comparableMetric = leftBasis.metric === rightBasis.metric ? leftBasis.metric : 'quantity';
+        const metricConfig = PERFORMANCE_METRICS.find((metric) => metric.id === comparableMetric) || PERFORMANCE_METRICS[0];
+        const leftValue = Number(left[metricConfig.valueKey]) || 0;
+        const rightValue = Number(right[metricConfig.valueKey]) || 0;
+        const [strong, weak] = leftValue >= rightValue ? [left, right] : [right, left];
+        const strongValue = Math.max(leftValue, rightValue);
+        const weakValue = Math.min(leftValue, rightValue);
         const strongPrice = toPrice(strong.priceIncludingTax);
         const weakPrice = toPrice(weak.priceIncludingTax);
         if (strongPrice && weakPrice && Math.max(strongPrice, weakPrice) / Math.min(strongPrice, weakPrice) > T.maxCannibalPriceRatio) continue;
-        if ((strong.salesCount || 0) < T.minStrongSales) continue;
-        if ((weak.salesCount || 0) > (strong.salesCount || 0) * T.weakSalesRatio) continue;
+        if (strongValue < (comparableMetric === 'quantity' ? T.minStrongSales : 1)) continue;
+        if (weakValue > strongValue * T.weakSalesRatio) continue;
         pairs.push({
           genre: primaryGenre(strong),
-          strong: { id: strong.id, code: strong.code, name: productLabel(strong), salesCount: strong.salesCount || 0 },
-          weak: { id: weak.id, code: weak.code, name: productLabel(weak), salesCount: weak.salesCount || 0 },
+          basis: comparableMetric,
+          basisLabel: metricConfig.id === 'grossProfitAmount' ? '粗利額' : metricConfig.id === 'salesAmount' ? '売上額' : '販売数量',
+          strong: { id: strong.id, code: strong.code, name: productLabel(strong), salesCount: strong.salesCount || 0, salesAmount: strong.salesAmount || 0, grossProfitAmount: strong.grossProfitAmount || 0, performanceValue: strongValue },
+          weak: { id: weak.id, code: weak.code, name: productLabel(weak), salesCount: weak.salesCount || 0, salesAmount: weak.salesAmount || 0, grossProfitAmount: weak.grossProfitAmount || 0, performanceValue: weakValue },
           similarity,
           method
         });
@@ -333,7 +497,7 @@ export const buildSalesMomentum = (products) => {
 const percent = (value) => `${Math.round(value * 100)}%`;
 
 // 分析結果 → 優先度付きの推奨アクション (根拠となる理論を明記する)
-export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalization, priceBands, momentum, salesCoverage }) => {
+export const buildAdvisorActions = ({ abc, panelPerformance, balance, cannibalization, priceBands, momentum, profitability, textAnalysis, dataQuality }) => {
   const actions = [];
 
   if (abc.zeroSalesCount >= 3) {
@@ -347,27 +511,27 @@ export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalizati
     });
   }
 
-  if (panelQuantity.expansionCandidates.length > 0) {
-    const names = panelQuantity.expansionCandidates.map((row) => row.name).join('、');
+  if (panelPerformance.expansionCandidates.length > 0) {
+    const names = panelPerformance.expansionCandidates.map((row) => row.name).join('、');
     actions.push({
       priority: 'mid',
       category: 'コマ配分',
-      metric: `${panelQuantity.expansionCandidates.length}商品`,
-      title: '販売数量の多い商品コマを広げる',
-      detail: `${names} は、使用面積に対して販売数量が多い商品です。大コマ化や目立つ位置への移動を検討してください。`,
-      theory: '数量スペース生産性: 1/16コマ当たりの販売数量が高い商品へ誌面を配分すると、限られたページを効率よく活用できます。'
+      metric: `${panelPerformance.expansionCandidates.length}商品`,
+      title: '総合実績の高い商品コマを広げる',
+      detail: `${names} は、使用面積に対する数量・売上額・粗利額の総合実績が高い商品です。大コマ化や目立つ位置への移動を検討してください。`,
+      theory: '総合スペース生産性: 利用できる実績指標を統合し、1/16コマ当たりの成果が高い商品へ誌面を配分します。'
     });
   }
 
-  if (panelQuantity.reductionCandidates.length > 0) {
-    const names = panelQuantity.reductionCandidates.map((row) => row.name).join('、');
+  if (panelPerformance.reductionCandidates.length > 0) {
+    const names = panelPerformance.reductionCandidates.map((row) => row.name).join('、');
     actions.push({
       priority: 'mid',
       category: 'コマ配分',
-      metric: `${panelQuantity.reductionCandidates.length}商品`,
-      title: '販売数量の少ない大コマを見直す',
-      detail: `${names} は、使用面積に対して販売数量が少ない商品です。小コマ化し、数量の多い商品へ面積を振り替える候補です。`,
-      theory: '数量スペース生産性: 販売数量÷誌面面積で比較し、低効率な大コマを縮小することでページ全体の効率を改善します。'
+      metric: `${panelPerformance.reductionCandidates.length}商品`,
+      title: '総合実績の低い大コマを見直す',
+      detail: `${names} は、使用面積に対する総合実績が低い商品です。小コマ化し、実績の高い商品へ面積を振り替える候補です。`,
+      theory: '総合スペース生産性: 数量だけでなく売上額と粗利額も加味し、低効率な大コマを見直します。'
     });
   }
 
@@ -378,7 +542,7 @@ export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalizati
       category: '重複',
       metric: `${cannibalization.length}組`,
       title: '役割が重なる商品を整理',
-      detail: `最優先候補は「${pair.weak.name}」と「${pair.strong.name}」。同ジャンル「${pair.genre}」で類似度${percent(pair.similarity)}、実績は ${pair.weak.salesCount.toLocaleString()} vs ${pair.strong.salesCount.toLocaleString()} です。価格差も考慮したうえで、弱い方の差し替えを検討してください。`,
+      detail: `最優先候補は「${pair.weak.name}」と「${pair.strong.name}」。同ジャンル「${pair.genre}」で類似度${percent(pair.similarity)}、${pair.basisLabel}は ${pair.weak.performanceValue.toLocaleString()} vs ${pair.strong.performanceValue.toLocaleString()} です。誌面テキストと価格差も考慮したうえで、弱い方の差し替えを検討してください。`,
       theory: 'カニバリゼーション回避と「選択のパラドックス」: 近似選択肢の並列は1商品あたりの購買率を下げます。差別化軸 (価格・サイズ・機能) を明確に分けるのが定石です。'
     });
   }
@@ -389,8 +553,8 @@ export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalizati
       category: '誌面配分',
       metric: `効率 ${row.fairShare.toFixed(1)}×`,
       title: `「${row.genre}」は誌面が不足気味です`,
-      detail: `販売数量シェア${percent(row.salesShare)}に対し誌面面積は${percent(row.panelShare)}。数量実績に対して露出が少ないため、増コマ・大コマ化を検討できます。`,
-      theory: 'フェアシェア理論: 露出シェアを販売数量シェアに近づけ、数量実績に応じた誌面配分を検討します。'
+      detail: `総合実績シェア${percent(row.performanceShare)}に対し誌面面積は${percent(row.panelShare)}。実績に対して露出が少ないため、増コマ・大コマ化を検討できます。`,
+      theory: 'フェアシェア理論: 露出シェアを数量・売上額・粗利額の総合実績シェアに近づけます。'
     });
   });
   balance.rows.filter((row) => row.status === 'over').slice(0, 2).forEach((row) => {
@@ -399,8 +563,8 @@ export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalizati
       category: '誌面配分',
       metric: `効率 ${row.fairShare.toFixed(1)}×`,
       title: `「${row.genre}」は誌面過剰の可能性があります`,
-      detail: `誌面面積${percent(row.panelShare)}に対し販売数量シェアは${percent(row.salesShare)}。コマを絞り、販売数量の多いジャンルへ譲ることを検討してください。`,
-      theory: '数量スペース生産性: 面積当たり販売数量の低い区画を見直し、限られた誌面を効率的に配分します。'
+      detail: `誌面面積${percent(row.panelShare)}に対し総合実績シェアは${percent(row.performanceShare)}。コマを絞り、実績の高いジャンルへ譲ることを検討してください。`,
+      theory: '総合スペース生産性: 面積当たりの数量・売上額・粗利額が低い区画を見直します。'
     });
   });
 
@@ -447,11 +611,31 @@ export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalizati
       theory: 'パレートの法則 (80:20): 集中は効率的ですが、上位依存はリスク管理とセットで運用します。'
     });
   }
-  if (salesCoverage < 0.5) {
+  if (profitability.lowMargin.length > 0) {
+    actions.push({
+      priority: 'high',
+      category: '収益性',
+      metric: `${profitability.lowMargin.length}商品`,
+      title: '売上額は大きいが粗利率の低い商品を確認',
+      detail: `${profitability.lowMargin.slice(0, 3).map((row) => `${row.name}（粗利率${percent(row.grossMargin)}）`).join('、')} は売上規模に対して粗利率が低めです。価格、仕入条件、掲載面積を併せて見直してください。`,
+      theory: 'GMROIの考え方: 売上規模だけでなく粗利額と占有資源を同時に見ることで、利益に結びつく誌面配分を判断します。'
+    });
+  }
+  if (textAnalysis.weakHighValue.length > 0) {
+    actions.push({
+      priority: 'mid',
+      category: '誌面表現',
+      metric: `${textAnalysis.weakHighValue.length}商品`,
+      title: '実績上位商品の誌面テキストを補強',
+      detail: `${textAnalysis.weakHighValue.slice(0, 3).map((row) => row.name).join('、')} は総合実績が高い一方、商品名・訴求・仕様などのテキスト情報が不足気味です。比較しやすい訴求へ整えてください。`,
+      theory: '情報診断: 高価値商品のベネフィットと差別化軸を明示すると、誌面上での理解と比較を助けます。'
+    });
+  }
+  if (dataQuality.quantityCoverage < 0.5) {
     actions.push({
       priority: 'info',
       category: 'データ品質',
-      metric: percent(salesCoverage),
+      metric: percent(dataQuality.quantityCoverage),
       title: '販売数量データと照合できた商品が半数未満です',
       detail: '介援隊コードの記載漏れや販売数量CSVの期間ずれがあると、この分析の精度が下がります。コード整備と最新CSVの取り込みを先に行うと判断材料が揃います。',
       theory: 'データドリブン経営の前提は計測です。まず照合率を上げることが最も費用対効果の高い一手です。'
@@ -465,17 +649,24 @@ export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalizati
 export const buildAdvisorDataQuality = (products, vectorsById = null) => {
   const count = products.length;
   const ratio = (predicate) => count > 0 ? products.filter(predicate).length / count : 0;
-  const salesCoverage = ratio((product) => product.salesMatched === true || (product.salesMatched == null && (product.salesCount || 0) > 0));
+  const quantityCoverage = ratio((product) => productHasMetric(product, PERFORMANCE_METRICS[0]));
+  const salesAmountCoverage = ratio((product) => productHasMetric(product, PERFORMANCE_METRICS[1]));
+  const grossProfitCoverage = ratio((product) => productHasMetric(product, PERFORMANCE_METRICS[2]));
   const priceCoverage = ratio((product) => toPrice(product.priceIncludingTax) !== null);
   const monthlyCoverage = ratio((product) => (product.monthlySales || []).length >= T.momentumMonths * 2);
+  const textCoverage = ratio((product) => Number(product.catalogTextCompleteness) >= 0.5 || String(product.catalogText || product.sourceText || '').trim().length >= 40);
   const semanticCoverage = vectorsById
     ? ratio((product) => Array.isArray(vectorsById[product.id]) || ArrayBuffer.isView(vectorsById[product.id]))
     : 0;
-  const score = Math.round((salesCoverage * 0.55 + monthlyCoverage * 0.25 + priceCoverage * 0.2) * 100);
+  const score = Math.round((quantityCoverage * 0.25 + salesAmountCoverage * 0.2 + grossProfitCoverage * 0.25 + textCoverage * 0.15 + monthlyCoverage * 0.1 + priceCoverage * 0.05) * 100);
   return {
     score,
     level: score >= 80 ? 'high' : score >= 55 ? 'medium' : 'low',
-    salesCoverage,
+    salesCoverage: quantityCoverage,
+    quantityCoverage,
+    salesAmountCoverage,
+    grossProfitCoverage,
+    textCoverage,
     priceCoverage,
     monthlyCoverage,
     semanticCoverage
@@ -485,18 +676,19 @@ export const buildAdvisorDataQuality = (products, vectorsById = null) => {
 // エントリポイント: 掲載中の商品だけを対象に全セクションを計算する
 export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } = {}) => {
   const placed = consolidateAdvisorProducts(products);
-  const withQuantityData = placed.filter((product) => product.salesMatched === true || (product.salesMatched == null && (product.salesCount || 0) > 0));
-  const salesCoverage = placed.length > 0 ? withQuantityData.length / placed.length : 0;
-  const quantityProducts = placed.filter((product) => product.salesMatched !== false);
+  const quantityProducts = placed.filter((product) => product.quantityMatched !== false && product.salesMatched !== false);
 
   const abc = buildAbcAnalysis(quantityProducts);
   const panelQuantity = buildPanelQuantityAnalysis(quantityProducts);
+  const panelPerformance = buildPanelPerformanceAnalysis(placed);
   const balance = buildGenreBalance(placed);
   const cannibalization = buildCannibalizationPairs(placed, vectorsById);
   const priceBands = buildPriceBandCoverage(placed);
   const momentum = buildSalesMomentum(placed);
+  const profitability = buildProfitabilityAnalysis(placed);
+  const textAnalysis = buildCatalogTextAnalysis(placed, panelPerformance);
   const dataQuality = buildAdvisorDataQuality(placed, vectorsById);
-  const actions = buildAdvisorActions({ abc, panelQuantity, balance, cannibalization, priceBands, momentum, salesCoverage });
+  const actions = buildAdvisorActions({ abc, panelPerformance, balance, cannibalization, priceBands, momentum, profitability, textAnalysis, dataQuality });
   const priorityCounts = actions.reduce((counts, action) => ({
     ...counts,
     [action.priority]: counts[action.priority] + 1
@@ -507,7 +699,16 @@ export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } 
     summary: {
       placedCount: placed.length,
       totalSales: abc.totalSales,
-      salesCoverage,
+      totalQuantity: abc.totalSales,
+      totalSalesAmount: balance.totalSalesAmount,
+      totalGrossProfitAmount: balance.totalGrossProfitAmount,
+      grossMargin: profitability.grossMargin,
+      salesCoverage: dataQuality.quantityCoverage,
+      quantityCoverage: dataQuality.quantityCoverage,
+      salesAmountCoverage: dataQuality.salesAmountCoverage,
+      grossProfitCoverage: dataQuality.grossProfitCoverage,
+      textCoverage: dataQuality.textCoverage,
+      availableMetrics: panelPerformance.availableMetrics,
       topShare: abc.topShare,
       genreCount: balance.rows.length,
       placementCount: placed.reduce((sum, product) => sum + product.assignments.length, 0),
@@ -518,10 +719,13 @@ export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } 
     },
     abc,
     panelQuantity,
+    panelPerformance,
     balance,
     cannibalization,
     priceBands,
     momentum,
+    profitability,
+    textAnalysis,
     dataQuality,
     actions
   };

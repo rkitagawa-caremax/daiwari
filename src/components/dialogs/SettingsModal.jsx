@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Database, FileText, Settings, TrendingUp, X } from 'lucide-react';
+import { BadgeJapaneseYen, CircleDollarSign, Database, PackageCheck, Settings, TrendingUp, X } from 'lucide-react';
 
 const formatUpdatedAt = (value) => {
   if (!value) return '';
@@ -7,7 +7,7 @@ const formatUpdatedAt = (value) => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
 };
 
-// 期 (今期 / 前期 / 前々期) ごとに売上CSVを取り込む。
+// 期 (今期 / 前期 / 前々期) ごとに販売実績CSVを取り込む。
 // 期を選んでから CSV を選ぶ流れにして、どの期に入るかを取り込み前に確かめられるようにしている。
 const SettingsModal = React.memo(({
   isOpen,
@@ -16,18 +16,24 @@ const SettingsModal = React.memo(({
   salesPeriodOptions = [],
   salesPeriodMeta = {}
 }) => {
-  const fileInputRef = useRef(null);
+  const fileInputRefs = useRef({});
   const [targetPeriodId, setTargetPeriodId] = useState(salesPeriodOptions[0]?.id || 'current');
 
   if (!isOpen) return null;
 
   const targetPeriod = salesPeriodOptions.find((period) => period.id === targetPeriodId) || salesPeriodOptions[0];
 
-  const handleFileChange = (event) => {
+  const handleFileChange = (event, metricType) => {
     const file = event.target.files[0];
     event.target.value = '';
-    if (file) onImportSalesCSV(file, targetPeriodId);
+    if (file) onImportSalesCSV(file, targetPeriodId, metricType);
   };
+
+  const importOptions = [
+    { id: 'quantity', label: '販売数量CSV', note: '売れた個数', icon: PackageCheck, cardClass: 'border-violet-100 bg-violet-50/60', iconClass: 'text-violet-600' },
+    { id: 'salesAmount', label: '売上額CSV', note: '販売金額', icon: CircleDollarSign, cardClass: 'border-sky-100 bg-sky-50/60', iconClass: 'text-sky-600' },
+    { id: 'grossProfitAmount', label: '粗利額CSV', note: '粗利益額', icon: BadgeJapaneseYen, cardClass: 'border-emerald-100 bg-emerald-50/60', iconClass: 'text-emerald-600' }
+  ];
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm m3-animate-fade-in">
@@ -50,18 +56,28 @@ const SettingsModal = React.memo(({
               <div className="p-1.5 rounded-full" style={{ background: 'var(--m3-tertiary-container)' }}>
                 <TrendingUp className="w-4 h-4" style={{ color: 'var(--m3-on-tertiary-container)' }} />
               </div>
-              販売数量データの取り込み
+              販売実績データの取り込み
             </h4>
             <div className="p-5" style={{ background: 'var(--m3-surface-container-lowest)', borderRadius: 'var(--m3-shape-corner-lg)' }}>
               <p className="text-sm mb-4 leading-relaxed" style={{ color: 'var(--m3-on-surface-variant)' }}>
-                CSVファイル（商品別売上推移表）を取り込むと、パネル上のコード（介援隊CD）と照合して販売数量と月別推移を表示できます。
-                期ごとに保存でき、実績モードのヘッダーで切り替えて比べられます。
+                販売数量・売上額・粗利額を別々のCSVから取り込み、介援隊コードで1つの実績へ統合します。
+                取り込んだ指標だけを更新するため、ほかの実績は消えません。
               </p>
+
+              <div className="mb-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3">
+                <p className="flex items-center gap-2 text-xs font-bold text-emerald-800"><CircleDollarSign size={15} /> 自動認識する主な列</p>
+                <p className="mt-1.5 text-[11px] leading-5 text-emerald-700">介援隊コード／商品コードと、選択した実績列を照合します。列名が独自形式でも、各CSVの18列目を選択した指標として取り込めます。</p>
+              </div>
 
               <p className="text-xs font-bold mb-2" style={{ color: 'var(--m3-on-surface-variant)' }}>取り込む期を選ぶ</p>
               <div className="space-y-2 mb-4">
                 {salesPeriodOptions.map((period) => {
                   const meta = salesPeriodMeta?.[period.id];
+                  const metricLabels = [
+                    meta?.metrics?.quantity?.codes > 0 ? '数量' : '',
+                    meta?.metrics?.salesAmount?.codes > 0 ? '売上額' : '',
+                    meta?.metrics?.grossProfitAmount?.codes > 0 ? '粗利額' : ''
+                  ].filter(Boolean);
                   const updatedAt = formatUpdatedAt(meta?.updatedAt);
                   const isSelected = period.id === targetPeriodId;
                   return (
@@ -89,7 +105,7 @@ const SettingsModal = React.memo(({
                         </span>
                         <span className="block text-[11px] mt-0.5" style={{ color: 'var(--m3-on-surface-variant)' }}>
                           {meta
-                            ? `${(meta.totalItems || 0).toLocaleString()}商品${updatedAt ? ` / 最終更新 ${updatedAt}` : ''}${meta.fileName ? ` / ${meta.fileName}` : ''}`
+                            ? `${(meta.totalItems || 0).toLocaleString()}商品${metricLabels.length ? ` / ${metricLabels.join('・')}` : ' / 旧形式の数量データ'}${updatedAt ? ` / 最終更新 ${updatedAt}` : ''}${meta.fileName ? ` / ${meta.fileName}` : ''}`
                             : 'まだ取り込まれていません'}
                         </span>
                       </span>
@@ -98,26 +114,38 @@ const SettingsModal = React.memo(({
                 })}
               </div>
 
-              <div className="flex items-center gap-4">
-                <input
-                  type="file"
-                  accept=".csv"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="m3-btn-tonal flex items-center gap-2"
-                >
-                  <FileText size={18} /> {targetPeriod?.label || ''}にCSVを取り込む
-                </button>
+              <p className="mb-2 text-xs font-bold" style={{ color: 'var(--m3-on-surface-variant)' }}>{targetPeriod?.label || ''}へ取り込むデータを選ぶ</p>
+              <div className="grid grid-cols-3 gap-2">
+                {importOptions.map((option) => {
+                  const Icon = option.icon;
+                  const sourceFile = salesPeriodMeta?.[targetPeriodId]?.sourceFiles?.[option.id];
+                  return (
+                    <div key={option.id} className={`rounded-2xl border p-2.5 ${option.cardClass}`}>
+                      <input
+                        type="file"
+                        accept=".csv"
+                        ref={(node) => { fileInputRefs.current[option.id] = node; }}
+                        onChange={(event) => handleFileChange(event, option.id)}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => fileInputRefs.current[option.id]?.click()}
+                        className="flex w-full flex-col items-center rounded-xl bg-white px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                      >
+                        <Icon size={21} className={`mb-1.5 ${option.iconClass}`} />
+                        <span className="text-xs font-bold text-slate-800">{option.label}</span>
+                        <span className="mt-0.5 text-[10px] text-slate-500">{option.note}</span>
+                      </button>
+                      {sourceFile && <p className="mt-1.5 truncate text-center text-[9px] text-slate-500" title={sourceFile}>{sourceFile}</p>}
+                    </div>
+                  );
+                })}
               </div>
 
               {salesPeriodMeta?.[targetPeriodId] && (
                 <div className="mt-4 flex items-center gap-2 text-xs px-3 py-2 w-fit" style={{ background: 'var(--m3-surface-container)', borderRadius: 'var(--m3-shape-corner-sm)', color: 'var(--m3-error)' }}>
                   <Database size={12} />
-                  取り込むと{targetPeriod?.label}の既存データは上書きされます
+                  選んだ指標のみ更新し、ほかの実績は保持します
                 </div>
               )}
             </div>

@@ -2,7 +2,8 @@ import { parseSalesCsvContent } from '../domain/salesData.js';
 
 self.onmessage = (event) => {
   try {
-    const salesData = parseSalesCsvContent(event.data);
+    const payload = typeof event.data === 'string' ? { csvText: event.data, options: {} } : event.data;
+    const salesData = parseSalesCsvContent(payload?.csvText, payload?.options);
     self.postMessage({ ok: true, salesData });
   } catch (error) {
     self.postMessage({
@@ -11,4 +12,3 @@ self.onmessage = (event) => {
     });
   }
 };
-

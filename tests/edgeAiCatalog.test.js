@@ -40,6 +40,8 @@ test('buildEdgeCatalogProducts combines saved text, placement and sales data', (
       name: '軽量歩行器',
       spec: '青',
       count: 12,
+      salesAmount: 120000,
+      grossProfitAmount: 36000,
       monthlySales: [5, 7],
       monthlyLabels: ['4月', '5月']
     }] }
@@ -47,6 +49,10 @@ test('buildEdgeCatalogProducts combines saved text, placement and sales data', (
   assert.equal(products.length, 1);
   assert.equal(products[0].code, 'E001');
   assert.equal(products[0].salesCount, 12);
+  assert.equal(products[0].salesAmount, 120000);
+  assert.equal(products[0].grossProfitAmount, 36000);
+  assert.equal(products[0].grossMargin, 0.3);
+  assert.equal(products[0].catalogTextCompleteness > 0, true);
   assert.equal(products[0].salesMatched, true);
   assert.deepEqual(products[0].monthlySales, [
     { label: '4月', count: 5 },

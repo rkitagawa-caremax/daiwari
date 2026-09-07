@@ -6,6 +6,8 @@ import {
   buildCannibalizationPairs,
   buildCatalogAdvisorReport,
   buildGenreBalance,
+  buildPanelPerformanceAnalysis,
+  buildProfitabilityAnalysis,
   buildPanelQuantityAnalysis,
   buildPriceBandCoverage,
   buildSalesMomentum,
@@ -94,6 +96,38 @@ test('buildPanelQuantityAnalysis compares total quantity and quantity per space 
   assert.equal(analysis.lowest[0].quantityPerSpace, 2);
   assert.deepEqual(analysis.expansionCandidates.map((row) => row.id), ['compact']);
   assert.deepEqual(analysis.reductionCandidates.map((row) => row.id), ['large']);
+});
+
+test('panel performance combines quantity, sales amount and gross profit without penalizing unavailable metrics', () => {
+  const profitLeader = makeProduct({
+    id: 'profit', salesCount: 20, quantityMatched: true,
+    salesAmount: 100000, salesAmountMatched: true,
+    grossProfitAmount: 50000, grossProfitMatched: true
+  });
+  const quantityLeader = makeProduct({
+    id: 'quantity', salesCount: 100, quantityMatched: true,
+    salesAmount: 100000, salesAmountMatched: true,
+    grossProfitAmount: 10000, grossProfitMatched: true
+  });
+  const analysis = buildPanelPerformanceAnalysis([profitLeader, quantityLeader]);
+  assert.deepEqual(analysis.availableMetrics, ['quantity', 'salesAmount', 'grossProfitAmount']);
+  assert.equal(analysis.highest[0].id, 'profit', '粗利額を最重視した総合評価になる');
+
+  const quantityOnly = buildPanelPerformanceAnalysis([
+    makeProduct({ id: 'q1', salesCount: 10 }),
+    makeProduct({ id: 'q2', salesCount: 20 })
+  ]);
+  assert.deepEqual(quantityOnly.availableMetrics, ['quantity']);
+  assert.equal(quantityOnly.highest[0].id, 'q2');
+});
+
+test('profitability analysis detects high-sales low-margin products', () => {
+  const result = buildProfitabilityAnalysis([
+    makeProduct({ id: 'low', salesAmount: 200000, salesAmountMatched: true, grossProfitAmount: 10000, grossProfitMatched: true }),
+    makeProduct({ id: 'healthy', salesAmount: 100000, salesAmountMatched: true, grossProfitAmount: 50000, grossProfitMatched: true })
+  ]);
+  assert.equal(result.totalSalesAmount, 300000);
+  assert.deepEqual(result.lowMargin.map((row) => row.id), ['low']);
 });
 
 test('buildGenreBalance weights large panels and splits sales across assigned genres', () => {

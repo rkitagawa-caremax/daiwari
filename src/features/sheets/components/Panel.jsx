@@ -13,7 +13,7 @@ import {
   getFreeLabelTextLayout
 } from '../../../domain/freeLabels';
 import { extractProductCodes, normalizeCode } from '../../../domain/productCodes';
-import { buildMonthlySalesSeries } from '../../../domain/salesData';
+import { buildMonthlySalesSeries, summarizeGrossProfitRows } from '../../../domain/salesData';
 import MonthlySalesChart from '../../sales/MonthlySalesChart';
 import {
   DAIWARI_PANEL_DROPZONE_PREFIX,
@@ -67,6 +67,8 @@ const Panel = React.memo(({
   onStartPointerDrag,
   isSalesMode,
   showMonthlySalesForAll = false,
+  salesDisplayMode = 'quantity',
+  salesPeriodLabel = '今期',
   showPanelCode = true,
   salesData,
   onHoverSales,
@@ -240,7 +242,7 @@ const Panel = React.memo(({
 
   const handleMouseEnter = (event) => {
     setIsHovered(true);
-    if (isSalesMode && matchedSales && onHoverSales) {
+    if (isSalesMode && salesDisplayMode !== 'grossProfit' && matchedSales && onHoverSales) {
       const rect = event.currentTarget.getBoundingClientRect();
       onHoverSales(matchedSales, { x: rect.right, y: rect.top });
     }
@@ -588,9 +590,12 @@ const Panel = React.memo(({
     ? matchedSales.reduce((total, item) => total + (parseInt(item.count) || 0), 0)
     : 0;
   const monthlySalesSeries = useMemo(() => buildMonthlySalesSeries(matchedSales), [matchedSales]);
+  const grossProfitSummary = useMemo(() => summarizeGrossProfitRows(matchedSales), [matchedSales]);
+  const isGrossProfitView = isSalesMode && salesDisplayMode === 'grossProfit';
   const canShowMonthlySales = monthlySalesSeries.length > 0;
   const normalizedPanelCode = normalizeCode(data.code);
   const isMonthlySalesView = isSalesMode
+    && salesDisplayMode === 'quantity'
     && canShowMonthlySales
     && (showMonthlySalesForAll || monthlySalesCode === normalizedPanelCode);
 
@@ -635,6 +640,8 @@ const Panel = React.memo(({
         ...(shouldHighlightEmpty ? {} : {}),
         '--tw-ring-color': isSelected
           ? '#3b82f6'
+          : isGrossProfitView && matchedSales
+            ? 'rgba(250, 204, 21, 0.92)'
           : shouldHighlightLabel
             ? '#22c55e'
             : shouldHighlightEmpty
@@ -658,12 +665,16 @@ const Panel = React.memo(({
           ? 'rgba(34, 197, 94, 0.16)'
           : shouldHighlightEmpty
             ? 'var(--m3-error-container)'
-            : isSalesMode && matchedSales
+            : isGrossProfitView && matchedSales
+              ? 'rgba(254, 240, 138, 0.28)'
+              : isSalesMode && matchedSales
               ? 'var(--m3-secondary-container)'
               : 'var(--m3-surface)',
         boxShadow: isSelected
           ? mergeSelectionGlow
-          : shouldHighlightLabel
+            : isGrossProfitView && matchedSales
+              ? 'inset 0 0 0 2px rgba(253, 224, 71, 0.92), inset 0 0 24px rgba(250, 204, 21, 0.2), 0 0 18px rgba(250, 204, 21, 0.72)'
+              : shouldHighlightLabel
             ? '0 0 0 1.5px rgba(22, 163, 74, 0.65), inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.35)'
             : undefined,
         touchAction: !isExportMode && !isOverview && !isLabelMode && (!isEmpty || isArrangeToken) ? 'none' : undefined,
@@ -893,7 +904,7 @@ const Panel = React.memo(({
         );
       })}
 
-      {isSalesMode && matchedSales && (
+      {isSalesMode && matchedSales && !isGrossProfitView && (
         <div className="pointer-events-none absolute inset-0 z-30 flex flex-col bg-slate-950/70 p-2 text-white backdrop-blur-[2px]">
           {/* →ボタンの代わりに、オーバーレイ全面のクリックで合計⇔月別グラフを切り替える */}
           {canShowMonthlySales && !showMonthlySalesForAll && (
@@ -931,6 +942,43 @@ const Panel = React.memo(({
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {isGrossProfitView && matchedSales && (
+        <div
+          data-gross-profit-overlay="true"
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-between overflow-hidden bg-[#161405]/80 px-2 py-2 text-white backdrop-blur-[2px]"
+        >
+          <div className="flex w-full items-center justify-between gap-1">
+            <span className="text-[8px] font-black tracking-[0.12em] text-yellow-200">{salesPeriodLabel}・粗利率</span>
+            <span className="font-mono text-lg font-black leading-none text-yellow-300 drop-shadow-[0_0_8px_rgba(253,224,71,0.95)]">
+              {grossProfitSummary.grossMargin == null ? '―' : `${Math.round(grossProfitSummary.grossMargin * 100)}%`}
+            </span>
+          </div>
+
+          {grossProfitSummary.grossMargin == null ? (
+            <div className="flex flex-1 items-center justify-center text-center text-[10px] font-bold leading-relaxed text-yellow-100/70">
+              売上額・粗利額<br />データなし
+            </div>
+          ) : (
+            <div
+              aria-label={`粗利率 ${Math.round(grossProfitSummary.grossMargin * 100)}%`}
+              className="relative my-1 aspect-square w-[46%] min-w-[54px] max-w-[104px] rounded-full border border-yellow-200/80 shadow-[0_0_18px_rgba(250,204,21,0.82),inset_0_0_12px_rgba(250,204,21,0.35)]"
+              style={{
+                background: `conic-gradient(from 0deg, #fde047 0deg ${grossProfitSummary.chartRatio * 360}deg, rgba(255,255,255,0.12) ${grossProfitSummary.chartRatio * 360}deg 360deg)`
+              }}
+            >
+              <span className="absolute inset-[19%] rounded-full border border-yellow-100/40 bg-[#171504] shadow-[inset_0_0_10px_rgba(250,204,21,0.18)]" />
+            </div>
+          )}
+
+          <div className="w-full rounded-lg border border-yellow-300/40 bg-yellow-300/10 px-2 py-1 text-center shadow-[0_0_10px_rgba(250,204,21,0.18)]">
+            <p className="text-[7px] font-bold tracking-[0.12em] text-yellow-100/75">粗利総額</p>
+            <p className="mt-0.5 truncate font-mono text-sm font-black leading-none text-yellow-300 drop-shadow-[0_0_6px_rgba(253,224,71,0.72)]">
+              {grossProfitSummary.hasGrossProfitAmount ? `¥${Math.round(grossProfitSummary.grossProfitAmount).toLocaleString()}` : '―'}
+            </p>
+          </div>
         </div>
       )}
 

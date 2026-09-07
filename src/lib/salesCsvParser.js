@@ -1,9 +1,9 @@
 import { parseSalesCsvContent } from '../domain/salesData.js';
 
 // 大きな売上CSVでも画面操作を止めないよう、対応ブラウザでは解析を専用スレッドへ逃がす。
-export const parseSalesCsvWithoutBlocking = (csvText) => {
+export const parseSalesCsvWithoutBlocking = (csvText, options = {}) => {
   if (typeof Worker === 'undefined') {
-    return Promise.resolve(parseSalesCsvContent(csvText));
+    return Promise.resolve(parseSalesCsvContent(csvText, options));
   }
 
   return new Promise((resolve, reject) => {
@@ -25,7 +25,6 @@ export const parseSalesCsvWithoutBlocking = (csvText) => {
       finish();
       reject(new Error(event.message || '売上CSVの解析処理を開始できませんでした。'));
     }, { once: true });
-    worker.postMessage(csvText);
+    worker.postMessage({ csvText, options });
   });
 };
-

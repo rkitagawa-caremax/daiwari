@@ -19,6 +19,8 @@ const Sheet = React.memo(({
   onStartPointerDrag,
   isSalesMode,
   showMonthlySalesForAll = false,
+  salesDisplayMode = 'quantity',
+  salesPeriodLabel = '今期',
   showPanelCode = true,
   salesData,
   onHoverSales,
@@ -131,6 +133,8 @@ const Sheet = React.memo(({
               onStartPointerDrag={onStartPointerDrag}
               isSalesMode={isSalesMode}
               showMonthlySalesForAll={showMonthlySalesForAll}
+              salesDisplayMode={salesDisplayMode}
+              salesPeriodLabel={salesPeriodLabel}
               showPanelCode={showPanelCode}
               salesData={salesData}
               onHoverSales={onHoverSales}

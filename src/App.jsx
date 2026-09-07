@@ -106,6 +106,7 @@ import {
 } from './domain/twoPageWorkspace';
 import {
   SALES_DATA_WRITE_BATCH_SIZE,
+  mergeSalesMetricData,
   mergeSerializedSalesChunks,
   splitSalesDataIntoChunks
 } from './domain/salesData';
@@ -324,6 +325,7 @@ export default function App() {
   const logoTapTimeoutRef = useRef(null);
   const [isSalesMode, setIsSalesMode] = useState(false); // 実績モード
   const [isSalesChartMode, setIsSalesChartMode] = useState(false);
+  const [salesDisplayMode, setSalesDisplayMode] = useState('quantity');
   // 各コマ右上の介援隊コードバッジ表示 (詳細・全体どちらにも効く)
   const [showPanelCodes, setShowPanelCodes] = useState(true);
   const [isCatalogDiffMode, setIsCatalogDiffMode] = useState(false);
@@ -1337,16 +1339,39 @@ export default function App() {
 
   // --- Sales CSV Import Logic ---
   // 期 (今期 / 前期 / 前々期) ごとに別のチャンクコレクションとメタ文書へ保存する。
-  const handleImportSalesCSV = async (file, periodId = SALES_PERIOD_CURRENT) => {
+  const handleImportSalesCSV = async (file, periodId = SALES_PERIOD_CURRENT, metricType = 'quantity') => {
     if (isLockedRef.current) return;
     const period = getSalesPeriodDefinition(periodId);
+    const metricLabels = {
+      quantity: '販売数量',
+      salesAmount: '売上額',
+      grossProfitAmount: '粗利額'
+    };
+    const normalizedMetricType = Object.hasOwn(metricLabels, metricType) ? metricType : 'quantity';
+    const metricLabel = metricLabels[normalizedMetricType];
     setIsProcessing(true);
-    setProgressMessage(`${period.label}の売上データを解析中...`);
+    setProgressMessage(`${period.label}の${metricLabel}データを解析中...`);
     try {
       const text = await readFileAutoEncoding(file);
+      let snapshot = null;
+      let existingSalesMap = {};
+      if (USE_LOCAL_STORAGE) {
+        existingSalesMap = (await idbHelper.getItem(period.localDataKey)) || {};
+      } else {
+        const periodChunksCollection = salesChunksCollections[period.id];
+        if (!periodChunksCollection) throw new Error('販売実績データの保存先に接続できません。');
+        snapshot = await getDocs(periodChunksCollection);
+        existingSalesMap = mergeSerializedSalesChunks(snapshot.docs.map((snapshotDoc) => snapshotDoc.data()?.items));
+      }
       // 大きなCSVでも画面が固まらないよう、対応ブラウザでは別スレッドで解析する
-      const salesMap = await parseSalesCsvWithoutBlocking(text);
-      const periodMeta = buildSalesPeriodMeta({ salesData: salesMap, fileName: file?.name || '' });
+      const importedSalesMap = await parseSalesCsvWithoutBlocking(text, { metricType: normalizedMetricType });
+      const salesMap = mergeSalesMetricData(existingSalesMap, importedSalesMap, normalizedMetricType);
+      const previousMeta = salesPeriodMeta?.[period.id] || {};
+      const sourceFiles = {
+        ...(previousMeta.sourceFiles || {}),
+        [normalizedMetricType]: file?.name || ''
+      };
+      const periodMeta = buildSalesPeriodMeta({ salesData: salesMap, fileName: file?.name || '', sourceFiles });
 
       const applyLoadedPeriod = () => {
         setSalesPeriodMeta((current) => ({ ...current, [period.id]: periodMeta }));
@@ -1362,25 +1387,23 @@ export default function App() {
           setProgressMessage("完了しました");
           setTimeout(() => {
             setIsProcessing(false);
-            showAlert(`${period.label}の売上データを取り込みました`);
+            showAlert(`${period.label}の${metricLabel}データを取り込みました`);
             setIsSettingsOpen(false);
           }, 500);
         } catch (e) {
           console.error("Failed to save sales data to IDB:", e);
-          showAlert("売上データの保存に失敗しました。");
+          showAlert("販売実績データの保存に失敗しました。");
           setIsProcessing(false);
         }
         return;
       }
 
       const periodChunksCollection = salesChunksCollections[period.id];
-      if (!periodChunksCollection) throw new Error('売上データの保存先に接続できません。');
+      if (!periodChunksCollection) throw new Error('販売実績データの保存先に接続できません。');
 
       // Chunking logic
       setProgressMessage("データを保存中...");
       const chunks = splitSalesDataIntoChunks(salesMap);
-
-      const snapshot = await getDocs(periodChunksCollection);
 
       // Firestoreの10MiBリクエスト上限に十分な余裕を持たせるため、
       // 旧チャンクの削除と新チャンクの保存を少数ずつ確定する。
@@ -1399,7 +1422,7 @@ export default function App() {
       }
 
       const currentChunkIds = new Set(chunks.map((_, index) => `chunk_${index}`));
-      const obsoleteDocs = snapshot.docs.filter((snapshotDoc) => !currentChunkIds.has(snapshotDoc.id));
+      const obsoleteDocs = (snapshot?.docs || []).filter((snapshotDoc) => !currentChunkIds.has(snapshotDoc.id));
       for (let index = 0; index < obsoleteDocs.length; index += SALES_DATA_WRITE_BATCH_SIZE) {
         const deleteBatch = writeBatch(db);
         obsoleteDocs.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((snapshotDoc) => deleteBatch.delete(snapshotDoc.ref));
@@ -1419,7 +1442,7 @@ export default function App() {
       });
       applyLoadedPeriod();
 
-      showAlert(`${period.label}の売上データを取り込みました！`);
+      showAlert(`${period.label}の${metricLabel}データを取り込みました！`);
       setIsSettingsOpen(false);
 
     } catch (err) {
@@ -1478,14 +1501,14 @@ export default function App() {
       salesModeLongPressTriggeredRef.current = false;
       return;
     }
-    const nextIsSalesMode = !isSalesMode;
+    const nextIsSalesMode = !(isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode);
     setIsSalesMode(nextIsSalesMode);
+    setSalesDisplayMode('quantity');
+    setIsSalesChartMode(false);
     if (nextIsSalesMode) {
       setIsCatalogDiffMode(false);
-    } else {
-      setIsSalesChartMode(false);
     }
-  }, [isSalesMode, panelArrangeSession]);
+  }, [isSalesChartMode, isSalesMode, panelArrangeSession, salesDisplayMode]);
 
   const handleSelectSalesPeriod = useCallback((periodId) => {
     setActiveSalesPeriod(periodId);
@@ -1493,13 +1516,23 @@ export default function App() {
 
   const handleSalesChartModeButtonClick = useCallback(() => {
     if (panelArrangeSession) return;
-    const nextIsSalesChartMode = !isSalesChartMode;
+    const nextIsSalesChartMode = !(isSalesMode && salesDisplayMode === 'quantity' && isSalesChartMode);
     setIsSalesChartMode(nextIsSalesChartMode);
+    setSalesDisplayMode('quantity');
     if (nextIsSalesChartMode) {
       setIsSalesMode(true);
       setIsCatalogDiffMode(false);
     }
-  }, [isSalesChartMode, panelArrangeSession]);
+  }, [isSalesChartMode, isSalesMode, panelArrangeSession, salesDisplayMode]);
+
+  const handleGrossProfitModeButtonClick = useCallback(() => {
+    if (panelArrangeSession) return;
+    const nextIsSalesMode = !(isSalesMode && salesDisplayMode === 'grossProfit');
+    setIsSalesMode(nextIsSalesMode);
+    setSalesDisplayMode(nextIsSalesMode ? 'grossProfit' : 'quantity');
+    setIsSalesChartMode(false);
+    if (nextIsSalesMode) setIsCatalogDiffMode(false);
+  }, [isSalesMode, panelArrangeSession, salesDisplayMode]);
 
   const handleCatalogDiffModeButtonClick = useCallback(() => {
     if (panelArrangeSession || !catalogChangeSet) return;
@@ -3619,10 +3652,12 @@ export default function App() {
   const salesProps = useMemo(() => ({
     isMode: isSalesMode,
     showMonthlyCharts: isSalesChartMode,
+    displayMode: salesDisplayMode,
+    periodLabel: getSalesPeriodDefinition(activeSalesPeriod).label,
     data: activeSalesData,
     onHover: handleHoverSales,
     onLeave: handleLeaveSales
-  }), [activeSalesData, handleHoverSales, handleLeaveSales, isSalesChartMode, isSalesMode]);
+  }), [activeSalesData, activeSalesPeriod, handleHoverSales, handleLeaveSales, isSalesChartMode, isSalesMode, salesDisplayMode]);
 
   const changesProps = useMemo(() => ({
     isMode: isCatalogDiffMode,
@@ -3815,6 +3850,7 @@ export default function App() {
           isPageSelectionMode={isPageSelectionMode}
           isSalesMode={isSalesMode}
           isSalesChartMode={isSalesChartMode}
+          salesDisplayMode={salesDisplayMode}
           showPanelCodes={showPanelCodes}
           onTogglePanelCodes={() => setShowPanelCodes((current) => !current)}
           salesPeriodOptions={SALES_PERIOD_OPTIONS}
@@ -3825,6 +3861,7 @@ export default function App() {
           isSalesLookupOpen={isSalesLookupOpen}
           onSalesModeClick={handleSalesModeButtonClick}
           onSalesChartModeClick={handleSalesChartModeButtonClick}
+          onGrossProfitModeClick={handleGrossProfitModeButtonClick}
           onSalesModeLongPressStart={startSalesModeLongPress}
           onSalesModeLongPressEnd={endSalesModeLongPress}
           catalogChangeCount={catalogChangeSet?.displayCount || Object.keys(catalogChangeSet?.byCode || {}).length}
@@ -4091,7 +4128,7 @@ export default function App() {
             onClose={() => setIsEdgeAiAssistOpen(false)}
             images={images}
             sheets={sheets}
-            salesData={salesData}
+            salesData={activeSalesData}
             genres={GENRES}
             activeChangeSet={catalogChangeSet}
             onApplyChangeSet={handleApplyCatalogChangeSet}

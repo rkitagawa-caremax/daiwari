@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   buildMonthlySalesSeries,
+  mergeSalesMetricData,
   mergeSerializedSalesChunks,
   parseSalesCsvContent,
   resolveSalesMonthColumns,
-  splitSalesDataIntoChunks
+  splitSalesDataIntoChunks,
+  summarizeGrossProfitRows
 } from '../src/domain/salesData.js';
 
 const makeSalesRow = ({ name = '', spec = '', code = '', count = '' } = {}) => {
@@ -46,6 +48,41 @@ test('parseSalesCsvContent handles quoted commas and ignores incomplete rows', (
   assert.deepEqual(parseSalesCsvContent(csv), {
     C001: [{ name: '商品, A', spec: '規格', count: 1234 }]
   });
+});
+
+test('separate amount CSV treats the selected value column as sales amount', () => {
+  const csv = [
+    'metadata',
+    'header',
+    makeSalesRow({ name: '商品A', spec: '10個入', code: 'E001', count: '"12,345"' })
+  ].join('\n');
+  const parsed = parseSalesCsvContent(csv, { metricType: 'salesAmount' });
+  assert.deepEqual(parsed, { E001: [{ name: '商品A', spec: '10個入', salesAmount: 12345 }] });
+  assert.equal(Object.hasOwn(parsed.E001[0], 'count'), false);
+});
+
+test('metric imports merge without erasing the other performance values', () => {
+  const quantity = { E001: [{ name: '商品A', spec: '10個入', count: 15, monthlySales: [7, 8], monthlyLabels: ['1月', '2月'] }] };
+  const amount = { E001: [{ name: '商品A', spec: '10個入', salesAmount: 30000 }] };
+  const profit = { E001: [{ name: '商品A', spec: '10個入', grossProfitAmount: 9000 }] };
+  const mergedAmount = mergeSalesMetricData(quantity, amount, 'salesAmount');
+  const merged = mergeSalesMetricData(mergedAmount, profit, 'grossProfitAmount');
+  assert.deepEqual(merged.E001[0], {
+    name: '商品A', spec: '10個入', count: 15,
+    monthlySales: [7, 8], monthlyLabels: ['1月', '2月'],
+    salesAmount: 30000, grossProfitAmount: 9000
+  });
+});
+
+test('gross profit summary calculates the margin used by the panel pie chart', () => {
+  const summary = summarizeGrossProfitRows([
+    { salesAmount: 60000, grossProfitAmount: 30000 },
+    { salesAmount: 40000, grossProfitAmount: 20000 }
+  ]);
+  assert.equal(summary.salesAmount, 100000);
+  assert.equal(summary.grossProfitAmount, 50000);
+  assert.equal(summary.grossMargin, 0.5);
+  assert.equal(summary.chartRatio, 0.5);
 });
 
 test('sales CSV keeps fiscal-year monthly values without changing the total', () => {
