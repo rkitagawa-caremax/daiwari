@@ -71,6 +71,42 @@ export const resolveSalesColumnSchema = (headerRows = []) => {
   };
 };
 
+const isCodeHeaderCell = (value) => {
+  const normalized = normalizeSalesHeader(value);
+  return SALES_COLUMN_ALIASES.code.some((alias) => {
+    const normalizedAlias = normalizeSalesHeader(alias);
+    return normalized === normalizedAlias || normalized.includes(normalizedAlias);
+  });
+};
+
+export const resolveSalesCsvLayout = (rows = [], fallbackHeaderRowCount = SALES_DATA_HEADER_ROW_COUNT) => {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const probeCount = Math.min(normalizedRows.length, Math.max(8, fallbackHeaderRowCount));
+  const parsedProbeRows = normalizedRows.slice(0, probeCount).map((row) => parseCSVLine(row));
+  const detectedHeaderIndex = parsedProbeRows.findIndex((row) => row.some(isCodeHeaderCell));
+  if (detectedHeaderIndex < 0) {
+    return {
+      dataStartIndex: fallbackHeaderRowCount,
+      headerRows: parsedProbeRows.slice(0, fallbackHeaderRowCount),
+      detectedHeaderIndex: null
+    };
+  }
+
+  let dataStartIndex = detectedHeaderIndex + 1;
+  let headerRows = parsedProbeRows.slice(detectedHeaderIndex, dataStartIndex);
+  let schema = resolveSalesColumnSchema(headerRows);
+  // 年度行＋月行など、商品コードが空の連続行は複数段ヘッダーとして取り込む。
+  while (dataStartIndex < parsedProbeRows.length && dataStartIndex <= detectedHeaderIndex + 3) {
+    const candidate = parsedProbeRows[dataStartIndex];
+    if (String(candidate?.[schema.codeIndex] || '').trim()) break;
+    headerRows = [...headerRows, candidate];
+    dataStartIndex += 1;
+    schema = resolveSalesColumnSchema(headerRows);
+  }
+
+  return { dataStartIndex, headerRows, detectedHeaderIndex };
+};
+
 export const resolveSalesMonthColumns = (headerRows = []) => {
   const rows = (Array.isArray(headerRows) ? headerRows : []).map((row) => (
     Array.isArray(row) ? row : []
@@ -168,7 +204,8 @@ export const parseSalesCsvContent = (
 ) => {
   const normalizedText = String(csvText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const rows = normalizedText.split('\n');
-  const parsedHeaderRows = rows.slice(0, headerRowCount).map((row) => parseCSVLine(row));
+  const layout = resolveSalesCsvLayout(rows, headerRowCount);
+  const parsedHeaderRows = layout.headerRows;
   const columnSchema = resolveSalesColumnSchema(parsedHeaderRows);
   const validMetricType = ['quantity', 'salesAmount', 'grossProfitAmount'].includes(metricType)
     ? metricType
@@ -181,7 +218,7 @@ export const parseSalesCsvContent = (
     : [];
   const salesData = {};
 
-  rows.slice(headerRowCount).forEach((row) => {
+  rows.slice(layout.dataStartIndex).forEach((row) => {
     if (!row.trim()) return;
     const columns = parseCSVLine(row);
     if (columns.length <= columnSchema.codeIndex) return;
@@ -306,6 +343,44 @@ export const summarizeSalesDataMetrics = (salesData = {}) => {
   return summary;
 };
 
+export const validateSalesMetricImport = (importedData = {}, existingData = {}, metricType = 'quantity') => {
+  const valueKey = metricType === 'salesAmount'
+    ? 'salesAmount'
+    : metricType === 'grossProfitAmount' ? 'grossProfitAmount' : 'count';
+  const metricLabel = metricType === 'salesAmount'
+    ? '売上額'
+    : metricType === 'grossProfitAmount' ? '粗利額' : '販売数量';
+  let importedRows = 0;
+  let importedCodes = 0;
+  let nonZeroRows = 0;
+  Object.values(importedData || {}).forEach((rows) => {
+    if (!Array.isArray(rows)) return;
+    let codeHasMetric = false;
+    rows.forEach((row) => {
+      if (!Object.hasOwn(row || {}, valueKey)) return;
+      codeHasMetric = true;
+      importedRows += 1;
+      if (Number(row?.[valueKey]) !== 0) nonZeroRows += 1;
+    });
+    if (codeHasMetric) importedCodes += 1;
+  });
+  if (importedCodes === 0 || importedRows === 0) {
+    throw new Error(`${metricLabel}列または商品コードを認識できませんでした。CSVのヘッダーと列位置を確認してください。既存データは変更されていません。`);
+  }
+  if (nonZeroRows === 0) {
+    throw new Error(`${metricLabel}がすべて空欄または0です。誤った列の取り込みを防ぐため保存を中止しました。既存データは変更されていません。`);
+  }
+
+  let existingCodes = 0;
+  Object.values(existingData || {}).forEach((rows) => {
+    if (Array.isArray(rows) && rows.some((row) => Object.hasOwn(row || {}, valueKey))) existingCodes += 1;
+  });
+  if (existingCodes >= 20 && importedCodes < existingCodes * 0.5) {
+    throw new Error(`${metricLabel}の認識商品数が既存データの半数未満です（${importedCodes.toLocaleString()} / ${existingCodes.toLocaleString()}商品）。期間やCSV形式を確認してください。既存データは変更されていません。`);
+  }
+  return { metricType, valueKey, importedCodes, importedRows, nonZeroRows, existingCodes };
+};
+
 export const splitSalesDataIntoChunks = (
   salesData,
   chunkSize = SALES_DATA_CHUNK_SIZE,
@@ -348,4 +423,47 @@ export const mergeSerializedSalesChunks = (serializedChunks, { onParseError } = 
     }
   });
   return salesData;
+};
+
+const readSalesChunkDocumentData = (snapshotDoc) => {
+  if (typeof snapshotDoc?.data === 'function') return snapshotDoc.data() || {};
+  return snapshotDoc?.data || {};
+};
+
+const sortSalesChunkDocuments = (documents) => [...documents].sort((left, right) => {
+  const leftData = readSalesChunkDocumentData(left);
+  const rightData = readSalesChunkDocumentData(right);
+  const leftIndex = Number(leftData.chunkIndex);
+  const rightIndex = Number(rightData.chunkIndex);
+  if (Number.isFinite(leftIndex) && Number.isFinite(rightIndex) && leftIndex !== rightIndex) {
+    return leftIndex - rightIndex;
+  }
+  return String(left?.id || '').localeCompare(String(right?.id || ''), undefined, { numeric: true });
+});
+
+// メタ文書が指す世代だけを読み込み、保存途中のチャンクや旧世代の混在を防ぐ。
+// generationId がない従来データは chunk_0, chunk_1... をそのまま読み込める。
+export const selectSalesChunkDocuments = (documents = [], meta = null) => {
+  const normalizedDocuments = Array.isArray(documents) ? documents : [];
+  const activeGenerationId = String(meta?.generationId || '');
+  if (activeGenerationId) {
+    return sortSalesChunkDocuments(normalizedDocuments.filter((snapshotDoc) => (
+      String(readSalesChunkDocumentData(snapshotDoc).generationId || '') === activeGenerationId
+    )));
+  }
+
+  const legacyDocuments = normalizedDocuments.filter((snapshotDoc) => {
+    const data = readSalesChunkDocumentData(snapshotDoc);
+    return !data.generationId && /^chunk_\d+$/.test(String(snapshotDoc?.id || ''));
+  });
+  if (legacyDocuments.length > 0) return sortSalesChunkDocuments(legacyDocuments);
+
+  // 世代データはメタ文書による確定前には採用しない。最新らしいIDの推測は保存途中の世代を拾う恐れがある。
+  return [];
+};
+
+export const isSalesChunkSelectionComplete = (selectedDocuments = [], meta = null) => {
+  const expectedChunkCount = Number(meta?.chunkCount);
+  if (!meta?.generationId || !Number.isInteger(expectedChunkCount) || expectedChunkCount < 0) return true;
+  return selectedDocuments.length === expectedChunkCount;
 };

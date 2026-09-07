@@ -948,7 +948,7 @@ const Panel = React.memo(({
       {isGrossProfitView && matchedSales && (
         <div
           data-gross-profit-overlay="true"
-          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-between overflow-hidden bg-[#161405]/80 px-2 py-2 text-white backdrop-blur-[2px]"
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-between overflow-hidden bg-[#161405]/80 px-2 py-2 text-white"
         >
           <div className="flex w-full items-center justify-between gap-1">
             <span className="text-[8px] font-black tracking-[0.12em] text-yellow-200">{salesPeriodLabel}・粗利率</span>

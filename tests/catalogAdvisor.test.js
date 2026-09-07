@@ -121,6 +121,22 @@ test('panel performance combines quantity, sales amount and gross profit without
   assert.equal(quantityOnly.highest[0].id, 'q2');
 });
 
+test('panel performance stays normalized when only some products have an optional metric', () => {
+  const quantityOnly = makeProduct({
+    id: 'quantity-only', salesCount: 100, quantityMatched: true,
+    grossProfitMatched: false
+  });
+  const withProfit = makeProduct({
+    id: 'with-profit', salesCount: 100, quantityMatched: true,
+    grossProfitAmount: 100, grossProfitMatched: true
+  });
+  const analysis = buildPanelPerformanceAnalysis([quantityOnly, withProfit]);
+  const totalShare = analysis.rows.reduce((sum, row) => sum + row.performanceShare, 0);
+  assert.ok(Math.abs(totalShare - 1) < 1e-12);
+  assert.ok(analysis.rows.find((row) => row.id === 'quantity-only').performanceShare < 0.5);
+  assert.ok(analysis.rows.find((row) => row.id === 'with-profit').performanceShare > 0.5);
+});
+
 test('profitability analysis detects high-sales low-margin products', () => {
   const result = buildProfitabilityAnalysis([
     makeProduct({ id: 'low', salesAmount: 200000, salesAmountMatched: true, grossProfitAmount: 10000, grossProfitMatched: true }),

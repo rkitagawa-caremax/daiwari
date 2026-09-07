@@ -23,6 +23,7 @@ export const CATALOG_ADVISOR_THRESHOLDS = Object.freeze({
   momentumFallRatio: 0.5,
   minMomentumTotal: 12,       // トレンド判定に必要な年間最低数量
   minMomentumWindowSales: 6,  // 直近または比較期間に求める最低数量
+  maxCannibalCandidatesPerGenre: 240,
   maxCannibalPairs: 12,
   maxListItems: 8,
   maxActions: 8
@@ -209,24 +210,23 @@ export const buildPanelQuantityAnalysis = (products) => {
 
 // --- 商品コマ別の総合実績 (数量・売上額・粗利額を、利用可能な指標だけで統合) ---
 export const buildPanelPerformanceAnalysis = (products) => {
-  const availableMetrics = resolveAvailablePerformanceMetrics(products);
-  const weights = performanceMetricWeights(availableMetrics);
-  const metricTotals = Object.fromEntries(availableMetrics.map((metric) => [
+  const candidateMetrics = resolveAvailablePerformanceMetrics(products);
+  const metricTotals = Object.fromEntries(candidateMetrics.map((metric) => [
     metric.id,
     products.reduce((sum, product) => sum + (productHasMetric(product, metric) ? Math.max(0, Number(product[metric.valueKey]) || 0) : 0), 0)
   ]));
+  const availableMetrics = candidateMetrics.filter((metric) => metricTotals[metric.id] > 0);
+  const weights = performanceMetricWeights(availableMetrics);
   const rows = products
     .filter((product) => availableMetrics.some((metric) => productHasMetric(product, metric)))
     .map((product) => {
       const spaceUnits = (product.assignments || []).reduce((sum, assignment) => sum + assignmentSpace(assignment), 0) || 1;
       const metricShares = {};
-      let usedWeight = 0;
       let weightedShare = 0;
       availableMetrics.forEach((metric) => {
-        if (!productHasMetric(product, metric) || metricTotals[metric.id] <= 0) return;
+        if (!productHasMetric(product, metric)) return;
         metricShares[metric.id] = Math.max(0, Number(product[metric.valueKey]) || 0) / metricTotals[metric.id];
         weightedShare += metricShares[metric.id] * weights[metric.id];
-        usedWeight += weights[metric.id];
       });
       return {
         id: product.id,
@@ -238,11 +238,19 @@ export const buildPanelPerformanceAnalysis = (products) => {
         grossMargin: Number(product.salesAmount) !== 0 ? (Number(product.grossProfitAmount) || 0) / Number(product.salesAmount) : null,
         spaceUnits,
         metricShares,
-        performanceShare: usedWeight > 0 ? weightedShare / usedWeight : 0,
+        rawPerformanceShare: weightedShare,
+        performanceShare: weightedShare,
         genre: primaryGenre(product),
         assignment: product.assignments?.[0] || null
       };
     });
+  // 商品ごとに欠けている指標があっても、個別に重みを掛け直すと全体シェアが100%を超える。
+  // 全商品で最後に正規化し、フェアシェアの基準を常に一貫させる。
+  const totalPerformanceShare = rows.reduce((sum, row) => sum + row.rawPerformanceShare, 0);
+  rows.forEach((row) => {
+    row.performanceShare = totalPerformanceShare > 0 ? row.rawPerformanceShare / totalPerformanceShare : 0;
+    delete row.rawPerformanceShare;
+  });
   const totalSpaceUnits = rows.reduce((sum, row) => sum + row.spaceUnits, 0);
   rows.forEach((row) => {
     row.panelShare = totalSpaceUnits > 0 ? row.spaceUnits / totalSpaceUnits : 0;
@@ -264,11 +272,13 @@ export const buildGenreBalance = (products) => {
   let totalSales = 0;
   let totalSalesAmount = 0;
   let totalGrossProfitAmount = 0;
-  const availableMetrics = resolveAvailablePerformanceMetrics(products);
-  const weights = performanceMetricWeights(availableMetrics);
+  const candidateMetrics = resolveAvailablePerformanceMetrics(products);
   products.forEach((product) => {
     const assignments = product.assignments?.length ? product.assignments : [{ genre: '未設定' }];
     const productSpace = assignments.reduce((sum, assignment) => sum + assignmentSpace(assignment), 0);
+    const quantity = productHasMetric(product, PERFORMANCE_METRICS[0]) ? Number(product.salesCount) || 0 : 0;
+    const salesAmount = productHasMetric(product, PERFORMANCE_METRICS[1]) ? Number(product.salesAmount) || 0 : 0;
+    const grossProfitAmount = productHasMetric(product, PERFORMANCE_METRICS[2]) ? Number(product.grossProfitAmount) || 0 : 0;
     assignments.forEach((assignment) => {
       const genre = assignment.genre || '未設定';
       if (!byGenre.has(genre)) byGenre.set(genre, { genre, spaceUnits: 0, placements: 0, sales: 0, salesAmount: 0, grossProfitAmount: 0, productIds: new Set() });
@@ -276,16 +286,23 @@ export const buildGenreBalance = (products) => {
       const spaceUnits = assignmentSpace(assignment);
       entry.spaceUnits += spaceUnits;
       entry.placements++;
-      entry.sales += (product.salesCount || 0) * (spaceUnits / productSpace);
-      entry.salesAmount += (product.salesAmount || 0) * (spaceUnits / productSpace);
-      entry.grossProfitAmount += (product.grossProfitAmount || 0) * (spaceUnits / productSpace);
+      entry.sales += quantity * (spaceUnits / productSpace);
+      entry.salesAmount += salesAmount * (spaceUnits / productSpace);
+      entry.grossProfitAmount += grossProfitAmount * (spaceUnits / productSpace);
       entry.productIds.add(product.id);
       totalSpaceUnits += spaceUnits;
     });
-    totalSales += product.salesCount || 0;
-    totalSalesAmount += product.salesAmount || 0;
-    totalGrossProfitAmount += product.grossProfitAmount || 0;
+    totalSales += quantity;
+    totalSalesAmount += salesAmount;
+    totalGrossProfitAmount += grossProfitAmount;
   });
+  const metricTotals = {
+    quantity: totalSales,
+    salesAmount: totalSalesAmount,
+    grossProfitAmount: totalGrossProfitAmount
+  };
+  const availableMetrics = candidateMetrics.filter((metric) => metricTotals[metric.id] > 0);
+  const weights = performanceMetricWeights(availableMetrics);
   const rows = [...byGenre.values()].map((entry) => {
     const panelShare = totalSpaceUnits > 0 ? entry.spaceUnits / totalSpaceUnits : 0;
     const salesShare = totalSales > 0 ? entry.sales / totalSales : 0;
@@ -376,9 +393,22 @@ export const buildCannibalizationPairs = (products, vectorsById = null) => {
   });
 
   const pairs = [];
+  const keepStrongestPair = (pair) => {
+    if (pairs.length < T.maxCannibalPairs) {
+      pairs.push(pair);
+      return;
+    }
+    let weakestIndex = 0;
+    for (let index = 1; index < pairs.length; index += 1) {
+      if (pairs[index].similarity < pairs[weakestIndex].similarity) weakestIndex = index;
+    }
+    if (pair.similarity > pairs[weakestIndex].similarity) pairs[weakestIndex] = pair;
+  };
   groups.forEach((group) => {
-    const candidates = group.length > 300
-      ? [...group].sort((a, b) => productPerformanceBasis(b).value - productPerformanceBasis(a).value).slice(0, 300)
+    const candidates = group.length > T.maxCannibalCandidatesPerGenre
+      ? [...group]
+        .sort((a, b) => productPerformanceBasis(b).value - productPerformanceBasis(a).value)
+        .slice(0, T.maxCannibalCandidatesPerGenre)
       : group;
     const tokens = method === 'lexical' ? candidates.map((p) => tokenize(p.searchText)) : null;
     for (let i = 0; i < candidates.length; i++) {
@@ -410,7 +440,7 @@ export const buildCannibalizationPairs = (products, vectorsById = null) => {
         if (strongPrice && weakPrice && Math.max(strongPrice, weakPrice) / Math.min(strongPrice, weakPrice) > T.maxCannibalPriceRatio) continue;
         if (strongValue < (comparableMetric === 'quantity' ? T.minStrongSales : 1)) continue;
         if (weakValue > strongValue * T.weakSalesRatio) continue;
-        pairs.push({
+        keepStrongestPair({
           genre: primaryGenre(strong),
           basis: comparableMetric,
           basisLabel: metricConfig.id === 'grossProfitAmount' ? '粗利額' : metricConfig.id === 'salesAmount' ? '売上額' : '販売数量',
@@ -422,7 +452,7 @@ export const buildCannibalizationPairs = (products, vectorsById = null) => {
       }
     }
   });
-  return pairs.sort((a, b) => b.similarity - a.similarity).slice(0, T.maxCannibalPairs);
+  return pairs.sort((a, b) => b.similarity - a.similarity);
 };
 
 // --- 価格帯カバレッジ (エントリー / ミドル / プレミアムの価格ラダー) ---

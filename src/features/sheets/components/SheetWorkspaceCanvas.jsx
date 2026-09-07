@@ -45,6 +45,10 @@ const SheetWorkspaceCanvas = React.memo(({
             ? (sheet.id === navigation.activeSheetId ? 'primary' : 'secondary')
             : undefined}
           className={`relative group transition-transform duration-300 ${pageSelection.isEnabled ? 'cursor-pointer' : ''} ${isPageSelected ? 'scale-[1.02]' : ''}`}
+          style={viewMode === 'list' ? {
+            contentVisibility: 'auto',
+            containIntrinsicSize: '794px 1123px'
+          } : undefined}
           onClick={() => {
             if (pageSelection.isEnabled) {
               pageSelection.onToggle(sheet.id);

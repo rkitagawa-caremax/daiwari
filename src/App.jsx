@@ -106,9 +106,12 @@ import {
 } from './domain/twoPageWorkspace';
 import {
   SALES_DATA_WRITE_BATCH_SIZE,
+  isSalesChunkSelectionComplete,
   mergeSalesMetricData,
   mergeSerializedSalesChunks,
-  splitSalesDataIntoChunks
+  selectSalesChunkDocuments,
+  splitSalesDataIntoChunks,
+  validateSalesMetricImport
 } from './domain/salesData';
 import {
   SALES_PERIOD_CURRENT,
@@ -285,8 +288,10 @@ export default function App() {
   const activeSalesData = activeSalesPeriod === SALES_PERIOD_CURRENT
     ? salesData
     : (loadedHistoricalSales.periodId === activeSalesPeriod ? loadedHistoricalSales.data : null);
+  const activeHistoricalGenerationId = String(salesPeriodMeta?.[activeSalesPeriod]?.generationId || '');
   const isSalesPeriodLoading = activeSalesPeriod !== SALES_PERIOD_CURRENT
-    && loadedHistoricalSales.periodId !== activeSalesPeriod;
+    && (loadedHistoricalSales.periodId !== activeSalesPeriod
+      || (activeHistoricalGenerationId && loadedHistoricalSales.generationId !== activeHistoricalGenerationId));
 
   // UI State
   const [viewMode, setViewMode] = useState('overview');
@@ -348,6 +353,7 @@ export default function App() {
   const [hoveredSalesData, setHoveredSalesData] = useState(null);
   const [salesPopupPos, setSalesPopupPos] = useState(null);
   const closeTimeoutRef = useRef(null);
+  const salesImportInProgressRef = useRef(false);
 
   const [isPageSelectionMode, setIsPageSelectionMode] = useState(false);
   const [selectedSheetIds, setSelectedSheetIds] = useState(new Set());
@@ -792,7 +798,9 @@ export default function App() {
   // 今期は常駐しているので対象外。
   useEffect(() => {
     if (activeSalesPeriod === SALES_PERIOD_CURRENT) return undefined;
-    if (loadedHistoricalSales.periodId === activeSalesPeriod) return undefined;
+    const expectedGenerationId = String(salesPeriodMeta?.[activeSalesPeriod]?.generationId || '');
+    if (loadedHistoricalSales.periodId === activeSalesPeriod
+      && (!expectedGenerationId || loadedHistoricalSales.generationId === expectedGenerationId)) return undefined;
 
     let isCancelled = false;
     const period = getSalesPeriodDefinition(activeSalesPeriod);
@@ -802,35 +810,43 @@ export default function App() {
       try {
         if (USE_LOCAL_STORAGE) {
           const saved = await idbHelper.getItem(period.localDataKey);
-          if (!isCancelled) setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: saved || {} });
+          if (!isCancelled) setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: saved || {}, generationId: '' });
           return;
         }
 
         const cached = await idbHelper.getItem(cacheKey);
         if (!isCancelled && cached?.data) {
-          setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: cached.data });
+          setLoadedHistoricalSales({
+            periodId: activeSalesPeriod,
+            data: cached.data,
+            generationId: String(cached.generationId || '')
+          });
         }
 
         const chunksCollection = salesChunksCollections[activeSalesPeriod];
         if (!chunksCollection) return;
         const snapshot = await getDocs(chunksCollection);
         if (isCancelled) return;
+        const selectedDocuments = selectSalesChunkDocuments(snapshot.docs, salesPeriodMeta?.[activeSalesPeriod]);
+        if (!isSalesChunkSelectionComplete(selectedDocuments, salesPeriodMeta?.[activeSalesPeriod])) {
+          throw new Error('販売実績データの一部を取得できませんでした。');
+        }
         const fullSalesMap = mergeSerializedSalesChunks(
-          snapshot.docs.map((snapshotDoc) => snapshotDoc.data()?.items),
+          selectedDocuments.map((snapshotDoc) => snapshotDoc.data()?.items),
           { onParseError: (error) => console.error("Failed to parse sales chunk", error) }
         );
-        setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: fullSalesMap });
-        await idbHelper.setItem(cacheKey, { data: fullSalesMap, fetchedAt: Date.now() });
+        setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: fullSalesMap, generationId: expectedGenerationId });
+        await idbHelper.setItem(cacheKey, { data: fullSalesMap, generationId: expectedGenerationId, fetchedAt: Date.now() });
       } catch (error) {
         console.error("Historical sales load failed:", error);
         // 読み込めなかった期は空として扱い、再試行のループを避ける
-        if (!isCancelled) setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: {} });
+        if (!isCancelled) setLoadedHistoricalSales({ periodId: activeSalesPeriod, data: {}, generationId: expectedGenerationId });
       }
     };
 
     void loadPeriod();
     return () => { isCancelled = true; };
-  }, [activeSalesPeriod, loadedHistoricalSales.periodId, salesChunksCollections]);
+  }, [activeSalesPeriod, loadedHistoricalSales.generationId, loadedHistoricalSales.periodId, salesChunksCollections, salesPeriodMeta]);
 
   // 全体表示に切り替えた時、実績モードを自動的にオフにする
   useEffect(() => {
@@ -944,13 +960,17 @@ export default function App() {
 
     const loadSalesWithCache = async (metaData = null) => {
       const metaSeconds = toComparableSeconds(metaData?.updatedAt);
+      const metaGenerationId = String(metaData?.generationId || '');
       let cachedBundle = null;
       try {
         cachedBundle = await idbHelper.getItem(CLOUD_SALES_CACHE_KEY);
         if (isCancelled) return;
         if (cachedBundle?.data) {
           setSalesData(cachedBundle.data);
-          if (!metaSeconds || cachedBundle.metaSeconds === metaSeconds) return;
+          const generationMatches = metaGenerationId
+            ? cachedBundle.generationId === metaGenerationId
+            : (!metaSeconds || cachedBundle.metaSeconds === metaSeconds);
+          if (generationMatches) return;
         }
       } catch (error) {
         console.error("Cloud sales cache load failed:", error);
@@ -960,14 +980,19 @@ export default function App() {
       try {
         const snapshot = await getDocs(salesChunksCollection);
         if (isCancelled) return;
+        const selectedDocuments = selectSalesChunkDocuments(snapshot.docs, metaData);
+        if (!isSalesChunkSelectionComplete(selectedDocuments, metaData)) {
+          throw new Error('販売実績データの一部を取得できませんでした。');
+        }
         const fullSalesMap = mergeSerializedSalesChunks(
-          snapshot.docs.map((snapshotDoc) => snapshotDoc.data()?.items),
+          selectedDocuments.map((snapshotDoc) => snapshotDoc.data()?.items),
           { onParseError: (error) => console.error("Failed to parse sales chunk", error) }
         );
         setSalesData(fullSalesMap);
         await idbHelper.setItem(CLOUD_SALES_CACHE_KEY, {
           data: fullSalesMap,
           metaSeconds,
+          generationId: metaGenerationId,
           fetchedAt: Date.now()
         });
       } catch (err) {
@@ -1340,7 +1365,8 @@ export default function App() {
   // --- Sales CSV Import Logic ---
   // 期 (今期 / 前期 / 前々期) ごとに別のチャンクコレクションとメタ文書へ保存する。
   const handleImportSalesCSV = async (file, periodId = SALES_PERIOD_CURRENT, metricType = 'quantity') => {
-    if (isLockedRef.current) return;
+    if (isLockedRef.current || salesImportInProgressRef.current) return;
+    salesImportInProgressRef.current = true;
     const period = getSalesPeriodDefinition(periodId);
     const metricLabels = {
       quantity: '販売数量',
@@ -1361,29 +1387,40 @@ export default function App() {
         const periodChunksCollection = salesChunksCollections[period.id];
         if (!periodChunksCollection) throw new Error('販売実績データの保存先に接続できません。');
         snapshot = await getDocs(periodChunksCollection);
-        existingSalesMap = mergeSerializedSalesChunks(snapshot.docs.map((snapshotDoc) => snapshotDoc.data()?.items));
+        const selectedDocuments = selectSalesChunkDocuments(snapshot.docs, salesPeriodMeta?.[period.id]);
+        if (!isSalesChunkSelectionComplete(selectedDocuments, salesPeriodMeta?.[period.id])) {
+          throw new Error('保存済みの販売実績データが不完全なため、上書きを中止しました。');
+        }
+        existingSalesMap = mergeSerializedSalesChunks(
+          selectedDocuments.map((snapshotDoc) => snapshotDoc.data()?.items),
+          { onParseError: () => { throw new Error('保存済みの販売実績データを正しく読み込めないため、上書きを中止しました。'); } }
+        );
       }
       // 大きなCSVでも画面が固まらないよう、対応ブラウザでは別スレッドで解析する
       const importedSalesMap = await parseSalesCsvWithoutBlocking(text, { metricType: normalizedMetricType });
+      validateSalesMetricImport(importedSalesMap, existingSalesMap, normalizedMetricType);
       const salesMap = mergeSalesMetricData(existingSalesMap, importedSalesMap, normalizedMetricType);
       const previousMeta = salesPeriodMeta?.[period.id] || {};
       const sourceFiles = {
         ...(previousMeta.sourceFiles || {}),
         [normalizedMetricType]: file?.name || ''
       };
-      const periodMeta = buildSalesPeriodMeta({ salesData: salesMap, fileName: file?.name || '', sourceFiles });
-
-      const applyLoadedPeriod = () => {
+      const applyLoadedPeriod = (periodMeta) => {
         setSalesPeriodMeta((current) => ({ ...current, [period.id]: periodMeta }));
         if (period.id === SALES_PERIOD_CURRENT) setSalesData(salesMap);
-        else setLoadedHistoricalSales({ periodId: period.id, data: salesMap });
+        else setLoadedHistoricalSales({
+          periodId: period.id,
+          data: salesMap,
+          generationId: String(periodMeta?.generationId || '')
+        });
       };
 
       if (USE_LOCAL_STORAGE) {
+        const periodMeta = buildSalesPeriodMeta({ salesData: salesMap, fileName: file?.name || '', sourceFiles });
         try {
           await idbHelper.setItem(period.localDataKey, salesMap);
           await idbHelper.setItem(period.localMetaKey, periodMeta);
-          applyLoadedPeriod();
+          applyLoadedPeriod(periodMeta);
           setProgressMessage("完了しました");
           setTimeout(() => {
             setIsProcessing(false);
@@ -1404,43 +1441,61 @@ export default function App() {
       // Chunking logic
       setProgressMessage("データを保存中...");
       const chunks = splitSalesDataIntoChunks(salesMap);
+      const generationId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const periodMeta = buildSalesPeriodMeta({
+        salesData: salesMap,
+        fileName: file?.name || '',
+        sourceFiles,
+        generationId,
+        chunkCount: chunks.length
+      });
 
       // Firestoreの10MiBリクエスト上限に十分な余裕を持たせるため、
-      // 旧チャンクの削除と新チャンクの保存を少数ずつ確定する。
+      // 新世代をすべて保存してからメタ文書を切り替え、途中失敗時も旧世代を表示し続ける。
       for (let index = 0; index < chunks.length; index += SALES_DATA_WRITE_BATCH_SIZE) {
         const writeBatchChunk = writeBatch(db);
         chunks.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((chunk, offset) => {
           const realIndex = index + offset;
-          writeBatchChunk.set(doc(periodChunksCollection, `chunk_${realIndex}`), {
+          writeBatchChunk.set(doc(periodChunksCollection, `g_${generationId}_chunk_${realIndex}`), {
             items: JSON.stringify(chunk),
             updatedAt: serverTimestamp(),
-            chunkIndex: realIndex
+            chunkIndex: realIndex,
+            generationId
           });
         });
         setProgressMessage(`データを保存中... ${Math.min(index + SALES_DATA_WRITE_BATCH_SIZE, chunks.length)}/${chunks.length}`);
         await runCloudWrite(() => writeBatchChunk.commit(), { key: 'sales-data' });
       }
 
-      const currentChunkIds = new Set(chunks.map((_, index) => `chunk_${index}`));
-      const obsoleteDocs = (snapshot?.docs || []).filter((snapshotDoc) => !currentChunkIds.has(snapshotDoc.id));
-      for (let index = 0; index < obsoleteDocs.length; index += SALES_DATA_WRITE_BATCH_SIZE) {
-        const deleteBatch = writeBatch(db);
-        obsoleteDocs.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((snapshotDoc) => deleteBatch.delete(snapshotDoc.ref));
-        await runCloudWrite(() => deleteBatch.commit(), { key: 'sales-data' });
-      }
-
-      await setDoc(doc(settingsCollection, period.metaDocumentId), {
+      await runCloudWrite(() => setDoc(doc(settingsCollection, period.metaDocumentId), {
         ...periodMeta,
         updatedAt: serverTimestamp()
-      });
+      }), { key: 'sales-data' });
 
       const cachedMetaSeconds = Math.floor(Date.now() / 1000);
-      await idbHelper.setItem(getSalesPeriodCacheKey(CLOUD_SALES_CACHE_KEY, period.id), {
-        data: salesMap,
-        metaSeconds: cachedMetaSeconds,
-        fetchedAt: Date.now()
-      });
-      applyLoadedPeriod();
+      try {
+        await idbHelper.setItem(getSalesPeriodCacheKey(CLOUD_SALES_CACHE_KEY, period.id), {
+          data: salesMap,
+          metaSeconds: cachedMetaSeconds,
+          generationId,
+          fetchedAt: Date.now()
+        });
+      } catch (cacheError) {
+        console.warn('Sales data cache update failed:', cacheError);
+      }
+      applyLoadedPeriod(periodMeta);
+
+      // メタの切替後に旧世代を掃除する。失敗しても読み込み対象にはならないため取込自体は成功扱い。
+      try {
+        const obsoleteDocs = snapshot?.docs || [];
+        for (let index = 0; index < obsoleteDocs.length; index += SALES_DATA_WRITE_BATCH_SIZE) {
+          const deleteBatch = writeBatch(db);
+          obsoleteDocs.slice(index, index + SALES_DATA_WRITE_BATCH_SIZE).forEach((snapshotDoc) => deleteBatch.delete(snapshotDoc.ref));
+          await runCloudWrite(() => deleteBatch.commit(), { key: 'sales-data-cleanup' });
+        }
+      } catch (cleanupError) {
+        console.warn('Old sales data cleanup failed:', cleanupError);
+      }
 
       showAlert(`${period.label}の${metricLabel}データを取り込みました！`);
       setIsSettingsOpen(false);
@@ -1449,6 +1504,7 @@ export default function App() {
       console.error(err);
       showAlert("取り込みに失敗しました: " + err.message);
     } finally {
+      salesImportInProgressRef.current = false;
       setIsProcessing(false);
     }
   };
@@ -4159,6 +4215,7 @@ export default function App() {
         onImportSalesCSV={handleImportSalesCSV}
         salesPeriodOptions={SALES_PERIOD_OPTIONS}
         salesPeriodMeta={salesPeriodMeta}
+        isProcessing={isProcessing}
       />
 
       <ConfirmModal

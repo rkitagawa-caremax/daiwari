@@ -6,7 +6,7 @@ const ProcessingModal = React.memo(({ isOpen, current, total, message }) => {
 
   const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm cursor-wait m3-animate-fade-in">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm cursor-wait m3-animate-fade-in">
       <div className="m3-dialog w-96 flex flex-col items-center m3-animate-scale-in">
         <div className="relative mb-6">
           <div className="absolute inset-0 rounded-full blur-xl opacity-30 animate-pulse" style={{ background: 'var(--m3-primary)' }}></div>

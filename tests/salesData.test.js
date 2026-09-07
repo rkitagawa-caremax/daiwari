@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 
 import {
   buildMonthlySalesSeries,
+  isSalesChunkSelectionComplete,
   mergeSalesMetricData,
   mergeSerializedSalesChunks,
   parseSalesCsvContent,
   resolveSalesMonthColumns,
+  selectSalesChunkDocuments,
   splitSalesDataIntoChunks,
-  summarizeGrossProfitRows
+  summarizeGrossProfitRows,
+  validateSalesMetricImport
 } from '../src/domain/salesData.js';
 
 const makeSalesRow = ({ name = '', spec = '', code = '', count = '' } = {}) => {
@@ -59,6 +62,37 @@ test('separate amount CSV treats the selected value column as sales amount', () 
   const parsed = parseSalesCsvContent(csv, { metricType: 'salesAmount' });
   assert.deepEqual(parsed, { E001: [{ name: '商品A', spec: '10個入', salesAmount: 12345 }] });
   assert.equal(Object.hasOwn(parsed.E001[0], 'count'), false);
+});
+
+test('single-row headers and leading metadata are detected without dropping the first product', () => {
+  const csv = [
+    '2026年度実績',
+    '商品名,規格,介援隊コード,売上額',
+    '商品A,10個入,E001,"12,345"',
+    '商品B,20個入,E002,5000'
+  ].join('\n');
+
+  assert.deepEqual(parseSalesCsvContent(csv, { metricType: 'salesAmount' }), {
+    E001: [{ name: '商品A', spec: '10個入', salesAmount: 12345 }],
+    E002: [{ name: '商品B', spec: '20個入', salesAmount: 5000 }]
+  });
+});
+
+test('metric import validation rejects empty, all-zero and suspiciously truncated replacements', () => {
+  assert.throws(
+    () => validateSalesMetricImport({}, {}, 'quantity'),
+    /既存データは変更されていません/
+  );
+  assert.throws(
+    () => validateSalesMetricImport({ A: [{ count: 0 }] }, {}, 'quantity'),
+    /すべて空欄または0/
+  );
+  const existing = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`E${index}`, [{ salesAmount: 100 }]]));
+  const imported = Object.fromEntries(Array.from({ length: 9 }, (_, index) => [`E${index}`, [{ salesAmount: 200 }]]));
+  assert.throws(
+    () => validateSalesMetricImport(imported, existing, 'salesAmount'),
+    /半数未満/
+  );
 });
 
 test('metric imports merge without erasing the other performance values', () => {
@@ -179,4 +213,25 @@ test('mergeSerializedSalesChunks merges valid chunks and reports invalid chunks'
     B: [{ count: 2 }]
   });
   assert.deepEqual(parseErrors, [1]);
+});
+
+test('sales chunk selection reads only the committed generation and keeps legacy compatibility', () => {
+  const makeDoc = (id, data) => ({ id, data: () => data });
+  const documents = [
+    makeDoc('g_old_chunk_0', { generationId: 'old', chunkIndex: 0, items: '{}' }),
+    makeDoc('g_new_chunk_1', { generationId: 'new', chunkIndex: 1, items: '{}' }),
+    makeDoc('g_new_chunk_0', { generationId: 'new', chunkIndex: 0, items: '{}' })
+  ];
+  const selectedGeneration = selectSalesChunkDocuments(documents, { generationId: 'new' });
+  assert.deepEqual(selectedGeneration.map((document) => document.id), ['g_new_chunk_0', 'g_new_chunk_1']);
+  assert.deepEqual(
+    selectSalesChunkDocuments([
+      makeDoc('chunk_1', { chunkIndex: 1, items: '{}' }),
+      makeDoc('chunk_0', { chunkIndex: 0, items: '{}' })
+    ]).map((document) => document.id),
+    ['chunk_0', 'chunk_1']
+  );
+  assert.deepEqual(selectSalesChunkDocuments(documents), []);
+  assert.equal(isSalesChunkSelectionComplete(selectedGeneration.slice(0, 1), { generationId: 'new', chunkCount: 2 }), false);
+  assert.equal(isSalesChunkSelectionComplete(selectedGeneration, { generationId: 'new', chunkCount: 2 }), true);
 });

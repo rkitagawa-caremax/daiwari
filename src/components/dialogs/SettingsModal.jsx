@@ -14,7 +14,8 @@ const SettingsModal = React.memo(({
   onClose,
   onImportSalesCSV,
   salesPeriodOptions = [],
-  salesPeriodMeta = {}
+  salesPeriodMeta = {},
+  isProcessing = false
 }) => {
   const fileInputRefs = useRef({});
   const [targetPeriodId, setTargetPeriodId] = useState(salesPeriodOptions[0]?.id || 'current');
@@ -26,7 +27,7 @@ const SettingsModal = React.memo(({
   const handleFileChange = (event, metricType) => {
     const file = event.target.files[0];
     event.target.value = '';
-    if (file) onImportSalesCSV(file, targetPeriodId, metricType);
+    if (file && !isProcessing) onImportSalesCSV(file, targetPeriodId, metricType);
   };
 
   const importOptions = [
@@ -45,7 +46,7 @@ const SettingsModal = React.memo(({
             </div>
             設定
           </h3>
-          <button onClick={onClose} className="m3-icon-btn">
+          <button onClick={onClose} className="m3-icon-btn" disabled={isProcessing}>
             <X size={20} />
           </button>
         </div>
@@ -96,6 +97,7 @@ const SettingsModal = React.memo(({
                         value={period.id}
                         checked={isSelected}
                         onChange={() => setTargetPeriodId(period.id)}
+                        disabled={isProcessing}
                         className="shrink-0"
                       />
                       <span className="min-w-0 flex-1">
@@ -126,11 +128,13 @@ const SettingsModal = React.memo(({
                         accept=".csv"
                         ref={(node) => { fileInputRefs.current[option.id] = node; }}
                         onChange={(event) => handleFileChange(event, option.id)}
+                        disabled={isProcessing}
                         className="hidden"
                       />
                       <button
                         onClick={() => fileInputRefs.current[option.id]?.click()}
-                        className="flex w-full flex-col items-center rounded-xl bg-white px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                        disabled={isProcessing}
+                        className="flex w-full flex-col items-center rounded-xl bg-white px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-wait disabled:opacity-50 disabled:hover:translate-y-0"
                       >
                         <Icon size={21} className={`mb-1.5 ${option.iconClass}`} />
                         <span className="text-xs font-bold text-slate-800">{option.label}</span>
@@ -153,7 +157,7 @@ const SettingsModal = React.memo(({
         </div>
 
         <div className="p-4 border-t flex justify-end" style={{ borderColor: 'var(--m3-outline-variant)', background: 'var(--m3-surface-container)' }}>
-          <button onClick={onClose} className="m3-btn-outlined">
+          <button onClick={onClose} className="m3-btn-outlined" disabled={isProcessing}>
             閉じる
           </button>
         </div>

@@ -57,7 +57,14 @@ export const getSalesDataMonthLabels = (salesData) => {
   return [];
 };
 
-export const buildSalesPeriodMeta = ({ salesData, fileName = '', sourceFiles = {}, updatedAt = new Date() } = {}) => {
+export const buildSalesPeriodMeta = ({
+  salesData,
+  fileName = '',
+  sourceFiles = {},
+  updatedAt = new Date(),
+  generationId = '',
+  chunkCount = 0
+} = {}) => {
   const metrics = summarizeSalesDataMetrics(salesData);
   return {
     fileName,
@@ -69,6 +76,7 @@ export const buildSalesPeriodMeta = ({ salesData, fileName = '', sourceFiles = {
       0
     ),
     monthLabels: getSalesDataMonthLabels(salesData),
-    metrics
+    metrics,
+    ...(generationId ? { generationId, chunkCount } : {})
   };
 };
