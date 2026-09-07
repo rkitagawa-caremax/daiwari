@@ -41,10 +41,10 @@ const INDEX_CACHE_KEY = `edgeAiCatalogIndex:${EDGE_AI_MODEL_VERSION}`;
 const EMBEDDING_BATCH_SIZE = 12;
 
 const TABS = [
-  { id: 'search', label: '商品意味検索', description: '言葉で商品を探す', icon: <Search size={15} /> },
-  { id: 'similar', label: '類似品提案', description: '代替候補を比較', icon: <Sparkles size={15} /> },
-  { id: 'advisor', label: '台割アドバイス', description: '売上と誌面を診断', icon: <Lightbulb size={15} /> },
-  { id: 'diff', label: '変更チェック', description: '更新データを照合', icon: <FileDiff size={15} /> }
+  { id: 'search', label: '商品検索', icon: <Search size={17} /> },
+  { id: 'similar', label: '類似品', icon: <Sparkles size={17} /> },
+  { id: 'advisor', label: '台割診断', icon: <Lightbulb size={17} /> },
+  { id: 'diff', label: '変更確認', icon: <FileDiff size={17} /> }
 ];
 
 const STATUS_LABELS = {
@@ -154,12 +154,12 @@ const AdvisorMetric = ({ icon, label, value, note, tone = 'violet' }) => {
     <div className="rounded-[20px] border border-white/80 bg-white p-3.5 shadow-[0_8px_24px_rgba(31,42,68,0.06)]">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-[10px] font-semibold text-[#7a8495]">{label}</p>
-          <p className="mt-1 font-mono text-xl font-black tracking-tight text-[#273246]">{value}</p>
+          <p className="text-xs font-semibold text-[#657086]">{label}</p>
+          <p className="mt-1 font-mono text-2xl font-black tracking-tight text-[#273246]">{value}</p>
         </div>
         <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${tones[tone]}`}>{icon}</span>
       </div>
-      {note && <p className="mt-1 text-[9px] text-[#98a1b1]">{note}</p>}
+      {note && <p className="mt-1.5 text-[11px] text-[#7f8999]">{note}</p>}
     </div>
   );
 };
@@ -174,18 +174,18 @@ const AdvisorActionCard = ({ action, index }) => {
     <article className="relative overflow-hidden rounded-[20px] border border-[#e8ebf2] bg-white p-4 pl-5 transition hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(31,42,68,0.08)]">
       <span className={`absolute inset-y-0 left-0 w-1 ${styles.rail}`} />
       <div className="flex items-start gap-3">
-        <span className={`font-mono text-xs font-black ${styles.number}`}>{String(index + 1).padStart(2, '0')}</span>
+        <span className={`font-mono text-sm font-black ${styles.number}`}>{String(index + 1).padStart(2, '0')}</span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${styles.badge}`}>
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${styles.badge}`}>
               {action.priority === 'high' ? '優先' : action.priority === 'mid' ? '検討' : '参考'}
             </span>
-            <span className="text-[9px] font-semibold text-[#8a94a6]">{action.category}</span>
-            {action.metric && <span className="ml-auto font-mono text-[9px] font-bold text-[#697386]">{action.metric}</span>}
+            <span className="text-[11px] font-semibold text-[#7b8494]">{action.category}</span>
+            {action.metric && <span className="ml-auto font-mono text-[11px] font-bold text-[#697386]">{action.metric}</span>}
           </div>
-          <h5 className="mt-2 text-xs font-bold leading-relaxed text-[#273246]">{action.title}</h5>
-          <p className="mt-1 text-[10px] leading-relaxed text-[#596579]">{action.detail}</p>
-          <p className="mt-2 border-t border-[#eef0f5] pt-2 text-[9px] leading-relaxed text-[#7c72c9]">{action.theory}</p>
+          <h5 className="mt-2.5 text-sm font-bold leading-relaxed text-[#273246]">{action.title}</h5>
+          <p className="mt-1.5 text-xs leading-6 text-[#596579]">{action.detail}</p>
+          <p className="mt-3 border-t border-[#eef0f5] pt-2.5 text-[11px] leading-5 text-[#6f65bc]">{action.theory}</p>
         </div>
       </div>
     </article>
@@ -435,9 +435,9 @@ const EdgeAiAssistModal = ({
           </button>
         </header>
 
-        <div className="flex items-center gap-3 border-b border-[#e5e9f0] bg-white/80 px-3 py-2.5 sm:px-6">
-          <nav className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto rounded-2xl bg-[#f1f3f8] p-1.5" aria-label="AIアシスト機能" role="tablist">
-            {TABS.map(({ id, label, description, icon }) => {
+        <div className="flex items-center gap-3 border-b border-[#e5e9f0] bg-white/80 px-3 py-3 sm:px-6">
+          <nav className="grid min-w-[520px] flex-1 grid-cols-4 gap-1.5 overflow-x-auto rounded-2xl bg-[#f1f3f8] p-1.5" aria-label="AIアシスト機能" role="tablist">
+            {TABS.map(({ id, label, icon }) => {
               const selected = activeTab === id;
               return (
                 <button
@@ -446,15 +446,12 @@ const EdgeAiAssistModal = ({
                   aria-selected={selected}
                   key={id}
                   onClick={() => setActiveTab(id)}
-                  className={`group flex min-w-[142px] flex-1 shrink-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition-all duration-200 ${selected ? 'bg-white text-[#5145cd] shadow-[0_5px_16px_rgba(42,50,80,0.11)] ring-1 ring-black/[0.03]' : 'text-[#697386] hover:bg-white/60 hover:text-[#313b4d]'}`}
+                  className={`group flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 py-2 text-center text-[13px] font-bold transition-all duration-200 ${selected ? 'bg-[#6557e8] text-white shadow-[0_5px_14px_rgba(101,87,232,0.26)]' : 'text-[#5f697a] hover:bg-white hover:text-[#3d4657]'}`}
                 >
-                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] transition ${selected ? 'bg-gradient-to-br from-[#6d5df3] to-[#8b70e8] text-white shadow-[0_4px_10px_rgba(101,87,232,0.28)]' : 'bg-white text-[#7b8496] shadow-sm group-hover:text-[#6557e8]'}`}>
+                  <span className={`flex shrink-0 items-center justify-center transition ${selected ? 'text-white' : 'text-[#7b8496] group-hover:text-[#6557e8]'}`}>
                     {icon}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block whitespace-nowrap text-[11px] font-bold">{label}</span>
-                    <span className={`hidden whitespace-nowrap text-[9px] font-medium lg:block ${selected ? 'text-[#887ee0]' : 'text-[#9aa2b0]'}`}>{description}</span>
-                  </span>
+                  <span className="whitespace-nowrap">{label}</span>
                 </button>
               );
             })}
@@ -588,15 +585,15 @@ const EdgeAiAssistModal = ({
                   <div className="flex items-center gap-3">
                     <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#6657e8] to-[#9a75dd] text-white shadow-[0_8px_20px_rgba(101,87,232,0.24)]"><LayoutDashboard size={20} /></span>
                     <div>
-                      <h3 className="text-xl font-semibold tracking-tight text-[#273246]">台割インサイト</h3>
-                      <p className="mt-0.5 text-[11px] text-[#7a8495]">売上・誌面面積・品揃えを横断して、次に直す場所を見つけます</p>
+                      <h3 className="text-2xl font-bold tracking-tight text-[#273246]">台割診断</h3>
+                      <p className="mt-1 text-sm text-[#687386]">売上と誌面のバランスから、見直すポイントを提案します</p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={runAdvisor}
                     disabled={products.length === 0}
-                    className="flex items-center gap-1.5 rounded-xl bg-[#6254e7] px-4 py-2.5 text-[11px] font-semibold text-white shadow-[0_6px_16px_rgba(98,84,231,0.22)] transition hover:-translate-y-0.5 hover:bg-[#5145cd] disabled:translate-y-0 disabled:opacity-40"
+                    className="flex items-center gap-2 rounded-xl bg-[#6254e7] px-5 py-3 text-sm font-bold text-white shadow-[0_6px_16px_rgba(98,84,231,0.22)] transition hover:-translate-y-0.5 hover:bg-[#5145cd] disabled:translate-y-0 disabled:opacity-40"
                   >
                     <BarChart3 size={14} /> {advisorReport ? '最新データで再分析' : '台割を分析する'}
                   </button>
@@ -611,32 +608,24 @@ const EdgeAiAssistModal = ({
                   </div>
                 ) : (
                   <div className="mt-5 space-y-4">
-                    <section className="relative overflow-hidden rounded-[26px] bg-gradient-to-br from-[#332d72] via-[#4c4196] to-[#6753b5] p-5 text-white shadow-[0_16px_36px_rgba(52,45,114,0.2)] sm:p-6">
-                      <div className="absolute -right-12 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
-                      <div className="relative flex flex-wrap items-center justify-between gap-5">
+                    <section className="rounded-[24px] bg-[#504399] p-5 text-white shadow-[0_14px_30px_rgba(52,45,114,0.18)] sm:p-6">
+                      <div className="flex flex-wrap items-center justify-between gap-5">
                         <div>
-                          <p className="text-[9px] font-bold tracking-[0.2em] text-[#c8c1ff]">DIAGNOSIS OVERVIEW</p>
-                          <h4 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+                          <p className="text-xs font-bold text-[#d8d4ff]">診断結果</p>
+                          <h4 className="mt-2 text-2xl font-bold tracking-tight sm:text-[28px]">
                             {advisorReport.summary.priorityCounts.high > 0
                               ? `優先して見直したい項目が ${advisorReport.summary.priorityCounts.high}件あります`
                               : advisorReport.summary.priorityCounts.mid > 0
                                 ? `改善を検討したい項目が ${advisorReport.summary.priorityCounts.mid}件あります`
                                 : '大きな偏りは見つかりませんでした'}
                           </h4>
-                          <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
-                            <span className="rounded-full bg-white/12 px-2.5 py-1">{advisorReport.actions.length}件の提案</span>
-                            <span className="rounded-full bg-white/12 px-2.5 py-1">{advisorReport.summary.genreCount}ジャンルを比較</span>
-                            <span className="rounded-full bg-white/12 px-2.5 py-1">{advisorReport.summary.usedEmbeddings ? '意味ベクトル使用' : '語彙類似で判定'}</span>
-                          </div>
+                          <p className="mt-3 text-sm text-[#dedaff]">{advisorReport.actions.length}件の改善案を、重要な順に表示しています</p>
                         </div>
-                        <div className="flex min-w-[126px] items-center gap-3 rounded-2xl bg-white/10 p-3 ring-1 ring-white/15 backdrop-blur-sm">
-                          <div className="relative flex h-14 w-14 items-center justify-center rounded-full bg-white/10">
-                            <span className="font-mono text-lg font-black">{advisorReport.dataQuality.score}</span>
-                            <span className="absolute -bottom-1 rounded-full bg-emerald-400 px-1.5 py-0.5 text-[7px] font-black text-emerald-950">DATA</span>
-                          </div>
+                        <div className="flex min-w-[170px] items-center gap-3 rounded-2xl bg-white/12 px-4 py-3 ring-1 ring-white/20">
+                          <span className="font-mono text-3xl font-black">{advisorReport.dataQuality.score}</span>
                           <div>
-                            <p className="text-[9px] text-[#cec9f5]">分析信頼度</p>
-                            <p className="mt-0.5 text-xs font-bold">{advisorReport.dataQuality.level === 'high' ? '高い' : advisorReport.dataQuality.level === 'medium' ? '標準' : '要データ補完'}</p>
+                            <p className="text-xs text-[#d8d4ff]">分析信頼度 / 100</p>
+                            <p className="mt-0.5 text-sm font-bold">{advisorReport.dataQuality.level === 'high' ? '十分なデータです' : advisorReport.dataQuality.level === 'medium' ? '標準的です' : 'データを補ってください'}</p>
                           </div>
                         </div>
                       </div>
@@ -653,10 +642,10 @@ const EdgeAiAssistModal = ({
                       <section>
                         <div className="mb-2.5 flex items-center justify-between px-1">
                           <div>
-                            <h4 className="text-sm font-bold text-[#273246]">次に行うこと</h4>
-                            <p className="mt-0.5 text-[9px] text-[#8a94a6]">影響度の高い順に最大8件を表示</p>
+                            <h4 className="text-lg font-bold text-[#273246]">おすすめの見直し</h4>
+                            <p className="mt-1 text-xs text-[#7a8495]">重要なものから順に表示しています</p>
                           </div>
-                          {advisorReport.summary.priorityCounts.high > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[9px] font-bold text-rose-600">優先 {advisorReport.summary.priorityCounts.high}</span>}
+                          {advisorReport.summary.priorityCounts.high > 0 && <span className="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-600">優先 {advisorReport.summary.priorityCounts.high}件</span>}
                         </div>
                       {advisorReport.actions.length === 0 ? (
                         <div className="rounded-[20px] bg-emerald-50 p-5 text-xs text-emerald-700">現在のバランスを維持してください。</div>
@@ -670,27 +659,23 @@ const EdgeAiAssistModal = ({
                       <aside className="space-y-3">
                         <section className="rounded-[22px] border border-[#e8ebf2] bg-white p-4">
                           <div className="flex items-center justify-between">
-                            <h4 className="text-xs font-bold text-[#273246]">ABC構成</h4>
-                            <span className="text-[9px] text-[#8a94a6]">累積売上基準</span>
+                            <h4 className="text-base font-bold text-[#273246]">売上ランク別の商品数</h4>
+                            <span className="text-xs text-[#7a8495]">ABC分析</span>
                           </div>
-                          <div className="mt-4 flex h-2.5 overflow-hidden rounded-full bg-[#eef1f6]">
+                          <div className="mt-4 grid grid-cols-3 gap-2">
                             {['A', 'B', 'C'].map((rank) => (
-                              <div key={rank} className={rank === 'A' ? 'bg-[#6557e8]' : rank === 'B' ? 'bg-[#60a5fa]' : 'bg-[#cbd5e1]'} style={{ width: `${advisorReport.summary.placedCount ? advisorReport.abc.counts[rank] / advisorReport.summary.placedCount * 100 : 0}%` }} />
-                            ))}
-                          </div>
-                          <div className="mt-3 grid grid-cols-3 gap-2">
-                            {['A', 'B', 'C'].map((rank) => (
-                              <div key={rank} className="rounded-xl bg-[#f7f8fb] px-2 py-2 text-center">
-                                <p className="text-[9px] font-bold text-[#8a94a6]">{rank}ランク</p>
-                                <p className="mt-0.5 font-mono text-base font-black text-[#344054]">{advisorReport.abc.counts[rank]}</p>
+                              <div key={rank} className={`rounded-xl px-2 py-3 text-center ${rank === 'A' ? 'bg-violet-50' : rank === 'B' ? 'bg-blue-50' : 'bg-slate-100'}`}>
+                                <p className="text-xs font-bold text-[#697386]">{rank}ランク</p>
+                                <p className="mt-1 font-mono text-xl font-black text-[#344054]">{advisorReport.abc.counts[rank]}</p>
+                                <p className="mt-0.5 text-[10px] text-[#8a94a6]">商品</p>
                               </div>
                             ))}
                           </div>
-                          <p className="mt-3 text-[9px] leading-relaxed text-[#7a8495]">上位10%の商品が売上の <b className="text-[#5145cd]">{Math.round(advisorReport.summary.topShare * 100)}%</b> を構成しています。</p>
+                          <p className="mt-4 rounded-xl bg-[#f7f8fb] px-3 py-2.5 text-xs leading-relaxed text-[#667085]">売上上位10%の商品で、全体売上の <b className="text-[#5145cd]">{Math.round(advisorReport.summary.topShare * 100)}%</b> を占めています。</p>
                         </section>
 
                         <section className="rounded-[22px] border border-[#e8ebf2] bg-white p-4">
-                          <h4 className="flex items-center gap-1.5 text-xs font-bold text-[#273246]"><CircleAlert size={14} className="text-[#7c6ee6]" /> 検出シグナル</h4>
+                          <h4 className="flex items-center gap-2 text-base font-bold text-[#273246]"><CircleAlert size={17} className="text-[#7c6ee6]" /> 見つかった項目</h4>
                           <div className="mt-3 divide-y divide-[#eef0f5]">
                             {[
                               ['実績ゼロ', `${advisorReport.abc.zeroSalesCount}商品`],
@@ -698,7 +683,7 @@ const EdgeAiAssistModal = ({
                               ['価格帯の不足', `${advisorReport.priceBands.rows.filter((row) => row.missing.length > 0).length}ジャンル`],
                               ['上昇 / 下降', `${advisorReport.momentum.rising.length} / ${advisorReport.momentum.falling.length}商品`]
                             ].map(([label, value]) => (
-                              <div key={label} className="flex items-center justify-between py-2 text-[10px]">
+                              <div key={label} className="flex items-center justify-between py-3 text-xs">
                                 <span className="text-[#697386]">{label}</span>
                                 <span className="font-mono font-bold text-[#344054]">{value}</span>
                               </div>
@@ -709,28 +694,25 @@ const EdgeAiAssistModal = ({
                     </div>
 
                     <section className="overflow-hidden rounded-[22px] border border-[#e8ebf2] bg-white">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] px-4 py-3.5">
+                      <div className="border-b border-[#edf0f5] px-5 py-4">
                         <div>
-                          <h4 className="text-sm font-bold text-[#273246]">ジャンル別スペース効率</h4>
-                          <p className="mt-0.5 text-[9px] text-[#8a94a6]">大コマを1/16単位へ換算し、複数ジャンル配置の売上を面積按分</p>
+                          <h4 className="text-lg font-bold text-[#273246]">ジャンル別の誌面バランス</h4>
+                          <p className="mt-1 text-xs text-[#7a8495]">誌面の割合と売上の割合を比べ、増減の目安を表示します</p>
                         </div>
-                        <div className="flex gap-3 text-[9px] text-[#7a8495]"><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-[#a9b8f5]" />誌面面積</span><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-[#34c6a3]" />売上</span></div>
+                      </div>
+                      <div className="hidden grid-cols-[minmax(140px,1fr)_100px_100px_120px] gap-3 bg-[#f7f8fb] px-5 py-2.5 text-xs font-bold text-[#7a8495] sm:grid">
+                        <span>ジャンル</span><span className="text-right">誌面の割合</span><span className="text-right">売上の割合</span><span className="text-right">判定</span>
                       </div>
                       <div className="divide-y divide-[#f0f2f6]">
                         {advisorReport.balance.rows.map((row) => (
-                          <div key={row.genre} className="grid gap-2 px-4 py-3 text-[10px] sm:grid-cols-[130px_minmax(0,1fr)_112px] sm:items-center">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-bold text-[#374357]">{row.genre}</span>
-                              {row.status !== 'ok' && <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold ${row.status === 'under' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{row.status === 'under' ? '増枠' : '縮小'}</span>}
+                          <div key={row.genre} className="grid gap-2 px-5 py-3.5 text-sm sm:grid-cols-[minmax(140px,1fr)_100px_100px_120px] sm:items-center">
+                            <div className="min-w-0">
+                              <p className="truncate font-bold text-[#374357]">{row.genre}</p>
+                              <p className="mt-0.5 text-[11px] text-[#8a94a6]">{row.spaceUnits.toLocaleString()}コマ分</p>
                             </div>
-                            <div className="space-y-1.5">
-                              <div className="h-1.5 overflow-hidden rounded-full bg-[#eef1f6]"><div className="h-full rounded-full bg-[#a9b8f5]" style={{ width: `${Math.min(100, row.panelShare * 100)}%` }} /></div>
-                              <div className="h-1.5 overflow-hidden rounded-full bg-[#eef1f6]"><div className="h-full rounded-full bg-[#34c6a3]" style={{ width: `${Math.min(100, row.salesShare * 100)}%` }} /></div>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 font-mono text-[9px] text-[#7a8495] sm:justify-end">
-                              <span>誌面{Math.round(row.panelShare * 100)}% / 売上{Math.round(row.salesShare * 100)}%</span>
-                              <span className={`rounded-lg px-1.5 py-1 font-bold ${row.fairShare >= 1.5 ? 'bg-emerald-50 text-emerald-700' : row.fairShare < 0.6 ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-600'}`}>{row.fairShare.toFixed(1)}×</span>
-                            </div>
+                            <p className="font-mono font-bold text-[#596579] sm:text-right"><span className="mr-1 text-xs text-[#98a1b1] sm:hidden">誌面</span>{Math.round(row.panelShare * 100)}%</p>
+                            <p className="font-mono font-bold text-[#273246] sm:text-right"><span className="mr-1 text-xs text-[#98a1b1] sm:hidden">売上</span>{Math.round(row.salesShare * 100)}%</p>
+                            <div className="sm:text-right"><span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${row.status === 'under' ? 'bg-emerald-50 text-emerald-700' : row.status === 'over' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{row.status === 'under' ? '誌面を増やす' : row.status === 'over' ? '誌面を減らす' : 'バランス良好'}</span></div>
                           </div>
                         ))}
                       </div>
@@ -743,12 +725,12 @@ const EdgeAiAssistModal = ({
                           ['落ちている商品', '前3ヶ月比', advisorReport.momentum.falling, 'text-rose-500', <TrendingDown key="down" size={14} className="text-rose-500" />]
                         ].map(([title, subtitle, rows, tone, icon]) => rows.length > 0 && (
                           <section key={title} className="rounded-[22px] border border-[#e8ebf2] bg-white p-4">
-                            <div className="flex items-center justify-between"><h4 className="flex items-center gap-1.5 text-xs font-bold text-[#273246]">{icon}{title}</h4><span className="text-[9px] text-[#9aa2b0]">{subtitle}</span></div>
+                            <div className="flex items-center justify-between"><h4 className="flex items-center gap-2 text-base font-bold text-[#273246]">{icon}{title}</h4><span className="text-xs text-[#7f8999]">{subtitle}</span></div>
                             <div className="mt-3 space-y-2">
                               {rows.map((row) => (
-                                <div key={row.id} className="flex items-center justify-between gap-3 text-[10px]">
-                                  <div className="min-w-0"><p className="truncate font-semibold text-[#4b5768]">{row.name}</p><p className="font-mono text-[8px] text-[#a0a7b4]">{Math.round(row.previousTotal)} → {Math.round(row.recentTotal)}</p></div>
-                                  <span className={`shrink-0 rounded-lg bg-[#f7f8fb] px-2 py-1 font-mono font-bold ${tone}`}>{formatTrendChange(row)}</span>
+                                <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#f8f9fb] px-3 py-2.5 text-xs">
+                                  <div className="min-w-0"><p className="truncate font-semibold text-[#4b5768]">{row.name}</p><p className="mt-0.5 font-mono text-[11px] text-[#8a94a6]">{Math.round(row.previousTotal)}個 → {Math.round(row.recentTotal)}個</p></div>
+                                  <span className={`shrink-0 rounded-lg bg-white px-2.5 py-1.5 font-mono text-sm font-bold ${tone}`}>{formatTrendChange(row)}</span>
                                 </div>
                               ))}
                             </div>
@@ -757,20 +739,18 @@ const EdgeAiAssistModal = ({
                       </div>
                     )}
 
-                    <section className="rounded-[20px] bg-[#eef1f6] px-4 py-3">
-                      <div className="grid gap-3 sm:grid-cols-3">
+                    <section className="rounded-[20px] bg-[#eef1f6] px-4 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="mr-1 text-xs font-bold text-[#596579]">データ充足率</span>
                         {[
                           ['売上', advisorReport.dataQuality.salesCoverage],
                           ['月別推移', advisorReport.dataQuality.monthlyCoverage],
                           ['価格', advisorReport.dataQuality.priceCoverage]
                         ].map(([label, value]) => (
-                          <div key={label}>
-                            <div className="flex justify-between text-[9px] font-semibold text-[#697386]"><span>{label}データ</span><span>{Math.round(value * 100)}%</span></div>
-                            <div className="mt-1 h-1 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-[#7568d9]" style={{ width: `${value * 100}%` }} /></div>
-                          </div>
+                          <span key={label} className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-[#596579]">{label} <b className="ml-1 text-[#5145cd]">{Math.round(value * 100)}%</b></span>
                         ))}
                       </div>
-                      <p className="mt-2.5 text-[9px] leading-relaxed text-[#8a94a6]">重複判定: {advisorReport.summary.usedEmbeddings ? '意味ベクトル＋価格差' : '語彙一致＋価格差（意味検索を準備すると精度向上）'} ／ 売上は現在選択中の期を使用 ／ 分析結果は提案であり、季節性・粗利・在庫状況と合わせて判断してください。</p>
+                      <p className="mt-3 text-[11px] leading-5 text-[#7a8495]">売上は現在選択中の期を使用しています。分析結果は、季節性・粗利・在庫状況と合わせて判断してください。</p>
                     </section>
                   </div>
                 )}
