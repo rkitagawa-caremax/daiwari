@@ -948,36 +948,54 @@ const Panel = React.memo(({
       {isGrossProfitView && matchedSales && (
         <div
           data-gross-profit-overlay="true"
-          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-between overflow-hidden bg-[#161405]/80 px-2 py-2 text-white"
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col overflow-hidden bg-slate-950/70 p-2 text-white backdrop-blur-[2px]"
         >
-          <div className="flex w-full items-center justify-between gap-1">
-            <span className="text-[8px] font-black tracking-[0.12em] text-yellow-200">{salesPeriodLabel}・粗利率</span>
-            <span className="font-mono text-lg font-black leading-none text-yellow-300 drop-shadow-[0_0_8px_rgba(253,224,71,0.95)]">
+          <div className="flex items-baseline justify-between gap-1 leading-none text-amber-50">
+            <span className="text-[11px] font-bold">{salesPeriodLabel}・粗利率</span>
+            <span className="font-mono text-2xl font-black leading-none tracking-tight text-amber-200">
               {grossProfitSummary.grossMargin == null ? '―' : `${Math.round(grossProfitSummary.grossMargin * 100)}%`}
             </span>
           </div>
 
           {grossProfitSummary.grossMargin == null ? (
-            <div className="flex flex-1 items-center justify-center text-center text-[10px] font-bold leading-relaxed text-yellow-100/70">
+            <div className="flex flex-1 items-center justify-center text-center text-[10px] font-bold leading-relaxed text-white/60">
               売上額・粗利額<br />データなし
             </div>
           ) : (
-            <div
+            <svg
+              viewBox="0 0 48 48"
+              role="img"
               aria-label={`粗利率 ${Math.round(grossProfitSummary.grossMargin * 100)}%`}
-              className="relative my-1 aspect-square w-[46%] min-w-[54px] max-w-[104px] rounded-full border border-yellow-200/80 shadow-[0_0_18px_rgba(250,204,21,0.82),inset_0_0_12px_rgba(250,204,21,0.35)]"
-              style={{
-                background: `conic-gradient(from 0deg, #fde047 0deg ${grossProfitSummary.chartRatio * 360}deg, rgba(255,255,255,0.12) ${grossProfitSummary.chartRatio * 360}deg 360deg)`
-              }}
+              className="my-1 min-h-0 w-full flex-1 overflow-visible"
             >
-              <span className="absolute inset-[19%] rounded-full border border-yellow-100/40 bg-[#171504] shadow-[inset_0_0_10px_rgba(250,204,21,0.18)]" />
-            </div>
+              <circle
+                cx="24"
+                cy="24"
+                r="17"
+                fill="rgba(15,23,42,0.45)"
+                stroke="rgba(255,255,255,0.16)"
+                strokeWidth="5.5"
+              />
+              <circle
+                cx="24"
+                cy="24"
+                r="17"
+                fill="none"
+                pathLength="100"
+                stroke="#facc15"
+                strokeWidth="5.5"
+                strokeLinecap="round"
+                strokeDasharray={`${grossProfitSummary.chartRatio * 100} 100`}
+                transform="rotate(-90 24 24)"
+              />
+            </svg>
           )}
 
-          <div className="w-full rounded-lg border border-yellow-300/40 bg-yellow-300/10 px-2 py-1 text-center shadow-[0_0_10px_rgba(250,204,21,0.18)]">
-            <p className="text-[7px] font-bold tracking-[0.12em] text-yellow-100/75">粗利総額</p>
-            <p className="mt-0.5 truncate font-mono text-sm font-black leading-none text-yellow-300 drop-shadow-[0_0_6px_rgba(253,224,71,0.72)]">
+          <div className="flex w-full items-baseline justify-between gap-1 border-t border-white/15 pt-1.5">
+            <span className="text-[10px] font-bold text-amber-50/80">粗利総額</span>
+            <span className="truncate font-mono text-sm font-black leading-none text-amber-200">
               {grossProfitSummary.hasGrossProfitAmount ? `¥${Math.round(grossProfitSummary.grossProfitAmount).toLocaleString()}` : '―'}
-            </p>
+            </span>
           </div>
         </div>
       )}

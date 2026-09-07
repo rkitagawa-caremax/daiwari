@@ -1,6 +1,57 @@
 import React from 'react';
 import { BarChart2, ChartSpline, FileDiff, Grid, Hash, List, LogOut, PieChart, Redo2, Undo2 } from 'lucide-react';
 
+const SalesPeriodTabs = ({
+  options,
+  activePeriod,
+  metaByPeriod,
+  displayMode,
+  isChartMode,
+  isLoading,
+  onSelect,
+  onShowQuickHelp,
+  onHideQuickHelp
+}) => (
+  <div
+    className="absolute left-1/2 top-full z-40 mt-1 flex -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white/95 p-0.5 shadow-md backdrop-blur-sm"
+    role="group"
+    aria-label="実績データの対象期間"
+  >
+    {options.map((period) => {
+      const isActive = period.id === activePeriod;
+      const periodMeta = metaByPeriod?.[period.id];
+      const isLegacyData = !!periodMeta && !periodMeta.metrics;
+      const hasData = displayMode === 'grossProfit'
+        ? (periodMeta?.metrics?.grossProfitAmount?.codes || 0) > 0
+        : (periodMeta?.metrics?.quantity?.codes || 0) > 0 || isLegacyData;
+      const activeClass = displayMode === 'grossProfit'
+        ? 'bg-yellow-400 text-amber-950 shadow-[0_0_12px_rgba(250,204,21,0.5)]'
+        : isChartMode
+          ? 'bg-cyan-600 text-white shadow-[0_0_10px_rgba(8,145,178,0.35)]'
+          : 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.35)]';
+      return (
+        <button
+          key={period.id}
+          type="button"
+          onClick={() => onSelect?.(period.id)}
+          onMouseEnter={(event) => onShowQuickHelp(event, period.label, hasData
+            ? `${period.description}の実績データを表示します。`
+            : `${period.description}の実績データはまだ取り込まれていません。設定から取り込めます。`)}
+          onMouseLeave={onHideQuickHelp}
+          className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${isActive
+            ? activeClass
+            : hasData ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
+          aria-pressed={isActive}
+          title={hasData ? `${period.label}の実績を表示` : `${period.label}のデータは未取り込み`}
+        >
+          {period.label}
+        </button>
+      );
+    })}
+    {isLoading && <span className="px-1 text-[10px] font-bold text-slate-400">読込中…</span>}
+  </div>
+);
+
 // 画面最上部のナビゲーションバー (M3 Expressive Style)。
 // 左: ロゴ / ログイン情報 / 戻る・進む / 詳細・全体 切替 / (選択モード時) 一括操作 / (詳細時) 実績モード
 // 右: ツールメニュー。selectionToolbar と toolsMenu は App 側で組み立てた要素をスロットとして受け取る
@@ -40,7 +91,9 @@ const AppHeader = ({
   selectionToolbar,
   toolsMenu
 }) => (
-  <div className="h-14 flex items-center justify-between px-4 z-30 flex-shrink-0 relative transition-all" style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
+  <div className={`${isSalesMode && !isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && salesPeriodOptions.length > 1
+    ? 'h-[5.75rem] items-start py-2'
+    : 'h-14 items-center'} flex justify-between px-4 z-30 flex-shrink-0 relative transition-all duration-300`} style={{ background: 'var(--m3-surface)', color: 'var(--m3-on-surface)' }}>
     <div className="flex items-center gap-5 flex-shrink-0">
       <div className="flex items-center">
         <div
@@ -143,87 +196,73 @@ const AppHeader = ({
       {/* 実績モード Toggle - 詳細表示時のみ */}
       {!isPageSelectionMode && (viewMode === 'list' || viewMode === 'single') && (
         <>
-          <button
-            onClick={onSalesModeClick}
-            onMouseDown={onSalesModeLongPressStart}
-            onMouseUp={onSalesModeLongPressEnd}
-            onMouseLeave={() => { onSalesModeLongPressEnd(); onHideQuickHelp(); }}
-            onTouchStart={onSalesModeLongPressStart}
-            onTouchEnd={onSalesModeLongPressEnd}
-            onTouchCancel={onSalesModeLongPressEnd}
-            onMouseEnter={(e) => onShowQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
-            className={`ml-2 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300
-              ${isSalesLookupOpen
-                ? 'animate-pulse border-violet-500 bg-violet-500/15 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)]'
-                : isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode
-                  ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-                  : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
-            title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
-          >
-            <BarChart2 size={18} />
-            <span className="hidden xl:inline">実績モード {isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode ? 'ON' : 'OFF'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onSalesChartModeClick}
-            onMouseEnter={(event) => onShowQuickHelp(event, '月別グラフ', '表示中の詳細ページにある全商品の月別売上グラフを一括で表示します。')}
-            onMouseLeave={onHideQuickHelp}
-            className={`ml-1 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isSalesChartMode
-              ? 'border-blue-500 bg-blue-500/10 text-blue-600 shadow-[0_0_15px_rgba(59,130,246,0.24)]'
-              : 'border-slate-200 bg-white text-blue-500 hover:border-blue-300 hover:bg-blue-50'}`}
-            aria-pressed={isSalesChartMode}
-            title={isSalesChartMode ? '月別グラフの一括表示を解除' : '月別グラフを全コマに一括表示'}
-          >
-            <ChartSpline size={18} strokeWidth={2.4} />
-            <span className="hidden xl:inline">月別グラフ {isSalesChartMode ? 'ON' : 'OFF'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onGrossProfitModeClick}
-            onMouseEnter={(event) => onShowQuickHelp(event, '粗利データ', 'コマごとの粗利率を円グラフ、粗利総額を金額で表示します。')}
-            onMouseLeave={onHideQuickHelp}
-            className={`ml-1 flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isSalesMode && salesDisplayMode === 'grossProfit'
-              ? 'border-yellow-400 bg-yellow-300/20 text-amber-700 shadow-[0_0_18px_rgba(250,204,21,0.55)]'
-              : 'border-slate-200 bg-white text-amber-600 hover:border-yellow-300 hover:bg-yellow-50'}`}
-            aria-pressed={isSalesMode && salesDisplayMode === 'grossProfit'}
-            title="コマ上に粗利率と粗利総額を表示"
-          >
-            <PieChart size={18} strokeWidth={2.5} />
-            <span className="hidden xl:inline">粗利データ</span>
-          </button>
-
-          {isSalesMode && salesPeriodOptions.length > 1 && (
-            <div className="ml-1 flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-0.5" role="group" aria-label="売上データの対象期間">
-              {salesPeriodOptions.map((period) => {
-                const isActive = period.id === activeSalesPeriod;
-                const periodMeta = salesPeriodMeta?.[period.id];
-                const hasData = salesDisplayMode === 'grossProfit'
-                  ? (periodMeta?.metrics?.grossProfitAmount?.codes || 0) > 0
-                  : !!periodMeta;
-                return (
-                  <button
-                    key={period.id}
-                    type="button"
-                    onClick={() => onSelectSalesPeriod?.(period.id)}
-                    onMouseEnter={(event) => onShowQuickHelp(event, period.label, hasData
-                      ? `${period.description}の売上データを表示します。`
-                      : `${period.description}の売上データはまだ取り込まれていません。設定から取り込めます。`)}
-                    onMouseLeave={onHideQuickHelp}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors ${isActive
-                      ? `${salesDisplayMode === 'grossProfit' ? 'bg-yellow-400 text-amber-950 shadow-[0_0_12px_rgba(250,204,21,0.5)]' : isSalesChartMode ? 'bg-cyan-600 text-white' : 'bg-emerald-500 text-white'} shadow-sm`
-                      : hasData ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
-                    aria-pressed={isActive}
-                    title={hasData ? `${period.label}の売上を表示` : `${period.label}のデータは未取り込み`}
-                  >
-                    {period.label}
-                  </button>
-                );
-              })}
-              {isSalesPeriodLoading && <span className="px-1 text-[10px] font-bold text-slate-400">読込中…</span>}
+          <div className="ml-2 flex items-start gap-1">
+            <div className="relative flex justify-center">
+              <button
+                onClick={onSalesModeClick}
+                onMouseDown={onSalesModeLongPressStart}
+                onMouseUp={onSalesModeLongPressEnd}
+                onMouseLeave={() => { onSalesModeLongPressEnd(); onHideQuickHelp(); }}
+                onTouchStart={onSalesModeLongPressStart}
+                onTouchEnd={onSalesModeLongPressEnd}
+                onTouchCancel={onSalesModeLongPressEnd}
+                onMouseEnter={(e) => onShowQuickHelp(e, '実績モード', 'クリックで重ね表示のON/OFF。2秒長押しで介援隊コード検索POPを開きます。')}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300
+                  ${isSalesLookupOpen
+                    ? 'animate-pulse border-violet-500 bg-violet-500/15 text-violet-700 shadow-[0_0_18px_rgba(139,92,246,0.55)]'
+                    : isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode
+                      ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
+                title="クリック: 実績モード切替 / 2秒長押し: コード実績検索"
+              >
+                <BarChart2 size={18} />
+                <span className="hidden xl:inline">実績モード {isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode ? 'ON' : 'OFF'}</span>
+              </button>
+              {isSalesMode && salesDisplayMode === 'quantity' && !isSalesChartMode && salesPeriodOptions.length > 1 && (
+                <SalesPeriodTabs options={salesPeriodOptions} activePeriod={activeSalesPeriod} metaByPeriod={salesPeriodMeta} displayMode={salesDisplayMode} isChartMode={false} isLoading={isSalesPeriodLoading} onSelect={onSelectSalesPeriod} onShowQuickHelp={onShowQuickHelp} onHideQuickHelp={onHideQuickHelp} />
+              )}
             </div>
-          )}
+
+            <div className="relative flex justify-center">
+              <button
+                type="button"
+                onClick={onSalesChartModeClick}
+                onMouseEnter={(event) => onShowQuickHelp(event, '月別グラフ', '表示中の詳細ページにある全商品の月別販売数量グラフを一括で表示します。')}
+                onMouseLeave={onHideQuickHelp}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isSalesChartMode
+                  ? 'border-blue-500 bg-blue-500/10 text-blue-600 shadow-[0_0_15px_rgba(59,130,246,0.24)]'
+                  : 'border-slate-200 bg-white text-blue-500 hover:border-blue-300 hover:bg-blue-50'}`}
+                aria-pressed={isSalesChartMode}
+                title={isSalesChartMode ? '月別グラフの一括表示を解除' : '月別グラフを全コマに一括表示'}
+              >
+                <ChartSpline size={18} strokeWidth={2.4} />
+                <span className="hidden xl:inline">月別グラフ {isSalesChartMode ? 'ON' : 'OFF'}</span>
+              </button>
+              {isSalesMode && isSalesChartMode && salesPeriodOptions.length > 1 && (
+                <SalesPeriodTabs options={salesPeriodOptions} activePeriod={activeSalesPeriod} metaByPeriod={salesPeriodMeta} displayMode="quantity" isChartMode isLoading={isSalesPeriodLoading} onSelect={onSelectSalesPeriod} onShowQuickHelp={onShowQuickHelp} onHideQuickHelp={onHideQuickHelp} />
+              )}
+            </div>
+
+            <div className="relative flex justify-center">
+              <button
+                type="button"
+                onClick={onGrossProfitModeClick}
+                onMouseEnter={(event) => onShowQuickHelp(event, '粗利データ', 'コマごとの粗利率を円グラフ、粗利総額を金額で表示します。')}
+                onMouseLeave={onHideQuickHelp}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-bold transition-all duration-300 ${isSalesMode && salesDisplayMode === 'grossProfit'
+                  ? 'border-yellow-400 bg-yellow-300/20 text-amber-700 shadow-[0_0_18px_rgba(250,204,21,0.55)]'
+                  : 'border-slate-200 bg-white text-amber-600 hover:border-yellow-300 hover:bg-yellow-50'}`}
+                aria-pressed={isSalesMode && salesDisplayMode === 'grossProfit'}
+                title="コマ上に粗利率と粗利総額を表示"
+              >
+                <PieChart size={18} strokeWidth={2.5} />
+                <span className="hidden xl:inline">粗利データ</span>
+              </button>
+              {isSalesMode && salesDisplayMode === 'grossProfit' && salesPeriodOptions.length > 1 && (
+                <SalesPeriodTabs options={salesPeriodOptions} activePeriod={activeSalesPeriod} metaByPeriod={salesPeriodMeta} displayMode={salesDisplayMode} isChartMode={false} isLoading={isSalesPeriodLoading} onSelect={onSelectSalesPeriod} onShowQuickHelp={onShowQuickHelp} onHideQuickHelp={onHideQuickHelp} />
+              )}
+            </div>
+          </div>
 
           {catalogChangeCount > 0 && (
             <button
