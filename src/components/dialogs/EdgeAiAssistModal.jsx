@@ -6,6 +6,7 @@ import {
   FileDiff,
   FileUp,
   Image as ImageIcon,
+  Lightbulb,
   Loader2,
   MapPin,
   Search,
@@ -25,6 +26,7 @@ import {
   rankSimilarEdgeCatalogProducts,
   summarizeCatalogDiff
 } from '../../domain/edgeAiCatalog';
+import { buildCatalogAdvisorReport } from '../../domain/catalogAdvisor';
 import { embedEdgeAiTexts, initializeEdgeAi } from '../../lib/edgeAiClient';
 import { readCatalogSnapshotFile } from '../../lib/catalogSnapshotFile';
 import { idbHelper } from '../../idbHelper';
@@ -35,6 +37,7 @@ const EMBEDDING_BATCH_SIZE = 12;
 const TABS = [
   { id: 'search', label: '商品意味検索' },
   { id: 'similar', label: '類似品提案' },
+  { id: 'advisor', label: '台割アドバイス' },
   { id: 'diff', label: '変更チェック' }
 ];
 
@@ -190,6 +193,7 @@ const EdgeAiAssistModal = ({
   const [catalogSnapshot, setCatalogSnapshot] = useState(null);
   const [diffMode, setDiffMode] = useState('catalog');
   const [diffFilter, setDiffFilter] = useState('changed');
+  const [advisorReport, setAdvisorReport] = useState(null);
   const preparingRef = useRef(false);
 
   const products = useMemo(() => buildEdgeCatalogProducts({
@@ -200,6 +204,15 @@ const EdgeAiAssistModal = ({
   }), [genres, images, salesData, sheets]);
   const fingerprint = useMemo(() => createEdgeCatalogFingerprint(products), [products]);
   const isIndexCurrent = aiStatus === 'ready' && indexFingerprint === fingerprint && !!vectorsById;
+
+  // 台割アドバイス: 端末内で決定的に計算する (LLM もネットワークも使わない)。
+  // 意味検索の索引があればカニバリ判定に埋め込み類似度を使い、無ければ語彙一致で代替する。
+  const runAdvisor = useCallback(() => {
+    setAdvisorReport(buildCatalogAdvisorReport({
+      products,
+      vectorsById: isIndexCurrent ? vectorsById : null
+    }));
+  }, [isIndexCurrent, products, vectorsById]);
 
   const lexicalResults = useMemo(() => (
     query.trim() ? rankEdgeCatalogProducts(products, query) : []
@@ -370,7 +383,7 @@ const EdgeAiAssistModal = ({
                 onClick={() => setActiveTab(id)}
                 className={`relative flex shrink-0 items-center gap-1.5 px-3 py-3 text-[11px] font-semibold transition ${activeTab === id ? 'text-[#5145cd]' : 'text-[#6f798b] hover:text-[#313b4d]'}`}
               >
-                {id === 'search' ? <Search size={14} /> : id === 'similar' ? <Sparkles size={14} /> : <FileDiff size={14} />}
+                {id === 'search' ? <Search size={14} /> : id === 'similar' ? <Sparkles size={14} /> : id === 'advisor' ? <Lightbulb size={14} /> : <FileDiff size={14} />}
                 {label}
                 {activeTab === id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[#6557e8]" />}
               </button>
@@ -495,6 +508,124 @@ const EdgeAiAssistModal = ({
                       {similarResults.map((result) => <ResultCard key={result.product.id} result={result} onSelectSimilar={selectSimilarProduct} onOpenSheet={onOpenSheet} />)}
                     </div>
                   </>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'advisor' && (
+              <div>
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-semibold text-[#273246]">台割全体のアドバイス</h3>
+                    <p className="mt-1 text-xs text-[#7a8495]">
+                      掲載中の商品と売上実績から、ABC分析・誌面バランス・カニバリ・価格帯・直近の勢いを分析します
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={runAdvisor}
+                    disabled={products.length === 0}
+                    className="flex items-center gap-1.5 rounded-full bg-[#6254e7] px-4 py-2.5 text-[11px] font-semibold text-white transition hover:bg-[#5145cd] disabled:opacity-40"
+                  >
+                    <Lightbulb size={13} /> {advisorReport ? '再分析する' : '分析を実行'}
+                  </button>
+                </div>
+
+                {!advisorReport ? (
+                  <div className="mt-6">
+                    <EmptyState>
+                      <span>「分析を実行」を押すと、この端末内だけで台割全体を診断します。<br />
+                      意味検索を準備済みだと、カニバリ判定が埋め込み類似度でより正確になります。</span>
+                    </EmptyState>
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-5">
+                    {/* サマリー */}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {[
+                        ['掲載商品', advisorReport.summary.placedCount.toLocaleString()],
+                        ['年間販売数', advisorReport.summary.totalSales.toLocaleString()],
+                        ['実績照合率', `${Math.round(advisorReport.summary.salesCoverage * 100)}%`],
+                        ['上位10%の売上シェア', `${Math.round(advisorReport.summary.topShare * 100)}%`]
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-2xl bg-white px-3 py-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                          <p className="text-[10px] text-[#7a8495]">{label}</p>
+                          <p className="mt-0.5 font-mono text-lg font-black text-[#273246]">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 推奨アクション */}
+                    <div>
+                      <h4 className="mb-2 text-sm font-semibold text-[#273246]">推奨アクション</h4>
+                      {advisorReport.actions.length === 0 ? (
+                        <p className="text-xs text-[#7a8495]">大きな課題は見つかりませんでした。現在のバランスを維持してください。</p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {advisorReport.actions.map((action, index) => (
+                            <article key={index} className="rounded-[22px] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                              <div className="flex items-center gap-2">
+                                <span className={`rounded-full px-2 py-0.5 text-[9px] font-black text-white ${action.priority === 'high' ? 'bg-rose-500' : action.priority === 'mid' ? 'bg-amber-500' : 'bg-slate-400'}`}>
+                                  {action.priority === 'high' ? '優先' : action.priority === 'mid' ? '検討' : '参考'}
+                                </span>
+                                <h5 className="min-w-0 flex-1 text-xs font-bold text-[#273246]">{action.title}</h5>
+                              </div>
+                              <p className="mt-1.5 text-[11px] leading-relaxed text-[#4b5768]">{action.detail}</p>
+                              <p className="mt-1.5 rounded-xl bg-[#f4f2ff] px-2.5 py-1.5 text-[10px] leading-relaxed text-[#6355c9]">{action.theory}</p>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ジャンル別バランス */}
+                    <div>
+                      <h4 className="mb-2 text-sm font-semibold text-[#273246]">ジャンル別: 誌面シェア vs 売上シェア</h4>
+                      <div className="overflow-hidden rounded-[22px] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                        {advisorReport.balance.rows.map((row) => (
+                          <div key={row.genre} className="flex items-center gap-2 border-b border-[#eef1f6] px-4 py-2 text-[11px] last:border-b-0">
+                            <span className="w-24 shrink-0 truncate font-bold text-[#374357]">{row.genre}</span>
+                            <div className="relative h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-[#eef1f6]">
+                              <div className="absolute inset-y-0 left-0 rounded-full bg-[#c7d2fe]" style={{ width: `${Math.min(100, row.panelShare * 100)}%` }} />
+                              <div className="absolute inset-y-0 left-0 h-full w-0.5 bg-[#059669]" style={{ left: `${Math.min(100, row.salesShare * 100)}%` }} />
+                            </div>
+                            <span className="w-28 shrink-0 text-right font-mono text-[10px] text-[#7a8495]">誌面{Math.round(row.panelShare * 100)}% / 売上{Math.round(row.salesShare * 100)}%</span>
+                            {row.status !== 'ok' && (
+                              <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${row.status === 'under' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                {row.status === 'under' ? '増枠候補' : '縮小候補'}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* トレンド */}
+                    {(advisorReport.momentum.rising.length > 0 || advisorReport.momentum.falling.length > 0) && (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {[
+                          ['直近3ヶ月で伸びている商品', advisorReport.momentum.rising, 'text-emerald-600', '↑'],
+                          ['直近3ヶ月で落ちている商品', advisorReport.momentum.falling, 'text-rose-500', '↓']
+                        ].map(([title, rows, tone, mark]) => rows.length > 0 && (
+                          <div key={title} className="rounded-[22px] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                            <h4 className="mb-2 text-xs font-semibold text-[#273246]">{title}</h4>
+                            <div className="space-y-1.5">
+                              {rows.map((row) => (
+                                <div key={row.id} className="flex items-baseline justify-between gap-2 text-[11px]">
+                                  <span className="min-w-0 flex-1 truncate text-[#4b5768]">{row.name}</span>
+                                  <span className={`shrink-0 font-mono font-bold ${tone}`}>{mark}{row.ratio >= 10 ? Math.round(row.ratio) : row.ratio.toFixed(1)}倍</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-[#98a1b1]">
+                      判定方式: カニバリ = {advisorReport.summary.usedEmbeddings ? 'AI埋め込み類似度' : '語彙一致 (意味検索を準備すると精度が上がります)'} / 売上は現在選択中の期のデータに基づきます
+                    </p>
+                  </div>
                 )}
               </div>
             )}

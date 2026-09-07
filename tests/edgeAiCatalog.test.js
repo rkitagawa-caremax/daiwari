@@ -36,11 +36,21 @@ test('buildEdgeCatalogProducts combines saved text, placement and sales data', (
     images,
     sheets,
     genres: [{ id: 'walk', label: '歩行関連' }],
-    salesData: { E001: [{ name: '軽量歩行器', spec: '青', count: 12 }] }
+    salesData: { E001: [{
+      name: '軽量歩行器',
+      spec: '青',
+      count: 12,
+      monthlySales: [5, 7],
+      monthlyLabels: ['4月', '5月']
+    }] }
   });
   assert.equal(products.length, 1);
   assert.equal(products[0].code, 'E001');
   assert.equal(products[0].salesCount, 12);
+  assert.deepEqual(products[0].monthlySales, [
+    { label: '4月', count: 5 },
+    { label: '5月', count: 7 }
+  ]);
   assert.equal(products[0].assignments[0].pageNumber, 1);
   assert.match(products[0].searchText, /重量5kg/);
 });

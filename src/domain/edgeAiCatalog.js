@@ -1,5 +1,6 @@
 import { resolveCatalogTextExportData } from './catalogTextCsv.js';
 import { normalizePdfCropCode } from './pdfCropImport.js';
+import { buildMonthlySalesSeries } from './salesData.js';
 
 export const EDGE_AI_MODEL_VERSION = 'ruri-v3-30m-int8-v1';
 
@@ -193,6 +194,8 @@ export const buildEdgeCatalogProducts = ({ images = [], sheets = [], salesData =
       sourcePage: image.sourcePage ?? '',
       assignments,
       salesCount: salesRows.reduce((total, row) => total + (Number(row?.count) || 0), 0),
+      // 台割アドバイス (トレンド分析) 用に月別合算も持たせる
+      monthlySales: buildMonthlySalesSeries(salesRows).map((entry) => ({ label: entry.label, count: entry.count })),
       salesNames: unique(salesRows.map((row) => String(row?.name || '').trim())),
       salesSpecs: unique(salesRows.map((row) => String(row?.spec || '').trim()))
     };
