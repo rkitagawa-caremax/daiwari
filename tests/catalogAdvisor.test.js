@@ -7,7 +7,8 @@ import {
   buildCatalogAdvisorReport,
   buildGenreBalance,
   buildPriceBandCoverage,
-  buildSalesMomentum
+  buildSalesMomentum,
+  consolidateAdvisorProducts
 } from '../src/domain/catalogAdvisor.js';
 
 const months = (counts) => counts.map((count, index) => ({ label: `${index + 1}月`, count }));
@@ -72,6 +73,40 @@ test('buildGenreBalance flags over- and under-allocated genres by fair share', (
   assert.ok(Math.abs(balance.rows.reduce((sum, row) => sum + row.panelShare, 0) - 1) < 1e-9);
 });
 
+test('buildGenreBalance weights large panels and splits sales across assigned genres', () => {
+  const product = makeProduct({
+    id: 'multi',
+    salesCount: 100,
+    assignments: [
+      { sheetId: 's1', panelIndex: 0, genre: '食事関連', rowSpan: 2, colSpan: 2 },
+      { sheetId: 's2', panelIndex: 0, genre: '入浴関連', rowSpan: 1, colSpan: 1 }
+    ]
+  });
+  const balance = buildGenreBalance([product]);
+  const food = balance.rows.find((row) => row.genre === '食事関連');
+  const bath = balance.rows.find((row) => row.genre === '入浴関連');
+  assert.equal(balance.totalSpaceUnits, 5);
+  assert.equal(food.spaceUnits, 4);
+  assert.equal(food.sales, 80);
+  assert.equal(bath.sales, 20);
+});
+
+test('consolidateAdvisorProducts prevents duplicate SKU sales and placements', () => {
+  const products = [
+    makeProduct({ id: 'first', code: 'E1000', salesCount: 25 }),
+    makeProduct({
+      id: 'duplicate',
+      code: 'E1000',
+      salesCount: 25,
+      assignments: [{ sheetId: 's2', pageNumber: 2, panelIndex: 3, genre: '食事関連' }]
+    })
+  ];
+  const consolidated = consolidateAdvisorProducts(products);
+  assert.equal(consolidated.length, 1);
+  assert.equal(consolidated[0].salesCount, 25);
+  assert.equal(consolidated[0].assignments.length, 2);
+});
+
 test('buildCannibalizationPairs uses embeddings when available and flags weak twins', () => {
   const strong = makeProduct({ id: 'strong', code: 'E0100', salesCount: 100, genre: '食事関連' });
   const weakTwin = makeProduct({ id: 'weak', code: 'E0101', salesCount: 5, genre: '食事関連' });
@@ -113,11 +148,11 @@ test('buildCannibalizationPairs falls back to lexical similarity without vectors
 
 test('buildPriceBandCoverage reports genres missing a price band', () => {
   const products = [
-    // 全体の三分位を作る素材 (別ジャンル)
+    // 別ジャンルの価格水準は食事関連の判定に影響しない
     ...[500, 800, 1000, 1500, 2000, 3000, 5000, 8000, 12000].map((price, i) => (
       makeProduct({ id: `bg-${i}`, code: `W0${i}`, genre: '歩行関連', priceIncludingTax: price })
     )),
-    // 食事関連は低価格帯のみ 5 商品 → mid/high 欠落 (全体三分位の境界より明確に下)
+    // 食事関連は中央値付近だけで、エントリーとプレミアムがない
     ...[300, 320, 340, 360, 380].map((price, i) => (
       makeProduct({ id: `fd-${i}`, code: `E05${i}`, genre: '食事関連', priceIncludingTax: price })
     ))
@@ -125,8 +160,10 @@ test('buildPriceBandCoverage reports genres missing a price band', () => {
   const coverage = buildPriceBandCoverage(products);
   assert.ok(coverage.bands);
   const food = coverage.rows.find((row) => row.genre === '食事関連');
+  assert.ok(food.missing.includes('low'));
   assert.ok(food.missing.includes('high'));
-  assert.equal(food.low, 5);
+  assert.equal(food.mid, 5);
+  assert.equal(food.median, 340);
 });
 
 test('buildSalesMomentum separates rising and falling products', () => {

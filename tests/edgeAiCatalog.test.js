@@ -31,7 +31,7 @@ test('buildEdgeCatalogProducts combines saved text, placement and sales data', (
       catchCopyCandidates: []
     }
   }];
-  const sheets = [{ id: 'sheet-1', genre: 'walk', panels: [{ imageId: 'image-1', code: 'E001' }] }];
+  const sheets = [{ id: 'sheet-1', genre: 'walk', panels: [{ imageId: 'image-1', code: 'E001', rowSpan: 2, colSpan: 2, sizeType: '1/4（4コマ）' }] }];
   const products = buildEdgeCatalogProducts({
     images,
     sheets,
@@ -52,6 +52,8 @@ test('buildEdgeCatalogProducts combines saved text, placement and sales data', (
     { label: '5月', count: 7 }
   ]);
   assert.equal(products[0].assignments[0].pageNumber, 1);
+  assert.equal(products[0].assignments[0].rowSpan, 2);
+  assert.equal(products[0].assignments[0].colSpan, 2);
   assert.match(products[0].searchText, /重量5kg/);
 });
 

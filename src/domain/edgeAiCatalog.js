@@ -129,7 +129,10 @@ const buildAssignmentMaps = (sheets, genreLabels = {}) => {
         sheetId: sheet.id,
         pageNumber: sheetIndex + 1,
         panelIndex,
-        genre: genreLabels[sheet.genre] || sheet.genre || '未設定'
+        genre: genreLabels[sheet.genre] || sheet.genre || '未設定',
+        rowSpan: Math.max(1, Number(panel.rowSpan) || 1),
+        colSpan: Math.max(1, Number(panel.colSpan) || 1),
+        sizeType: panel.sizeType || ''
       };
       add(byImageId, panel.imageId, assignment);
       add(byImageData, panel.image, assignment);
