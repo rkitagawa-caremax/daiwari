@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 const EdgeAiLaunchButton = ({ onLaunch }) => (
-  <div className="group/edge-ai relative flex h-12 w-[92px] flex-shrink-0 items-center justify-center">
+  <div className="daiwari-ai-launch-shell group/edge-ai relative flex h-12 w-[92px] flex-shrink-0 items-center justify-center">
     <button
       type="button"
       onClick={() => onLaunch('search')}

@@ -728,15 +728,18 @@ button:active {
     font-size: 8px;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-sparkle-one {
+.daiwari-ai-launch-shell:hover .daiwari-ai-sparkle-one,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-sparkle-one {
     animation: daiwari-ai-sparkle-pop 1.05s ease-in-out infinite;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-sparkle-two {
+.daiwari-ai-launch-shell:hover .daiwari-ai-sparkle-two,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-sparkle-two {
     animation: daiwari-ai-sparkle-pop 1.05s 160ms ease-in-out infinite;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-sparkle-three {
+.daiwari-ai-launch-shell:hover .daiwari-ai-sparkle-three,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-sparkle-three {
     animation: daiwari-ai-sparkle-pop 1.05s 340ms ease-in-out infinite;
 }
 
@@ -790,6 +793,43 @@ button:active {
     animation-delay: 380ms;
 }
 
+.daiwari-ai-tab-sparkle {
+    position: absolute;
+    z-index: 3;
+    color: #ffffff;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    text-shadow:
+        0 0 3px #ffffff,
+        0 0 7px rgba(217, 70, 239, 0.85),
+        0 0 11px rgba(14, 165, 233, 0.75);
+}
+
+.daiwari-ai-tab-sparkle-one {
+    right: 10px;
+    top: 6px;
+    font-size: 10px;
+}
+
+.daiwari-ai-tab-sparkle-two {
+    right: 38px;
+    bottom: 5px;
+    font-size: 7px;
+}
+
+.daiwari-ai-tab-button[aria-selected="true"] .daiwari-ai-tab-sparkle-one,
+.daiwari-ai-tab-button:hover .daiwari-ai-tab-sparkle-one,
+.daiwari-ai-tab-button:focus-visible .daiwari-ai-tab-sparkle-one {
+    animation: daiwari-ai-sparkle-pop 1.15s ease-in-out infinite;
+}
+
+.daiwari-ai-tab-button[aria-selected="true"] .daiwari-ai-tab-sparkle-two,
+.daiwari-ai-tab-button:hover .daiwari-ai-tab-sparkle-two,
+.daiwari-ai-tab-button:focus-visible .daiwari-ai-tab-sparkle-two {
+    animation: daiwari-ai-sparkle-pop 1.15s 360ms ease-in-out infinite;
+}
+
 @keyframes daiwari-ai-mascot-front {
     0%, 33.332% { opacity: 1; }
     33.333%, 100% { opacity: 0; }
@@ -811,21 +851,25 @@ button:active {
     opacity: 0;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-launch-frame {
+.daiwari-ai-launch-shell:hover .daiwari-ai-launch-frame,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-launch-frame {
     animation-duration: 0.9s;
     animation-timing-function: step-end;
     animation-iteration-count: infinite;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-launch-frame-front {
+.daiwari-ai-launch-shell:hover .daiwari-ai-launch-frame-front,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-launch-frame-front {
     animation-name: daiwari-ai-mascot-front;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-launch-frame-left {
+.daiwari-ai-launch-shell:hover .daiwari-ai-launch-frame-left,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-launch-frame-left {
     animation-name: daiwari-ai-mascot-left;
 }
 
-.daiwari-ai-launch:hover .daiwari-ai-launch-frame-closed {
+.daiwari-ai-launch-shell:hover .daiwari-ai-launch-frame-closed,
+.daiwari-ai-launch-shell:focus-within .daiwari-ai-launch-frame-closed {
     animation-name: daiwari-ai-mascot-closed;
 }
 
@@ -877,16 +921,19 @@ button:active {
         animation: none;
     }
 
-    .daiwari-ai-launch:hover .daiwari-ai-sparkle {
+    .daiwari-ai-launch-shell:hover .daiwari-ai-sparkle,
+    .daiwari-ai-launch-shell:focus-within .daiwari-ai-sparkle {
         animation: none;
     }
 
     .daiwari-ai-shortcut-label,
-    .daiwari-ai-shortcut-sparkle {
+    .daiwari-ai-shortcut-sparkle,
+    .daiwari-ai-tab-sparkle {
         animation: none;
     }
 
-    .daiwari-ai-launch:hover .daiwari-ai-launch-frame {
+    .daiwari-ai-launch-shell:hover .daiwari-ai-launch-frame,
+    .daiwari-ai-launch-shell:focus-within .daiwari-ai-launch-frame {
         animation: none;
     }
 

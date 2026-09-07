@@ -41,10 +41,38 @@ const INDEX_CACHE_KEY = `edgeAiCatalogIndex:${EDGE_AI_MODEL_VERSION}`;
 const EMBEDDING_BATCH_SIZE = 12;
 
 const TABS = [
-  { id: 'search', label: '商品検索', icon: <Search size={17} /> },
-  { id: 'similar', label: '類似品', icon: <Sparkles size={17} /> },
-  { id: 'advisor', label: '台割診断', icon: <Lightbulb size={17} /> },
-  { id: 'diff', label: '変更確認', icon: <FileDiff size={17} /> }
+  {
+    id: 'search',
+    label: '商品検索',
+    icon: <Search size={17} />,
+    active: 'border-cyan-200 ring-cyan-200/70 shadow-[0_7px_20px_rgba(14,165,233,0.18)]',
+    iconStyle: 'from-sky-400 to-cyan-400 shadow-sky-300/40',
+    labelStyle: 'daiwari-ai-shortcut-label-blue'
+  },
+  {
+    id: 'similar',
+    label: '類似品',
+    icon: <Sparkles size={17} />,
+    active: 'border-fuchsia-200 ring-fuchsia-200/70 shadow-[0_7px_20px_rgba(192,38,211,0.16)]',
+    iconStyle: 'from-fuchsia-400 to-violet-500 shadow-fuchsia-300/40',
+    labelStyle: 'daiwari-ai-shortcut-label-violet'
+  },
+  {
+    id: 'advisor',
+    label: '台割診断',
+    icon: <Lightbulb size={17} />,
+    active: 'border-violet-200 ring-violet-200/70 shadow-[0_7px_20px_rgba(124,58,237,0.18)]',
+    iconStyle: 'from-violet-500 to-fuchsia-400 shadow-violet-300/40',
+    labelStyle: 'daiwari-ai-shortcut-label-violet'
+  },
+  {
+    id: 'diff',
+    label: '変更確認',
+    icon: <FileDiff size={17} />,
+    active: 'border-blue-200 ring-blue-200/70 shadow-[0_7px_20px_rgba(59,130,246,0.16)]',
+    iconStyle: 'from-blue-500 to-sky-400 shadow-blue-300/40',
+    labelStyle: 'daiwari-ai-shortcut-label-blue'
+  }
 ];
 
 const STATUS_LABELS = {
@@ -439,8 +467,8 @@ const EdgeAiAssistModal = ({
         </header>
 
         <div className="flex items-center gap-3 border-b border-[#e5e9f0] bg-white/80 px-3 py-3 sm:px-6">
-          <nav className="grid min-w-[520px] flex-1 grid-cols-4 gap-1.5 overflow-x-auto rounded-2xl bg-[#f1f3f8] p-1.5" aria-label="AIアシスト機能" role="tablist">
-            {TABS.map(({ id, label, icon }) => {
+          <nav className="grid min-w-[620px] flex-1 grid-cols-4 gap-2 overflow-x-auto rounded-[22px] border border-white/90 bg-gradient-to-r from-violet-50/95 via-white to-cyan-50/90 p-2 shadow-[0_8px_24px_rgba(76,68,151,0.08)] ring-1 ring-violet-100/60" aria-label="AIアシスト機能" role="tablist">
+            {TABS.map(({ id, label, icon, active, iconStyle, labelStyle }) => {
               const selected = activeTab === id;
               return (
                 <button
@@ -449,12 +477,15 @@ const EdgeAiAssistModal = ({
                   aria-selected={selected}
                   key={id}
                   onClick={() => setActiveTab(id)}
-                  className={`group flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 py-2 text-center text-[13px] font-bold transition-all duration-200 ${selected ? 'bg-[#6557e8] text-white shadow-[0_5px_14px_rgba(101,87,232,0.26)]' : 'text-[#5f697a] hover:bg-white hover:text-[#3d4657]'}`}
+                  className={`daiwari-ai-tab-button group/tab relative flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-2xl border bg-white/90 px-3 py-2 text-center text-[13px] font-black transition-all duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_8px_22px_rgba(76,68,151,0.14)] focus:outline-none focus:ring-2 ${selected ? `-translate-y-0.5 ring-2 ${active}` : 'border-white/90 ring-transparent'}`}
                 >
-                  <span className={`flex shrink-0 items-center justify-center transition ${selected ? 'text-white' : 'text-[#7b8496] group-hover:text-[#6557e8]'}`}>
+                  <span aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-violet-50/0 via-white to-cyan-50/0 opacity-0 transition group-hover/tab:opacity-100" />
+                  <span className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-md ${iconStyle}`}>
                     {icon}
                   </span>
-                  <span className="whitespace-nowrap">{label}</span>
+                  <span className={`daiwari-ai-shortcut-label ${labelStyle} relative whitespace-nowrap`}>{label}</span>
+                  <span aria-hidden="true" className="daiwari-ai-tab-sparkle daiwari-ai-tab-sparkle-one">✦</span>
+                  <span aria-hidden="true" className="daiwari-ai-tab-sparkle daiwari-ai-tab-sparkle-two">✦</span>
                 </button>
               );
             })}
