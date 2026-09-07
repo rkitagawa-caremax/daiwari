@@ -358,6 +358,94 @@ export const buildProfitabilityAnalysis = (products) => {
   return { rows, totalSalesAmount, totalGrossProfitAmount, grossMargin, lowMarginThreshold, lowMargin, highGrossProfit };
 };
 
+// 売上・粗利を掲載場所へ帰属させる。複数ページに同じSKUがある場合は重複加算せず、掲載箇所へ均等配分する。
+export const buildContributionRankings = (products = []) => {
+  const pages = new Map();
+  const panels = new Map();
+  let totalSalesAmount = 0;
+  let totalGrossProfitAmount = 0;
+
+  products.forEach((product) => {
+    const assignments = Array.isArray(product?.assignments) ? product.assignments : [];
+    if (assignments.length === 0) return;
+    const salesAmount = productHasMetric(product, PERFORMANCE_METRICS[1])
+      ? Math.max(0, Number(product.salesAmount) || 0)
+      : 0;
+    const grossProfitAmount = productHasMetric(product, PERFORMANCE_METRICS[2])
+      ? Math.max(0, Number(product.grossProfitAmount) || 0)
+      : 0;
+    if (salesAmount <= 0 && grossProfitAmount <= 0) return;
+
+    totalSalesAmount += salesAmount;
+    totalGrossProfitAmount += grossProfitAmount;
+    const allocation = 1 / assignments.length;
+    assignments.forEach((assignment) => {
+      const pageKey = String(assignment.sheetId || `page:${assignment.pageNumber || 'unknown'}`);
+      if (!pages.has(pageKey)) {
+        pages.set(pageKey, {
+          id: pageKey,
+          sheetId: assignment.sheetId || null,
+          pageNumber: Number(assignment.pageNumber) || null,
+          salesAmount: 0,
+          grossProfitAmount: 0,
+          productIds: new Set(),
+          genres: new Set()
+        });
+      }
+      const page = pages.get(pageKey);
+      page.salesAmount += salesAmount * allocation;
+      page.grossProfitAmount += grossProfitAmount * allocation;
+      page.productIds.add(product.id);
+      if (assignment.genre) page.genres.add(assignment.genre);
+
+      const panelKey = assignmentKey(assignment);
+      if (!panels.has(panelKey)) {
+        panels.set(panelKey, {
+          id: panelKey,
+          sheetId: assignment.sheetId || null,
+          pageNumber: Number(assignment.pageNumber) || null,
+          panelIndex: Number.isInteger(Number(assignment.panelIndex)) ? Number(assignment.panelIndex) : null,
+          genre: assignment.genre || '未設定',
+          salesAmount: 0,
+          grossProfitAmount: 0,
+          productIds: new Set(),
+          productNames: []
+        });
+      }
+      const panel = panels.get(panelKey);
+      panel.salesAmount += salesAmount * allocation;
+      panel.grossProfitAmount += grossProfitAmount * allocation;
+      if (!panel.productIds.has(product.id)) panel.productNames.push(productLabel(product));
+      panel.productIds.add(product.id);
+    });
+  });
+
+  const pageRows = [...pages.values()].map(({ productIds, genres, ...page }) => ({
+    ...page,
+    productCount: productIds.size,
+    genres: [...genres]
+  }));
+  const panelRows = [...panels.values()].map(({ productIds, productNames, ...panel }) => ({
+    ...panel,
+    productCount: productIds.size,
+    name: productNames[0] || '商品名未取得'
+  }));
+  const rank = (rows, key) => [...rows]
+    .filter((row) => row[key] > 0)
+    .sort((left, right) => right[key] - left[key]
+      || (left.pageNumber || Number.MAX_SAFE_INTEGER) - (right.pageNumber || Number.MAX_SAFE_INTEGER)
+      || (left.panelIndex ?? Number.MAX_SAFE_INTEGER) - (right.panelIndex ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, T.maxListItems);
+
+  return {
+    totals: { salesAmount: totalSalesAmount, grossProfitAmount: totalGrossProfitAmount },
+    topSalesPages: rank(pageRows, 'salesAmount'),
+    topGrossProfitPages: rank(pageRows, 'grossProfitAmount'),
+    topSalesPanels: rank(panelRows, 'salesAmount'),
+    topGrossProfitPanels: rank(panelRows, 'grossProfitAmount')
+  };
+};
+
 export const buildCatalogTextAnalysis = (products, panelPerformance = null) => {
   const performanceById = new Map((panelPerformance?.rows || []).map((row) => [row.id, row.performanceShare]));
   const averagePerformanceShare = panelPerformance?.rows?.length ? 1 / panelPerformance.rows.length : 0;
@@ -716,6 +804,7 @@ export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } 
   const priceBands = buildPriceBandCoverage(placed);
   const momentum = buildSalesMomentum(placed);
   const profitability = buildProfitabilityAnalysis(placed);
+  const contributionRankings = buildContributionRankings(placed);
   const textAnalysis = buildCatalogTextAnalysis(placed, panelPerformance);
   const dataQuality = buildAdvisorDataQuality(placed, vectorsById);
   const actions = buildAdvisorActions({ abc, panelPerformance, balance, cannibalization, priceBands, momentum, profitability, textAnalysis, dataQuality });
@@ -755,6 +844,7 @@ export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } 
     priceBands,
     momentum,
     profitability,
+    contributionRankings,
     textAnalysis,
     dataQuality,
     actions

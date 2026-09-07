@@ -112,7 +112,22 @@ const formatProgress = (progress) => {
 };
 
 const percent = (score) => `${Math.round(Math.max(0, Math.min(1, score || 0)) * 100)}%`;
-const formatCurrency = (value) => `¥${Math.round(Number(value) || 0).toLocaleString()}`;
+const formatCurrency = (value) => {
+  const amount = Math.round(Number(value) || 0);
+  return `${amount < 0 ? '-' : ''}¥${Math.abs(amount).toLocaleString()}`;
+};
+const formatDashboardCurrency = (value) => {
+  const amount = Number(value) || 0;
+  const absolute = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  if (absolute >= 100_000_000) {
+    return `${sign}¥${(absolute / 100_000_000).toLocaleString('ja-JP', { maximumFractionDigits: 1 })}億`;
+  }
+  if (absolute >= 10_000_000) {
+    return `${sign}¥${(absolute / 10_000).toLocaleString('ja-JP', { maximumFractionDigits: 1 })}万`;
+  }
+  return formatCurrency(amount);
+};
 
 const ResultCard = ({ result, onSelectSimilar, onOpenSheet }) => {
   const { product, score } = result;
@@ -174,7 +189,7 @@ const EmptyState = ({ children }) => (
   </div>
 );
 
-const AdvisorMetric = ({ icon, label, value, note, tone = 'violet' }) => {
+const AdvisorMetric = ({ icon, label, value, valueTitle = '', note, tone = 'violet' }) => {
   const tones = {
     violet: 'bg-violet-50 text-violet-600',
     blue: 'bg-blue-50 text-blue-600',
@@ -182,11 +197,11 @@ const AdvisorMetric = ({ icon, label, value, note, tone = 'violet' }) => {
     amber: 'bg-amber-50 text-amber-600'
   };
   return (
-    <div className="rounded-[20px] border border-white/80 bg-white p-3.5 shadow-[0_8px_24px_rgba(31,42,68,0.06)]">
+    <div className="min-w-0 rounded-2xl border border-[#e8ebf2] bg-white p-4">
       <div className="flex items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold text-[#657086]">{label}</p>
-          <p className="mt-1 font-mono text-2xl font-black tracking-tight text-[#273246]">{value}</p>
+          <p className="mt-1 truncate whitespace-nowrap font-mono text-xl font-black tabular-nums tracking-tight text-[#273246] sm:text-2xl" title={valueTitle || String(value)}>{value}</p>
         </div>
         <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${tones[tone]}`}>{icon}</span>
       </div>
@@ -194,6 +209,68 @@ const AdvisorMetric = ({ icon, label, value, note, tone = 'violet' }) => {
     </div>
   );
 };
+
+const ContributionList = ({ title, rows, valueKey, total, type, tone, onOpenSheet }) => (
+  <div className="min-w-0">
+    <p className="mb-2 text-xs font-bold text-[#657086]">{title}</p>
+    {rows.length === 0 ? (
+      <div className="rounded-xl bg-[#f7f8fb] px-3 py-4 text-center text-xs text-[#98a1b1]">対象データなし</div>
+    ) : (
+      <div className="space-y-1.5">
+        {rows.slice(0, type === 'page' ? 3 : 4).map((row, index) => {
+          const value = Number(row[valueKey]) || 0;
+          const share = total > 0 ? Math.max(0, Math.min(1, value / total)) : 0;
+          const location = type === 'page'
+            ? `P.${row.pageNumber || '―'}`
+            : `P.${row.pageNumber || '―'}・コマ${row.panelIndex == null ? '―' : row.panelIndex + 1}`;
+          const detail = type === 'page'
+            ? `${row.productCount.toLocaleString()}商品${row.genres.length ? `・${row.genres.slice(0, 2).join(' / ')}` : ''}`
+            : `${row.name}${row.productCount > 1 ? ` ほか${row.productCount - 1}商品` : ''}`;
+          return (
+            <button
+              key={row.id}
+              type="button"
+              onClick={() => row.sheetId && onOpenSheet?.(row.sheetId)}
+              disabled={!row.sheetId}
+              className="block w-full rounded-xl border border-transparent bg-[#f7f8fb] px-3 py-2.5 text-left transition hover:border-[#ddd9fa] hover:bg-white disabled:cursor-default disabled:hover:border-transparent disabled:hover:bg-[#f7f8fb]"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className={`w-4 shrink-0 font-mono text-xs font-black ${tone}`}>{index + 1}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-bold text-[#374357]">{location}</span>
+                  <span className="block truncate text-[10px] text-[#8a94a6]">{detail}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="block whitespace-nowrap font-mono text-xs font-black tabular-nums text-[#273246]" title={formatCurrency(value)}>{formatDashboardCurrency(value)}</span>
+                  <span className="block text-[9px] font-bold text-[#98a1b1]">全体の {Math.round(share * 100)}%</span>
+                </span>
+              </span>
+              <span className="mt-2 block h-1 overflow-hidden rounded-full bg-[#e8ebf2]">
+                <span className={`block h-full rounded-full ${valueKey === 'salesAmount' ? 'bg-blue-500' : 'bg-violet-500'}`} style={{ width: `${share * 100}%` }} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    )}
+  </div>
+);
+
+const ContributionMetricCard = ({ title, icon, pages, panels, valueKey, total, tone, iconBackground, onOpenSheet }) => (
+  <article className="min-w-0 rounded-[22px] border border-[#e8ebf2] bg-white p-4">
+    <div className="mb-4 flex items-center gap-2">
+      <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${iconBackground} ${tone}`}>{icon}</span>
+      <div className="min-w-0">
+        <h5 className="text-sm font-bold text-[#273246]">{title}</h5>
+        <p className="truncate text-[10px] text-[#8a94a6]" title={formatCurrency(total)}>対象合計 {formatDashboardCurrency(total)}</p>
+      </div>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <ContributionList title="ページ上位" rows={pages} valueKey={valueKey} total={total} type="page" tone={tone} onOpenSheet={onOpenSheet} />
+      <ContributionList title="コマ上位" rows={panels} valueKey={valueKey} total={total} type="panel" tone={tone} onOpenSheet={onOpenSheet} />
+    </div>
+  </article>
+);
 
 const AdvisorActionCard = ({ action, index }) => {
   const styles = action.priority === 'high'
@@ -645,37 +722,68 @@ const EdgeAiAssistModal = ({
                   </div>
                 ) : (
                   <div className="mt-5 space-y-4">
-                    <section className="rounded-[24px] bg-[#504399] p-5 text-white shadow-[0_14px_30px_rgba(52,45,114,0.18)] sm:p-6">
+                    <section className="rounded-[22px] border border-[#e8ebf2] bg-white p-5 sm:p-6">
                       <div className="flex flex-wrap items-center justify-between gap-5">
-                        <div>
-                          <p className="text-xs font-bold text-[#d8d4ff]">診断結果</p>
-                          <h4 className="mt-2 text-2xl font-bold tracking-tight sm:text-[28px]">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#7165c8]">診断結果</p>
+                          <h4 className="mt-2 text-xl font-bold tracking-tight text-[#273246] sm:text-2xl">
                             {advisorReport.summary.priorityCounts.high > 0
                               ? `優先して見直したい項目が ${advisorReport.summary.priorityCounts.high}件あります`
                               : advisorReport.summary.priorityCounts.mid > 0
                                 ? `改善を検討したい項目が ${advisorReport.summary.priorityCounts.mid}件あります`
                                 : '大きな偏りは見つかりませんでした'}
                           </h4>
-                          <p className="mt-3 text-sm text-[#dedaff]">{advisorReport.actions.length}件の改善案を、重要な順に表示しています</p>
+                          <p className="mt-2 text-sm text-[#687386]">{advisorReport.actions.length}件の改善案を、重要な順に表示しています</p>
                         </div>
-                        <div className="flex min-w-[170px] items-center gap-3 rounded-2xl bg-white/12 px-4 py-3 ring-1 ring-white/20">
-                          <span className="font-mono text-3xl font-black">{advisorReport.dataQuality.score}</span>
+                        <div className="flex min-w-[190px] items-center gap-3 rounded-2xl bg-[#f2f0ff] px-4 py-3">
+                          <span className="font-mono text-3xl font-black text-[#6254e7]">{advisorReport.dataQuality.score}</span>
                           <div>
-                            <p className="text-xs text-[#d8d4ff]">分析信頼度 / 100</p>
-                            <p className="mt-0.5 text-sm font-bold">{advisorReport.dataQuality.level === 'high' ? '十分なデータです' : advisorReport.dataQuality.level === 'medium' ? '標準的です' : 'データを補ってください'}</p>
+                            <p className="text-xs text-[#7a8495]">分析信頼度 / 100</p>
+                            <p className="mt-0.5 text-sm font-bold text-[#374357]">{advisorReport.dataQuality.level === 'high' ? '十分なデータです' : advisorReport.dataQuality.level === 'medium' ? '標準的です' : 'データを補ってください'}</p>
                           </div>
                         </div>
                       </div>
                     </section>
 
-                    <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-6">
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                       <AdvisorMetric icon={<LayoutDashboard size={16} />} label="掲載SKU" value={advisorReport.summary.placedCount.toLocaleString()} note={`${advisorReport.summary.placementCount.toLocaleString()}箇所に配置`} tone="violet" />
                       <AdvisorMetric icon={<Target size={16} />} label="使用コマ面積" value={advisorReport.summary.spaceUnits.toLocaleString()} note="1/16コマ換算" tone="blue" />
                       <AdvisorMetric icon={<TrendingUp size={16} />} label="期間販売数量" value={advisorReport.summary.totalQuantity.toLocaleString()} note={`照合率 ${Math.round(advisorReport.summary.quantityCoverage * 100)}%`} tone="emerald" />
-                      <AdvisorMetric icon={<CircleDollarSign size={16} />} label="期間売上額" value={formatCurrency(advisorReport.summary.totalSalesAmount)} note={`照合率 ${Math.round(advisorReport.summary.salesAmountCoverage * 100)}%`} tone="blue" />
-                      <AdvisorMetric icon={<BadgeJapaneseYen size={16} />} label="期間粗利額" value={formatCurrency(advisorReport.summary.totalGrossProfitAmount)} note={`照合率 ${Math.round(advisorReport.summary.grossProfitCoverage * 100)}%`} tone="violet" />
+                      <AdvisorMetric icon={<CircleDollarSign size={16} />} label="期間売上額" value={formatDashboardCurrency(advisorReport.summary.totalSalesAmount)} valueTitle={formatCurrency(advisorReport.summary.totalSalesAmount)} note={`照合率 ${Math.round(advisorReport.summary.salesAmountCoverage * 100)}%`} tone="blue" />
+                      <AdvisorMetric icon={<BadgeJapaneseYen size={16} />} label="期間粗利額" value={formatDashboardCurrency(advisorReport.summary.totalGrossProfitAmount)} valueTitle={formatCurrency(advisorReport.summary.totalGrossProfitAmount)} note={`照合率 ${Math.round(advisorReport.summary.grossProfitCoverage * 100)}%`} tone="violet" />
                       <AdvisorMetric icon={<CheckCircle2 size={16} />} label="粗利率" value={advisorReport.summary.grossMargin == null ? '―' : percent(advisorReport.summary.grossMargin)} note="売上額・粗利額の照合分" tone="amber" />
                     </div>
+
+                    <section>
+                      <div className="mb-2.5 px-1">
+                        <h4 className="text-lg font-bold text-[#273246]">売上・粗利の貢献ランキング</h4>
+                        <p className="mt-1 text-xs text-[#7a8495]">ページと商品コマの上位を表示します。複数箇所に掲載した商品の金額は、各掲載先へ均等に配分しています。</p>
+                      </div>
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <ContributionMetricCard
+                          title="売上額への貢献"
+                          icon={<CircleDollarSign size={17} />}
+                          pages={advisorReport.contributionRankings.topSalesPages}
+                          panels={advisorReport.contributionRankings.topSalesPanels}
+                          valueKey="salesAmount"
+                          total={advisorReport.contributionRankings.totals.salesAmount}
+                          tone="text-blue-600"
+                          iconBackground="bg-blue-50"
+                          onOpenSheet={onOpenSheet}
+                        />
+                        <ContributionMetricCard
+                          title="粗利額への貢献"
+                          icon={<BadgeJapaneseYen size={17} />}
+                          pages={advisorReport.contributionRankings.topGrossProfitPages}
+                          panels={advisorReport.contributionRankings.topGrossProfitPanels}
+                          valueKey="grossProfitAmount"
+                          total={advisorReport.contributionRankings.totals.grossProfitAmount}
+                          tone="text-violet-600"
+                          iconBackground="bg-violet-50"
+                          onOpenSheet={onOpenSheet}
+                        />
+                      </div>
+                    </section>
 
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,.75fr)]">
                       <section>
@@ -754,7 +862,12 @@ const EdgeAiAssistModal = ({
                                   <span className="w-5 shrink-0 font-mono text-xs font-bold text-[#98a1b1]">{index + 1}</span>
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate text-sm font-semibold text-[#374357]">{row.name}</p>
-                                    <p className="mt-0.5 text-[11px] text-[#8a94a6]">{row.spaceUnits.toLocaleString()}コマ分・数量 {row.quantity.toLocaleString()}個・粗利 {formatCurrency(row.grossProfitAmount)}</p>
+                                    <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-[#8a94a6]">
+                                      <span>{row.spaceUnits.toLocaleString()}コマ分</span>
+                                      <span>数量 {row.quantity.toLocaleString()}個</span>
+                                      {row.salesAmount !== 0 && <span className="whitespace-nowrap" title={formatCurrency(row.salesAmount)}>売上 {formatDashboardCurrency(row.salesAmount)}</span>}
+                                      {row.grossProfitAmount !== 0 && <span className="whitespace-nowrap" title={formatCurrency(row.grossProfitAmount)}>粗利 {formatDashboardCurrency(row.grossProfitAmount)}</span>}
+                                    </div>
                                   </div>
                                   <span className={`shrink-0 font-mono text-base font-black ${tone}`}>{(row.performanceShare * 100).toFixed(1)}%</span>
                                   {row.assignment && <button type="button" onClick={() => onOpenSheet?.(row.assignment.sheetId)} className="shrink-0 rounded-lg bg-[#f1f3f7] px-2 py-1 text-[11px] font-bold text-[#657086] hover:bg-[#e8e5ff] hover:text-[#5145cd]">P.{row.assignment.pageNumber}</button>}

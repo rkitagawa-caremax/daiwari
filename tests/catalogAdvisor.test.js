@@ -5,6 +5,7 @@ import {
   buildAbcAnalysis,
   buildCannibalizationPairs,
   buildCatalogAdvisorReport,
+  buildContributionRankings,
   buildGenreBalance,
   buildPanelPerformanceAnalysis,
   buildProfitabilityAnalysis,
@@ -144,6 +145,39 @@ test('profitability analysis detects high-sales low-margin products', () => {
   ]);
   assert.equal(result.totalSalesAmount, 300000);
   assert.deepEqual(result.lowMargin.map((row) => row.id), ['low']);
+});
+
+test('contribution rankings show top pages and panels without double counting multi-placement products', () => {
+  const shared = makeProduct({
+    id: 'shared',
+    code: 'E1000',
+    salesAmount: 100,
+    salesAmountMatched: true,
+    grossProfitAmount: 40,
+    grossProfitMatched: true,
+    assignments: [
+      { sheetId: 's1', pageNumber: 1, panelIndex: 0, genre: '食事関連' },
+      { sheetId: 's2', pageNumber: 2, panelIndex: 1, genre: '入浴関連' }
+    ]
+  });
+  const pageTwoLeader = makeProduct({
+    id: 'leader',
+    code: 'E2000',
+    salesAmount: 300,
+    salesAmountMatched: true,
+    grossProfitAmount: 60,
+    grossProfitMatched: true,
+    assignments: [{ sheetId: 's2', pageNumber: 2, panelIndex: 2, genre: '入浴関連' }]
+  });
+
+  const ranking = buildContributionRankings([shared, pageTwoLeader]);
+  assert.deepEqual(ranking.totals, { salesAmount: 400, grossProfitAmount: 100 });
+  assert.equal(ranking.topSalesPages[0].sheetId, 's2');
+  assert.equal(ranking.topSalesPages[0].salesAmount, 350);
+  assert.equal(ranking.topGrossProfitPages[0].grossProfitAmount, 80);
+  assert.equal(ranking.topSalesPanels[0].id, 's2:2');
+  assert.equal(ranking.topSalesPanels[0].salesAmount, 300);
+  assert.equal(ranking.topGrossProfitPanels[0].id, 's2:2');
 });
 
 test('buildGenreBalance weights large panels and splits sales across assigned genres', () => {
