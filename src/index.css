@@ -740,6 +740,56 @@ button:active {
     animation: daiwari-ai-sparkle-pop 1.05s 340ms ease-in-out infinite;
 }
 
+@keyframes daiwari-ai-shortcut-shimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+.daiwari-ai-shortcut-label {
+    z-index: 2;
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    letter-spacing: 0.025em;
+    animation: daiwari-ai-shortcut-shimmer 2.2s ease-in-out infinite;
+}
+
+.daiwari-ai-shortcut-label-violet {
+    background-image: linear-gradient(100deg, #6d4ee8 5%, #d946ef 48%, #7c3aed 82%, #6d4ee8 100%);
+}
+
+.daiwari-ai-shortcut-label-blue {
+    background-image: linear-gradient(100deg, #2563eb 5%, #06b6d4 48%, #8b5cf6 82%, #2563eb 100%);
+}
+
+.daiwari-ai-shortcut-sparkle {
+    position: absolute;
+    z-index: 3;
+    color: #ffffff;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    text-shadow:
+        0 0 3px #ffffff,
+        0 0 7px rgba(217, 70, 239, 0.9),
+        0 0 11px rgba(14, 165, 233, 0.8);
+    animation: daiwari-ai-sparkle-pop 1.2s ease-in-out infinite;
+}
+
+.daiwari-ai-shortcut-sparkle-one {
+    right: 7px;
+    top: 5px;
+    font-size: 10px;
+}
+
+.daiwari-ai-shortcut-sparkle-two {
+    right: 42px;
+    bottom: 4px;
+    font-size: 7px;
+    animation-delay: 380ms;
+}
+
 @keyframes daiwari-ai-mascot-front {
     0%, 33.332% { opacity: 1; }
     33.333%, 100% { opacity: 0; }
@@ -828,6 +878,11 @@ button:active {
     }
 
     .daiwari-ai-launch:hover .daiwari-ai-sparkle {
+        animation: none;
+    }
+
+    .daiwari-ai-shortcut-label,
+    .daiwari-ai-shortcut-sparkle {
         animation: none;
     }
 

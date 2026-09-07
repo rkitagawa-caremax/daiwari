@@ -6,7 +6,7 @@ import {
   Lightbulb,
   Lock,
   Plus,
-  Search,
+  Sparkles,
   Tag,
   Unlock,
   Wrench
@@ -31,25 +31,33 @@ const EdgeAiLaunchButton = ({ onLaunch }) => (
       <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-two">✦</span>
       <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-three">✦</span>
     </button>
-    <div className="pointer-events-none absolute left-1/2 top-full z-[110] w-44 -translate-x-1/2 -translate-y-1 pt-2 opacity-0 transition duration-200 group-hover/edge-ai:pointer-events-auto group-hover/edge-ai:translate-y-0 group-hover/edge-ai:opacity-100 group-focus-within/edge-ai:pointer-events-auto group-focus-within/edge-ai:translate-y-0 group-focus-within/edge-ai:opacity-100">
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-[0_14px_36px_rgba(15,23,42,0.18)] backdrop-blur-xl" role="menu" aria-label="AIアシストのショートカット">
+    <div className="pointer-events-none absolute left-1/2 top-full z-[110] w-[316px] -translate-x-1/2 -translate-y-1 pt-2 opacity-0 transition duration-200 group-hover/edge-ai:pointer-events-auto group-hover/edge-ai:translate-y-0 group-hover/edge-ai:opacity-100 group-focus-within/edge-ai:pointer-events-auto group-focus-within/edge-ai:translate-y-0 group-focus-within/edge-ai:opacity-100">
+      <div className="relative grid grid-cols-2 gap-2 overflow-hidden rounded-[22px] border border-white/90 bg-gradient-to-br from-white via-violet-50/95 to-cyan-50/90 p-2 shadow-[0_16px_40px_rgba(76,68,151,0.22)] ring-1 ring-violet-100/70 backdrop-blur-xl" role="menu" aria-label="AIアシストのショートカット">
+        <span aria-hidden="true" className="absolute -right-8 -top-10 h-24 w-24 rounded-full bg-cyan-200/30 blur-2xl" />
+        <span aria-hidden="true" className="absolute -bottom-12 -left-6 h-24 w-24 rounded-full bg-fuchsia-200/30 blur-2xl" />
         <button
           type="button"
           role="menuitem"
           onClick={() => onLaunch('advisor')}
-          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-bold text-slate-700 transition hover:bg-violet-50 hover:text-violet-700 focus:bg-violet-50 focus:text-violet-700 focus:outline-none"
+          className="group/shortcut relative flex min-w-0 items-center justify-center gap-2 overflow-hidden rounded-2xl border border-violet-100 bg-white/90 px-3 py-3 text-xs font-black shadow-[0_5px_16px_rgba(124,92,214,0.10)] transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-[0_9px_22px_rgba(124,92,214,0.19)] focus:-translate-y-0.5 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-600"><Lightbulb size={15} /></span>
-          台割診断
+          <span aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-violet-50/0 via-fuchsia-50/80 to-cyan-50/0 opacity-0 transition group-hover/shortcut:opacity-100" />
+          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-400 text-white shadow-[0_4px_10px_rgba(139,92,246,0.28)]"><Lightbulb size={16} /></span>
+          <span className="daiwari-ai-shortcut-label daiwari-ai-shortcut-label-violet relative whitespace-nowrap">台割診断</span>
+          <span aria-hidden="true" className="daiwari-ai-shortcut-sparkle daiwari-ai-shortcut-sparkle-one">✦</span>
+          <span aria-hidden="true" className="daiwari-ai-shortcut-sparkle daiwari-ai-shortcut-sparkle-two">✦</span>
         </button>
         <button
           type="button"
           role="menuitem"
           onClick={() => onLaunch('search')}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700 focus:bg-blue-50 focus:text-blue-700 focus:outline-none"
+          className="group/shortcut relative flex min-w-0 items-center justify-center gap-2 overflow-hidden rounded-2xl border border-cyan-100 bg-white/90 px-3 py-3 text-xs font-black shadow-[0_5px_16px_rgba(14,165,233,0.10)] transition duration-200 hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-[0_9px_22px_rgba(14,165,233,0.18)] focus:-translate-y-0.5 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-600"><Search size={15} /></span>
-          商品検索
+          <span aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-cyan-50/0 via-sky-50/90 to-violet-50/0 opacity-0 transition group-hover/shortcut:opacity-100" />
+          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-cyan-400 text-white shadow-[0_4px_10px_rgba(14,165,233,0.25)]"><Sparkles size={16} /></span>
+          <span className="daiwari-ai-shortcut-label daiwari-ai-shortcut-label-blue relative whitespace-nowrap">商品提案</span>
+          <span aria-hidden="true" className="daiwari-ai-shortcut-sparkle daiwari-ai-shortcut-sparkle-one">✦</span>
+          <span aria-hidden="true" className="daiwari-ai-shortcut-sparkle daiwari-ai-shortcut-sparkle-two">✦</span>
         </button>
       </div>
     </div>
