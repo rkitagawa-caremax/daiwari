@@ -3,22 +3,24 @@ import {
   CheckSquare,
   ChevronDown,
   FileSpreadsheet,
+  Lightbulb,
   Lock,
   Plus,
+  Search,
   Tag,
   Unlock,
   Wrench
 } from 'lucide-react';
 
-const EdgeAiLaunchButton = ({ onLaunch, onShowQuickHelp, onHideQuickHelp }) => (
+const EdgeAiLaunchButton = ({ onLaunch }) => (
+  <div className="group/edge-ai relative flex h-12 w-[92px] flex-shrink-0 items-center justify-center">
     <button
       type="button"
-      onClick={onLaunch}
-      onMouseEnter={(event) => onShowQuickHelp(event, 'AIアシスト', '外部AIへ送信せず、商品意味検索・類似品提案・CSV差分を端末内で処理します。')}
-      onMouseLeave={onHideQuickHelp}
-      className="daiwari-ai-launch group relative flex h-12 w-[92px] flex-shrink-0 items-center justify-center px-2"
+      onClick={() => onLaunch('search')}
+      className="daiwari-ai-launch group relative flex h-12 w-full items-center justify-center px-2"
       title="AIアシストを開く"
       aria-label="AIアシストを開く"
+      aria-haspopup="menu"
     >
       <span className="relative z-[2] flex h-[46px] items-center justify-center">
         <img src="/daiwari-kun.png" alt="" draggable="false" className="daiwari-ai-launch-image daiwari-ai-launch-frame daiwari-ai-launch-frame-front h-[46px] w-auto select-none object-contain" />
@@ -29,6 +31,29 @@ const EdgeAiLaunchButton = ({ onLaunch, onShowQuickHelp, onHideQuickHelp }) => (
       <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-two">✦</span>
       <span aria-hidden="true" className="daiwari-ai-sparkle daiwari-ai-sparkle-three">✦</span>
     </button>
+    <div className="pointer-events-none absolute left-1/2 top-full z-[110] w-44 -translate-x-1/2 -translate-y-1 pt-2 opacity-0 transition duration-200 group-hover/edge-ai:pointer-events-auto group-hover/edge-ai:translate-y-0 group-hover/edge-ai:opacity-100 group-focus-within/edge-ai:pointer-events-auto group-focus-within/edge-ai:translate-y-0 group-focus-within/edge-ai:opacity-100">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-[0_14px_36px_rgba(15,23,42,0.18)] backdrop-blur-xl" role="menu" aria-label="AIアシストのショートカット">
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => onLaunch('advisor')}
+          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-bold text-slate-700 transition hover:bg-violet-50 hover:text-violet-700 focus:bg-violet-50 focus:text-violet-700 focus:outline-none"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-600"><Lightbulb size={15} /></span>
+          台割診断
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => onLaunch('search')}
+          className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700 focus:bg-blue-50 focus:text-blue-700 focus:outline-none"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-600"><Search size={15} /></span>
+          商品検索
+        </button>
+      </div>
+    </div>
+  </div>
 );
 
 // ヘッダー右端の「ツール」ボタンと、そのポップアップメニュー
@@ -60,12 +85,10 @@ const HeaderToolsMenu = ({
   <>
     <div className="flex items-center gap-2 flex-shrink-0 ml-4">
       <EdgeAiLaunchButton
-        onLaunch={() => {
+        onLaunch={(initialTab) => {
           onClose();
-          onOpenEdgeAi();
+          onOpenEdgeAi(initialTab);
         }}
-        onShowQuickHelp={onShowQuickHelp}
-        onHideQuickHelp={onHideQuickHelp}
       />
 
       <button

@@ -228,6 +228,7 @@ const DiffResults = ({ diffs, emptyMessage = '差分はありません。' }) =>
 
 const EdgeAiAssistModal = ({
   isOpen,
+  initialTab = 'search',
   onClose,
   images,
   sheets,
@@ -237,7 +238,9 @@ const EdgeAiAssistModal = ({
   activeChangeSet,
   onApplyChangeSet
 }) => {
-  const [activeTab, setActiveTab] = useState('search');
+  const [activeTab, setActiveTab] = useState(() => (
+    TABS.some((tab) => tab.id === initialTab) ? initialTab : 'search'
+  ));
   const [query, setQuery] = useState('');
   const [semanticQuery, setSemanticQuery] = useState('');
   const [semanticResults, setSemanticResults] = useState([]);

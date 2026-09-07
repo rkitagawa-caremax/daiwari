@@ -314,6 +314,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPdfCropImportOpen, setIsPdfCropImportOpen] = useState(false);
   const [isEdgeAiAssistOpen, setIsEdgeAiAssistOpen] = useState(false);
+  const [edgeAiInitialTab, setEdgeAiInitialTab] = useState('search');
   const [isHiddenImportModalOpen, setIsHiddenImportModalOpen] = useState(false);
   const [isWorkLogDashboardOpen, setIsWorkLogDashboardOpen] = useState(false);
   const [workLogRecords, setWorkLogRecords] = useState([]);
@@ -3863,7 +3864,10 @@ export default function App() {
               onToggleHighlightLabels={() => setHighlightLabels(!highlightLabels)}
               onToggleHighlightEmpty={() => setHighlightEmpty(!highlightEmpty)}
               onAddSheet={handleAddSheet}
-              onOpenEdgeAi={() => setIsEdgeAiAssistOpen(true)}
+              onOpenEdgeAi={(initialTab = 'search') => {
+                setEdgeAiInitialTab(initialTab);
+                setIsEdgeAiAssistOpen(true);
+              }}
               onExportCSV={handleExportCSV}
               onShowQuickHelp={showQuickHelp}
               onHideQuickHelp={hideQuickHelp}
@@ -4083,6 +4087,7 @@ export default function App() {
         <Suspense fallback={<div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45"><Loader2 className="animate-spin text-white" size={36} /></div>}>
           <EdgeAiAssistModal
             isOpen={isEdgeAiAssistOpen}
+            initialTab={edgeAiInitialTab}
             onClose={() => setIsEdgeAiAssistOpen(false)}
             images={images}
             sheets={sheets}
