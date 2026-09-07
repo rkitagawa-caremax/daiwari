@@ -6,6 +6,7 @@ import {
   buildCannibalizationPairs,
   buildCatalogAdvisorReport,
   buildGenreBalance,
+  buildPanelQuantityAnalysis,
   buildPriceBandCoverage,
   buildSalesMomentum,
   consolidateAdvisorProducts
@@ -71,6 +72,28 @@ test('buildGenreBalance flags over- and under-allocated genres by fair share', (
   assert.equal(bath.status, 'over');
   assert.equal(food.status, 'under');
   assert.ok(Math.abs(balance.rows.reduce((sum, row) => sum + row.panelShare, 0) - 1) < 1e-9);
+});
+
+test('buildPanelQuantityAnalysis compares total quantity and quantity per space unit', () => {
+  const compactSeller = makeProduct({
+    id: 'compact',
+    salesCount: 120,
+    salesMatched: true,
+    assignments: [{ sheetId: 's1', panelIndex: 0, genre: '食事関連', rowSpan: 1, colSpan: 1 }]
+  });
+  const largeSlowSeller = makeProduct({
+    id: 'large',
+    salesCount: 8,
+    salesMatched: true,
+    assignments: [{ sheetId: 's1', panelIndex: 1, genre: '食事関連', rowSpan: 2, colSpan: 2 }]
+  });
+  const analysis = buildPanelQuantityAnalysis([compactSeller, largeSlowSeller]);
+  assert.equal(analysis.highest[0].id, 'compact');
+  assert.equal(analysis.highest[0].quantityPerSpace, 120);
+  assert.equal(analysis.lowest[0].id, 'large');
+  assert.equal(analysis.lowest[0].quantityPerSpace, 2);
+  assert.deepEqual(analysis.expansionCandidates.map((row) => row.id), ['compact']);
+  assert.deepEqual(analysis.reductionCandidates.map((row) => row.id), ['large']);
 });
 
 test('buildGenreBalance weights large panels and splits sales across assigned genres', () => {

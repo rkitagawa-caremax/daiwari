@@ -196,6 +196,7 @@ export const buildEdgeCatalogProducts = ({ images = [], sheets = [], salesData =
       sourcePdfName: image.sourcePdfName || '',
       sourcePage: image.sourcePage ?? '',
       assignments,
+      salesMatched: salesRows.length > 0,
       salesCount: salesRows.reduce((total, row) => total + (Number(row?.count) || 0), 0),
       // 台割アドバイス (トレンド分析) 用に月別合算も持たせる
       monthlySales: buildMonthlySalesSeries(salesRows).map((entry) => ({ label: entry.label, count: entry.count })),

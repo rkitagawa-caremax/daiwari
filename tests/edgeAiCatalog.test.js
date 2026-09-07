@@ -47,6 +47,7 @@ test('buildEdgeCatalogProducts combines saved text, placement and sales data', (
   assert.equal(products.length, 1);
   assert.equal(products[0].code, 'E001');
   assert.equal(products[0].salesCount, 12);
+  assert.equal(products[0].salesMatched, true);
   assert.deepEqual(products[0].monthlySales, [
     { label: '4月', count: 5 },
     { label: '5月', count: 7 }

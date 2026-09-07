@@ -1,19 +1,19 @@
 import { cosineSimilarity } from './edgeAiCatalog.js';
 
 // --- 台割全体のアドバイス生成 (端末内・決定的な分析) ---
-// LLM は使わず、掲載中の商品 (buildEdgeCatalogProducts の出力) と売上実績・埋め込みベクトルから
+// LLM は使わず、掲載中の商品 (buildEdgeCatalogProducts の出力) と販売数量実績・埋め込みベクトルから
 // ABC 分析 / フェアシェア / カニバリゼーション / 価格帯カバレッジ / 直近トレンドを計算し、
 // 経営・マーケティング理論に紐づけた推奨アクションへ変換する。
 
 export const CATALOG_ADVISOR_THRESHOLDS = Object.freeze({
-  abcARatio: 0.8,             // 累積売上シェアの A ランク境界 (パレート)
+  abcARatio: 0.8,             // 累積販売数量シェアの A ランク境界 (パレート)
   abcBRatio: 0.95,            // B ランク境界
   cannibalSimilarity: 0.92,   // 埋め込み類似度でのカニバリ判定
   cannibalJaccard: 0.55,      // ベクトル未準備時の語彙一致 (Jaccard) 判定
   weakSalesRatio: 0.2,        // 弱い方の実績が強い方の 20% 以下なら統合候補
   minStrongSales: 10,         // カニバリ判定で「強い方」に求める最低実績
   maxCannibalPriceRatio: 1.75, // 価格差が大きい商品は役割が異なるため除外
-  overAllocatedFairShare: 0.6, // 誌面シェア過剰 (売上シェア/誌面シェア がこの値未満)
+  overAllocatedFairShare: 0.6, // 誌面シェア過剰 (販売数量シェア/誌面シェア がこの値未満)
   underAllocatedFairShare: 1.5, // 誌面シェア過少
   minGenrePanels: 6,          // バランス判定の対象にする最小誌面ユニット数
   priceLowRatio: 0.75,        // ジャンル中央値に対するエントリー帯
@@ -62,6 +62,9 @@ export const consolidateAdvisorProducts = (products = []) => {
       seen.add(value);
       return true;
     });
+    if (current.salesMatched != null || product.salesMatched != null) {
+      current.salesMatched = current.salesMatched === true || product.salesMatched === true;
+    }
     if ((product.salesCount || 0) > (current.salesCount || 0)) current.salesCount = product.salesCount;
     if ((product.monthlySales || []).length > (current.monthlySales || []).length) current.monthlySales = product.monthlySales;
     if (!current.priceIncludingTax && product.priceIncludingTax) current.priceIncludingTax = product.priceIncludingTax;
@@ -102,7 +105,7 @@ export const buildAbcAnalysis = (products) => {
     const previousShare = totalSales > 0 ? cumulative / totalSales : 1;
     cumulative += product.salesCount || 0;
     // 境界を越えさせた商品も直前の累積ランクへ含める。
-    // これにより、単品で売上の80%超を占める主力商品がB判定になるのを防ぐ。
+    // これにより、単品で販売数量の80%超を占める主力商品がB判定になるのを防ぐ。
     const rank = (product.salesCount || 0) === 0
       ? 'C'
       : previousShare < T.abcARatio ? 'A' : previousShare < T.abcBRatio ? 'B' : 'C';
@@ -113,7 +116,7 @@ export const buildAbcAnalysis = (products) => {
   const topShare = totalSales > 0
     ? topTenPercent.reduce((sum, p) => sum + (p.salesCount || 0), 0) / totalSales
     : 0;
-  const allZeroSales = ranked.filter((p) => (p.salesCount || 0) === 0 && p.lifecycleStatus !== '廃盤');
+  const allZeroSales = ranked.filter((p) => p.salesMatched !== false && (p.salesCount || 0) === 0 && p.lifecycleStatus !== '廃盤');
   return {
     totalSales,
     counts,
@@ -125,7 +128,46 @@ export const buildAbcAnalysis = (products) => {
   };
 };
 
-// --- ジャンル別のフェアシェア (誌面シェア vs 売上シェア) ---
+// --- 商品コマ別の販売数量と誌面効率 ---
+export const buildPanelQuantityAnalysis = (products) => {
+  const rows = products
+    .filter((product) => product.salesMatched !== false)
+    .map((product) => {
+      const spaceUnits = (product.assignments || []).reduce((sum, assignment) => sum + assignmentSpace(assignment), 0) || 1;
+      const quantity = product.salesCount || 0;
+      return {
+        id: product.id,
+        code: product.code,
+        name: productLabel(product),
+        quantity,
+        spaceUnits,
+        quantityPerSpace: quantity / spaceUnits,
+        genre: primaryGenre(product),
+        assignment: product.assignments?.[0] || null
+      };
+    });
+  const totalQuantity = rows.reduce((sum, row) => sum + row.quantity, 0);
+  const totalSpaceUnits = rows.reduce((sum, row) => sum + row.spaceUnits, 0);
+  const averagePerSpace = totalSpaceUnits > 0 ? totalQuantity / totalSpaceUnits : 0;
+  const averagePerProduct = rows.length > 0 ? totalQuantity / rows.length : 0;
+  const highest = [...rows]
+    .sort((a, b) => b.quantity - a.quantity || b.quantityPerSpace - a.quantityPerSpace)
+    .slice(0, T.maxListItems);
+  const lowest = [...rows]
+    .sort((a, b) => a.quantity - b.quantity || b.spaceUnits - a.spaceUnits)
+    .slice(0, T.maxListItems);
+  const expansionCandidates = rows
+    .filter((row) => row.quantity >= averagePerProduct && row.quantityPerSpace >= averagePerSpace * 1.5 && row.spaceUnits <= 4)
+    .sort((a, b) => b.quantityPerSpace - a.quantityPerSpace)
+    .slice(0, 3);
+  const reductionCandidates = rows
+    .filter((row) => row.spaceUnits >= 2 && row.quantityPerSpace <= averagePerSpace * 0.5)
+    .sort((a, b) => a.quantityPerSpace - b.quantityPerSpace)
+    .slice(0, 3);
+  return { rows, highest, lowest, expansionCandidates, reductionCandidates, averagePerSpace };
+};
+
+// --- ジャンル別のフェアシェア (誌面シェア vs 販売数量シェア) ---
 export const buildGenreBalance = (products) => {
   const byGenre = new Map();
   let totalSpaceUnits = 0;
@@ -291,7 +333,7 @@ export const buildSalesMomentum = (products) => {
 const percent = (value) => `${Math.round(value * 100)}%`;
 
 // 分析結果 → 優先度付きの推奨アクション (根拠となる理論を明記する)
-export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands, momentum, salesCoverage }) => {
+export const buildAdvisorActions = ({ abc, panelQuantity, balance, cannibalization, priceBands, momentum, salesCoverage }) => {
   const actions = [];
 
   if (abc.zeroSalesCount >= 3) {
@@ -300,8 +342,32 @@ export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands,
       category: '品揃え',
       metric: `${abc.zeroSalesCount}商品`,
       title: `実績ゼロの商品を優先的に棚卸し`,
-      detail: `${abc.zeroSales.slice(0, 3).map((p) => productLabel(p)).join('、')} などは誌面を使いながら売上に貢献していません。差し替え・縮小 (1/16化)・カット候補として棚卸ししてください。`,
+      detail: `${abc.zeroSales.slice(0, 3).map((p) => productLabel(p)).join('、')} などは誌面を使いながら販売数量がありません。差し替え・縮小 (1/16化)・カット候補として棚卸ししてください。`,
       theory: 'ABC分析: Cランク商品の整理は誌面の回転率 (スペース生産性) を直接引き上げる、小売の基本手法です。'
+    });
+  }
+
+  if (panelQuantity.expansionCandidates.length > 0) {
+    const names = panelQuantity.expansionCandidates.map((row) => row.name).join('、');
+    actions.push({
+      priority: 'mid',
+      category: 'コマ配分',
+      metric: `${panelQuantity.expansionCandidates.length}商品`,
+      title: '販売数量の多い商品コマを広げる',
+      detail: `${names} は、使用面積に対して販売数量が多い商品です。大コマ化や目立つ位置への移動を検討してください。`,
+      theory: '数量スペース生産性: 1/16コマ当たりの販売数量が高い商品へ誌面を配分すると、限られたページを効率よく活用できます。'
+    });
+  }
+
+  if (panelQuantity.reductionCandidates.length > 0) {
+    const names = panelQuantity.reductionCandidates.map((row) => row.name).join('、');
+    actions.push({
+      priority: 'mid',
+      category: 'コマ配分',
+      metric: `${panelQuantity.reductionCandidates.length}商品`,
+      title: '販売数量の少ない大コマを見直す',
+      detail: `${names} は、使用面積に対して販売数量が少ない商品です。小コマ化し、数量の多い商品へ面積を振り替える候補です。`,
+      theory: '数量スペース生産性: 販売数量÷誌面面積で比較し、低効率な大コマを縮小することでページ全体の効率を改善します。'
     });
   }
 
@@ -323,8 +389,8 @@ export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands,
       category: '誌面配分',
       metric: `効率 ${row.fairShare.toFixed(1)}×`,
       title: `「${row.genre}」は誌面が不足気味です`,
-      detail: `売上シェア${percent(row.salesShare)}に対し誌面面積は${percent(row.panelShare)}。需要に対して露出が追いついていないため、増コマ・大コマ化で売上の取りこぼしを防げます。`,
-      theory: 'フェアシェア理論: 露出シェアを売上シェアに合わせると機会損失が最小になります (棚割の基本)。'
+      detail: `販売数量シェア${percent(row.salesShare)}に対し誌面面積は${percent(row.panelShare)}。数量実績に対して露出が少ないため、増コマ・大コマ化を検討できます。`,
+      theory: 'フェアシェア理論: 露出シェアを販売数量シェアに近づけ、数量実績に応じた誌面配分を検討します。'
     });
   });
   balance.rows.filter((row) => row.status === 'over').slice(0, 2).forEach((row) => {
@@ -333,8 +399,8 @@ export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands,
       category: '誌面配分',
       metric: `効率 ${row.fairShare.toFixed(1)}×`,
       title: `「${row.genre}」は誌面過剰の可能性があります`,
-      detail: `誌面面積${percent(row.panelShare)}に対し売上シェアは${percent(row.salesShare)}。コマを絞って伸びているジャンルへ譲る検討を。`,
-      theory: 'スペース生産性: 面積あたり売上の低い区画の縮小は、カタログ全体の売上効率を高めます。'
+      detail: `誌面面積${percent(row.panelShare)}に対し販売数量シェアは${percent(row.salesShare)}。コマを絞り、販売数量の多いジャンルへ譲ることを検討してください。`,
+      theory: '数量スペース生産性: 面積当たり販売数量の低い区画を見直し、限られた誌面を効率的に配分します。'
     });
   });
 
@@ -374,10 +440,10 @@ export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands,
   if (abc.topShare >= 0.6) {
     actions.push({
       priority: 'info',
-      category: '売上集中',
+      category: '数量集中',
       metric: percent(abc.topShare),
-      title: `売上の${percent(abc.topShare)}を上位10%の商品が生んでいます`,
-      detail: 'A ランク商品の欠品・廃盤リスクがカタログ全体の売上リスクです。主力の代替候補を1つずつ用意しつつ、A 商品は目立つ位置と十分なコマサイズを維持してください。',
+      title: `販売数量の${percent(abc.topShare)}を上位10%の商品が占めています`,
+      detail: '販売数量が上位商品へ集中しています。主力商品の欠品・廃盤に備えて代替候補を用意しつつ、数量上位商品は目立つ位置と十分なコマサイズを維持してください。',
       theory: 'パレートの法則 (80:20): 集中は効率的ですが、上位依存はリスク管理とセットで運用します。'
     });
   }
@@ -386,8 +452,8 @@ export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands,
       priority: 'info',
       category: 'データ品質',
       metric: percent(salesCoverage),
-      title: '売上データと照合できた商品が半数未満です',
-      detail: '介援隊コードの記載漏れや売上CSVの期間ずれがあると、この分析の精度が下がります。コード整備と最新CSVの取り込みを先に行うと判断材料が揃います。',
+      title: '販売数量データと照合できた商品が半数未満です',
+      detail: '介援隊コードの記載漏れや販売数量CSVの期間ずれがあると、この分析の精度が下がります。コード整備と最新CSVの取り込みを先に行うと判断材料が揃います。',
       theory: 'データドリブン経営の前提は計測です。まず照合率を上げることが最も費用対効果の高い一手です。'
     });
   }
@@ -399,7 +465,7 @@ export const buildAdvisorActions = ({ abc, balance, cannibalization, priceBands,
 export const buildAdvisorDataQuality = (products, vectorsById = null) => {
   const count = products.length;
   const ratio = (predicate) => count > 0 ? products.filter(predicate).length / count : 0;
-  const salesCoverage = ratio((product) => (product.salesCount || 0) > 0);
+  const salesCoverage = ratio((product) => product.salesMatched === true || (product.salesMatched == null && (product.salesCount || 0) > 0));
   const priceCoverage = ratio((product) => toPrice(product.priceIncludingTax) !== null);
   const monthlyCoverage = ratio((product) => (product.monthlySales || []).length >= T.momentumMonths * 2);
   const semanticCoverage = vectorsById
@@ -419,16 +485,18 @@ export const buildAdvisorDataQuality = (products, vectorsById = null) => {
 // エントリポイント: 掲載中の商品だけを対象に全セクションを計算する
 export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } = {}) => {
   const placed = consolidateAdvisorProducts(products);
-  const withSales = placed.filter((product) => (product.salesCount || 0) > 0);
-  const salesCoverage = placed.length > 0 ? withSales.length / placed.length : 0;
+  const withQuantityData = placed.filter((product) => product.salesMatched === true || (product.salesMatched == null && (product.salesCount || 0) > 0));
+  const salesCoverage = placed.length > 0 ? withQuantityData.length / placed.length : 0;
+  const quantityProducts = placed.filter((product) => product.salesMatched !== false);
 
-  const abc = buildAbcAnalysis(placed);
+  const abc = buildAbcAnalysis(quantityProducts);
+  const panelQuantity = buildPanelQuantityAnalysis(quantityProducts);
   const balance = buildGenreBalance(placed);
   const cannibalization = buildCannibalizationPairs(placed, vectorsById);
   const priceBands = buildPriceBandCoverage(placed);
   const momentum = buildSalesMomentum(placed);
   const dataQuality = buildAdvisorDataQuality(placed, vectorsById);
-  const actions = buildAdvisorActions({ abc, balance, cannibalization, priceBands, momentum, salesCoverage });
+  const actions = buildAdvisorActions({ abc, panelQuantity, balance, cannibalization, priceBands, momentum, salesCoverage });
   const priorityCounts = actions.reduce((counts, action) => ({
     ...counts,
     [action.priority]: counts[action.priority] + 1
@@ -449,6 +517,7 @@ export const buildCatalogAdvisorReport = ({ products = [], vectorsById = null } 
       priorityCounts
     },
     abc,
+    panelQuantity,
     balance,
     cannibalization,
     priceBands,
