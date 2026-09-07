@@ -696,8 +696,8 @@ const EdgeAiAssistModal = ({
                     {advisorReport.panelQuantity.rows.length > 0 && (
                       <section className="grid gap-4 sm:grid-cols-2">
                         {[
-                          ['販売数量が多い商品コマ', advisorReport.panelQuantity.highest, TrendingUp, 'text-emerald-600', 'bg-emerald-50'],
-                          ['販売数量が少ない商品コマ', advisorReport.panelQuantity.lowest, TrendingDown, 'text-amber-600', 'bg-amber-50']
+                          ['販売数量が多い商品コマ', advisorReport.panelQuantity.highest, <TrendingUp key="quantity-high" size={17} />, 'text-emerald-600', 'bg-emerald-50'],
+                          ['販売数量が少ない商品コマ', advisorReport.panelQuantity.lowest, <TrendingDown key="quantity-low" size={17} />, 'text-amber-600', 'bg-amber-50']
                         ].map(([title, rows, icon, tone, background]) => (
                           <div key={title} className="overflow-hidden rounded-[22px] border border-[#e8ebf2] bg-white">
                             <div className="flex items-center gap-2 border-b border-[#edf0f5] px-5 py-4">
