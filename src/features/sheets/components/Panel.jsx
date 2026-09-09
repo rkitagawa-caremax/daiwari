@@ -592,6 +592,13 @@ const Panel = React.memo(({
   const monthlySalesSeries = useMemo(() => buildMonthlySalesSeries(matchedSales), [matchedSales]);
   const grossProfitSummary = useMemo(() => summarizeGrossProfitRows(matchedSales), [matchedSales]);
   const isGrossProfitView = isSalesMode && salesDisplayMode === 'grossProfit';
+  const grossProfitPercent = grossProfitSummary.grossMargin == null
+    ? null
+    : Math.round(grossProfitSummary.grossMargin * 100);
+  const grossProfitLabelAngle = (-90 + (grossProfitSummary.chartRatio * 180)) * (Math.PI / 180);
+  const grossProfitLabelRadius = grossProfitSummary.chartRatio < 0.22 ? 18 : 14;
+  const grossProfitLabelX = 36 + (Math.cos(grossProfitLabelAngle) * grossProfitLabelRadius);
+  const grossProfitLabelY = 36 + (Math.sin(grossProfitLabelAngle) * grossProfitLabelRadius);
   const canShowMonthlySales = monthlySalesSeries.length > 0;
   const normalizedPanelCode = normalizeCode(data.code);
   const isMonthlySalesView = isSalesMode
@@ -915,18 +922,17 @@ const Panel = React.memo(({
               onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
               draggable={false}
               className="pointer-events-auto absolute inset-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
-              aria-label={isMonthlySalesView ? '総合計表示に戻す' : '月別売上グラフを表示'}
-              title={isMonthlySalesView ? 'クリックで合計表示に戻す' : 'クリックで月別グラフを表示'}
+              aria-label={isMonthlySalesView ? '販売数量合計へ戻す' : '月別販売数量グラフを表示'}
+              title={isMonthlySalesView ? 'クリックで販売数量合計へ戻す' : 'クリックで月別販売数量グラフを表示'}
             />
           )}
           {isMonthlySalesView ? (
             <MonthlySalesChart series={monthlySalesSeries} />
           ) : (
             <>
-              <div className="flex items-baseline justify-between gap-1">
-                <span className="text-[8px] font-bold tracking-[0.2em] text-emerald-300/90">実績</span>
-                <span className="font-mono text-2xl font-black leading-none tracking-tight text-emerald-300">
-                  {salesTotal.toLocaleString()}
+              <div className="flex items-center leading-none">
+                <span className="rounded-full border border-emerald-200/25 bg-emerald-300/15 px-2 py-1 text-[9px] font-bold text-emerald-100">
+                  実績
                 </span>
               </div>
               <div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-hidden">
@@ -940,6 +946,12 @@ const Panel = React.memo(({
                   <div className="text-[8px] font-bold text-white/45">他{matchedSales.length - 3}件</div>
                 )}
               </div>
+              <div className="flex w-full items-baseline justify-between gap-1 rounded-lg border border-emerald-200/20 bg-black/20 px-2 py-1.5">
+                <span className="shrink-0 text-[9px] font-bold text-emerald-50/80">{salesPeriodLabel}・販売数量合計</span>
+                <span className="min-w-0 truncate font-mono text-sm font-black leading-none text-emerald-300">
+                  {salesTotal.toLocaleString()}<span className="ml-0.5 text-[9px]">個</span>
+                </span>
+              </div>
             </>
           )}
         </div>
@@ -950,10 +962,9 @@ const Panel = React.memo(({
           data-gross-profit-overlay="true"
           className="pointer-events-none absolute inset-0 z-30 flex flex-col overflow-hidden bg-slate-950/70 p-2 text-white backdrop-blur-[2px]"
         >
-          <div className="flex items-baseline justify-between gap-1 leading-none text-amber-50">
-            <span className="text-[11px] font-bold">{salesPeriodLabel}・粗利率</span>
-            <span className="font-mono text-2xl font-black leading-none tracking-tight text-amber-200">
-              {grossProfitSummary.grossMargin == null ? '―' : `${Math.round(grossProfitSummary.grossMargin * 100)}%`}
+          <div className="flex items-center leading-none">
+            <span className="rounded-full border border-amber-200/30 bg-amber-300/15 px-2 py-1 text-[9px] font-bold text-amber-100">
+              {salesPeriodLabel}・粗利率
             </span>
           </div>
 
@@ -963,37 +974,66 @@ const Panel = React.memo(({
             </div>
           ) : (
             <svg
-              viewBox="0 0 48 48"
+              viewBox="0 0 72 72"
               role="img"
-              aria-label={`粗利率 ${Math.round(grossProfitSummary.grossMargin * 100)}%`}
-              className="my-1 min-h-0 w-full flex-1 overflow-visible"
+              aria-label={`粗利率 ${grossProfitPercent}%`}
+              className="my-0.5 min-h-0 w-full flex-1 overflow-visible drop-shadow-[0_0_7px_rgba(250,204,21,0.26)]"
             >
               <circle
-                cx="24"
-                cy="24"
-                r="17"
-                fill="rgba(15,23,42,0.45)"
-                stroke="rgba(255,255,255,0.16)"
-                strokeWidth="5.5"
+                cx="36"
+                cy="36"
+                r="30"
+                fill="rgba(226,232,240,0.9)"
+                stroke="rgba(255,255,255,0.9)"
+                strokeWidth="1.5"
               />
               <circle
-                cx="24"
-                cy="24"
-                r="17"
+                cx="36"
+                cy="36"
+                r="15"
                 fill="none"
                 pathLength="100"
                 stroke="#facc15"
-                strokeWidth="5.5"
-                strokeLinecap="round"
-                strokeDasharray={`${grossProfitSummary.chartRatio * 100} 100`}
-                transform="rotate(-90 24 24)"
+                strokeWidth="30"
+                strokeLinecap="butt"
+                strokeDasharray={`${grossProfitSummary.chartRatio * 100} ${100 - (grossProfitSummary.chartRatio * 100)}`}
+                transform="rotate(-90 36 36)"
               />
+              {grossProfitSummary.chartRatio > 0 && grossProfitSummary.chartRatio < 1 && (
+                <>
+                  <line x1="36" y1="36" x2="36" y2="5" stroke="white" strokeWidth="1.8" />
+                  <line
+                    x1="36"
+                    y1="36"
+                    x2="36"
+                    y2="5"
+                    stroke="white"
+                    strokeWidth="1.8"
+                    transform={`rotate(${grossProfitSummary.chartRatio * 360} 36 36)`}
+                  />
+                </>
+              )}
+              <text
+                x={grossProfitLabelX}
+                y={grossProfitLabelY}
+                dominantBaseline="middle"
+                textAnchor="middle"
+                fill={grossProfitSummary.chartRatio < 0.22 ? '#334155' : 'white'}
+                stroke={grossProfitSummary.chartRatio < 0.22 ? 'rgba(255,255,255,0.55)' : 'rgba(120,83,0,0.2)'}
+                strokeWidth="0.7"
+                paintOrder="stroke"
+                className="font-mono font-black"
+                fontSize={grossProfitSummary.chartRatio < 0.22 ? 8.5 : 12}
+              >
+                {grossProfitPercent}
+                <tspan fontSize={grossProfitSummary.chartRatio < 0.22 ? 5.5 : 7}>%</tspan>
+              </text>
             </svg>
           )}
 
-          <div className="flex w-full items-baseline justify-between gap-1 border-t border-white/15 pt-1.5">
-            <span className="text-[10px] font-bold text-amber-50/80">粗利総額</span>
-            <span className="truncate font-mono text-sm font-black leading-none text-amber-200">
+          <div className="flex w-full items-baseline justify-between gap-1 rounded-lg border border-amber-200/25 bg-black/20 px-2 py-1.5">
+            <span className="shrink-0 text-[9px] font-bold text-amber-50/80">粗利総額</span>
+            <span className="min-w-0 truncate font-mono text-sm font-black leading-none text-amber-200">
               {grossProfitSummary.hasGrossProfitAmount ? `¥${Math.round(grossProfitSummary.grossProfitAmount).toLocaleString()}` : '―'}
             </span>
           </div>
