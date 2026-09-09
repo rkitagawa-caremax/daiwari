@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { GripVertical, X } from 'lucide-react';
 
 import {
@@ -95,6 +95,7 @@ const Panel = React.memo(({
   const codeInputRef = useRef(null);
   const [localText, setLocalText] = useState(data.text || '');
   const [labelDrafts, setLabelDrafts] = useState({});
+  const grossProfitGradientId = `gross-profit-${useId().replace(/:/g, '')}`;
   const isFocusedRef = useRef(false);
   const editingLabelIdRef = useRef(null);
   const panelRef = useRef(null);
@@ -960,7 +961,7 @@ const Panel = React.memo(({
       {isGrossProfitView && matchedSales && (
         <div
           data-gross-profit-overlay="true"
-          className="pointer-events-none absolute inset-0 z-30 flex flex-col overflow-hidden bg-slate-950/70 p-2 text-white backdrop-blur-[2px]"
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col overflow-hidden bg-gradient-to-br from-slate-950/70 via-slate-900/60 to-amber-950/50 p-2 text-white backdrop-blur-[1.5px]"
         >
           <div className="flex items-center leading-none">
             <span className="rounded-full border border-amber-200/30 bg-amber-300/15 px-2 py-1 text-[9px] font-bold text-amber-100">
@@ -979,12 +980,23 @@ const Panel = React.memo(({
               aria-label={`粗利率 ${grossProfitPercent}%`}
               className="my-0.5 min-h-0 w-full flex-1 overflow-visible drop-shadow-[0_0_7px_rgba(250,204,21,0.26)]"
             >
+              <defs>
+                <radialGradient id={`${grossProfitGradientId}-remainder`} cx="28%" cy="22%" r="88%">
+                  <stop offset="0%" stopColor="#f8fafc" stopOpacity="0.52" />
+                  <stop offset="100%" stopColor="#cbd5e1" stopOpacity="0.24" />
+                </radialGradient>
+                <linearGradient id={`${grossProfitGradientId}-value`} x1="0" y1="0" x2="0.9" y2="1">
+                  <stop offset="0%" stopColor="#fde047" stopOpacity="0.98" />
+                  <stop offset="58%" stopColor="#facc15" stopOpacity="0.9" />
+                  <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.66" />
+                </linearGradient>
+              </defs>
               <circle
                 cx="36"
                 cy="36"
                 r="30"
-                fill="rgba(226,232,240,0.9)"
-                stroke="rgba(255,255,255,0.9)"
+                fill={`url(#${grossProfitGradientId}-remainder)`}
+                stroke="rgba(255,255,255,0.88)"
                 strokeWidth="1.5"
               />
               <circle
@@ -993,7 +1005,7 @@ const Panel = React.memo(({
                 r="15"
                 fill="none"
                 pathLength="100"
-                stroke="#facc15"
+                stroke={`url(#${grossProfitGradientId}-value)`}
                 strokeWidth="30"
                 strokeLinecap="butt"
                 strokeDasharray={`${grossProfitSummary.chartRatio * 100} ${100 - (grossProfitSummary.chartRatio * 100)}`}
